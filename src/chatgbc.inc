@@ -12,6 +12,9 @@ DEF CON_VIS_W  EQU 20
 DEF CON_SIZE   EQU CON_W * CON_H          ; 576 bytes = 36 GDMA blocks
 DEF FONT_FIRST EQU 32                     ; VRAM tile N holds ASCII N + 32
 
+; --- Model arithmetic -------------------------------------------------------
+DEF ACC_BYTES EQU 3                 ; int24 matvec accumulators
+
 ; --- Profiler ---------------------------------------------------------------
 ; TAC_16KHZ makes TIMA tick once per 64 M-cycles. That ratio is fixed to the CPU
 ; clock, so it holds in double-speed mode too: the unit is cycles, not seconds.

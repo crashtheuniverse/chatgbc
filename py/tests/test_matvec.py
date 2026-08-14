@@ -1,48 +1,46 @@
-"""Phase 1: the matvec kernel must be bit-exact, and its cost must be known.
+"""The matvec + requantization path must be bit-exact.
 
-The accumulators are compared against py/export.py's arithmetic element by
-element. "Close" is a failure - every later kernel is built on this one, and an
-off-by-one here would surface as mysteriously degraded text ten kernels later.
+This checks the whole chain the layers are built on: build the product table,
+accumulate int24, remove the bias, apply the per-output-row shift with
+round-half-up, and saturate to int8. Every value is compared against the
+integer twin. "Close" is a failure - an off-by-one here would surface as
+mysteriously degraded text once ten kernels sit on top of it.
 """
 
-import struct
 from pathlib import Path
 
 import pytest
 
-BUILD = Path(__file__).resolve().parent.parent.parent / "build"
+BLOBS = Path(__file__).resolve().parent.parent.parent / "build" / "blobs"
 
 
-def expected_accumulators():
-    blob = (BUILD / "mv_expected.bin").read_bytes()
-    return [int.from_bytes(blob[i : i + 3], "little") for i in range(0, len(blob), 3)]
+def signed(b):
+    return [v - 256 if v > 127 else v for v in b]
 
 
 @pytest.fixture(scope="module")
-def acc(rom):
-    m = rom.defs["MV_M"]
-    raw = rom.read("wAcc", m * 3)
-    return [int.from_bytes(raw[i * 3 : i * 3 + 3], "little") for i in range(m)]
+def h1(rom):
+    return signed(rom.read("wH1", rom.defs["HIDDEN"]))
 
 
-def test_accumulators_are_bit_exact(acc):
-    want = expected_accumulators()
-    assert len(acc) == len(want)
-    bad = [(i, a, w) for i, (a, w) in enumerate(zip(acc, want)) if a != w]
-    assert not bad, f"{len(bad)} of {len(want)} accumulators differ; first: {bad[:3]}"
+def test_requantized_output_is_bit_exact(h1):
+    want = signed((BLOBS / "test_h1.bin").read_bytes())
+    assert len(h1) == len(want)
+    bad = [(i, a, w) for i, (a, w) in enumerate(zip(h1, want)) if a != w]
+    assert not bad, f"{len(bad)} of {len(want)} outputs differ; first: {bad[:5]}"
 
 
-def test_accumulators_are_not_trivial(acc):
-    """Guards against a kernel that never ran: all-zero would otherwise only be
-    caught if the expected values happened to be nonzero."""
-    assert len(set(acc)) > len(acc) // 2
+def test_output_is_not_trivial(h1):
+    """Guards against a kernel that never ran; all-zero would otherwise pass
+    only by luck of the expected values."""
+    assert len(set(h1)) > 16
 
 
 def test_cycles_per_mac_recorded(rom):
     cycles = rom.read_u32("wMvCycles")
-    macs = rom.defs["MV_MACS"]
+    macs = rom.defs["DIM"] * rom.defs["HIDDEN"]
     per_mac = cycles / macs
-    print(f"\n  matvec: {cycles:,} cycles / {macs:,} MACs = {per_mac:.1f} cycles/MAC")
+    print(f"\n  matvec+requant: {cycles:,} cycles / {macs:,} MACs = {per_mac:.1f} cycles/MAC")
     assert cycles > 0
     # A regression guard, not a target. Tighten it whenever the kernel improves.
-    assert per_mac < 60, f"{per_mac:.1f} cycles/MAC is a regression"
+    assert per_mac < 70, f"{per_mac:.1f} cycles/MAC is a regression"

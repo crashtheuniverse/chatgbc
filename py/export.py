@@ -1,19 +1,23 @@
-"""Export quantized tensors into ROM-ready blobs.
+"""Export the quantized model into ROM-ready blobs plus generated assembly.
 
-Phase 1 exports a single real matvec (w1 of layer 0: 172 outputs x 64 inputs) so
-the assembly kernel can be checked bit-exact and timed against a known MAC count.
-The layout below is the one the full model will use.
+Emits one .bin per (tensor, layer) and a `src/weights.asm` that INCBINs them
+into ROMX sections. Section placement is left to rgblink, and the manifest
+tables use `BANK(label)` so the linker fills the bank numbers in - no bin
+packing here.
+
+Everything the ROM needs is precomputed into *shifts*, never exponents. A
+requantization is `acc >> shift` with the per-output-row scale already folded
+in, so the assembly never does exponent arithmetic at runtime.
 
 Product table bias
 ------------------
-The ROM's per-input table holds `x[j] * cb[u]`, which is signed, and adding a
-signed 16-bit value into an int24 accumulator costs a sign-extension the SM83 has
-no spare register for. Biasing every entry by BIAS makes the table unsigned, so
-the third accumulator byte is a plain `adc a, 0`. The sum picks up `n * BIAS`,
-a constant removed once per matvec rather than once per MAC.
+The per-input table holds `x[j] * cb[u]`, which is signed, and adding a signed
+16-bit value into an int24 accumulator needs a sign extension the SM83 has no
+spare register for. Biasing every entry by MV_BIAS makes the table unsigned, so
+the third accumulator byte is a plain `adc a, 0`. The sum picks up `n * MV_BIAS`,
+removed once per matvec rather than once per MAC.
 """
 
-import struct
 from pathlib import Path
 
 import numpy as np
@@ -22,80 +26,209 @@ import quant as Q
 import reference as ref
 
 ROOT = Path(__file__).resolve().parent.parent
-BUILD = ROOT / "build"
-INC = ROOT / "src" / "model.inc"
+BLOBS = ROOT / "build" / "blobs"
+WEIGHTS_ASM = ROOT / "src" / "weights.asm"
+MODEL_INC = ROOT / "src" / "model.inc"
 
-BIAS = 1 << 14          # 16384 > 127*127, so every table entry is unsigned
+BIAS = 1 << 14
+HLUT_BASE = 0x80          # product table pinned here so weight bytes are HRAM offsets
 WEIGHT_BITS = 4
-CLASSIFIER_BITS = 8
+SEQ = 64                  # KV cache: one WRAM bank per layer holds exactly 64 positions
 
-# The product table is pinned at $FF80 so exported weight bytes can be complete
-# HRAM offsets: `index * 2 + HLUT_BASE`. The kernel then loads a product with
-# `ld c, a` / `ldh a, [c]` and no address arithmetic at all in the inner loop.
-HLUT_BASE = 0x80
+MATS = ("wq", "wk", "wv", "wo", "w1", "w2", "w3")
 
-
-def product_table(x, codebook):
-    """The 16 entries the ROM builds per input, as unsigned 16-bit."""
-    return (x.astype(np.int32) * codebook.astype(np.int32) + BIAS).astype(np.uint16)
+_blobs = []
 
 
-def matvec_expected(idx, codebook, x):
-    """Exactly what the ROM will hold in its accumulators, bias included."""
-    m, n = idx.shape
-    acc = np.zeros(m, dtype=np.int64)
-    for j in range(n):
-        table = product_table(x[j], codebook).astype(np.int64)
-        acc += table[idx[:, j]]
-    return acc
+def blob(name, data, rom0=True):
+    """Record a named binary that weights.asm will INCBIN into its own section.
+
+    Small tables go in ROM0 so they are always mapped; only the weight matrices
+    are banked. That keeps bank switching entirely out of the kernels - they
+    would otherwise have to juggle a bank per codebook and shift array.
+    """
+    data = bytes(data)
+    (BLOBS / f"{name}.bin").write_bytes(data)
+    _blobs.append((name, len(data), rom0))
+    return name
+
+
+def blob_split(name, data, rows):
+    """Split a blob across banks on a row boundary.
+
+    A ROMX section cannot exceed 16 KB, and both the embedding table and the
+    classifier weights are 32 KB. Splitting the classifier by *input* is free:
+    the matvec accumulates over inputs, so a bank boundary just ends one group
+    and the accumulators carry straight over.
+    """
+    stride = len(data) // rows
+    per_bank = (0x4000 // stride) * stride
+    parts = [data[i : i + per_bank] for i in range(0, len(data), per_bank)]
+    for i, part in enumerate(parts):
+        blob(f"{name}_p{i}", part, rom0=False)
+    return len(parts), per_bank // stride
+
+
+def weight_blob(name, idx):
+    """Codebook indices as ready-to-use HRAM table offsets, input-major.
+
+    Input-major means input j's weights for every output are contiguous, which
+    is what lets the kernel stream them with `ld a, [de]` / `inc de`. It also
+    makes splitting a matvec across ROM banks trivial: a bank boundary just ends
+    one group of inputs, and the accumulators carry over.
+    """
+    offsets = idx.T.astype(np.int32) * 2 + HLUT_BASE
+    assert offsets.max() < 0x100
+    return blob(name, offsets.astype(np.uint8).tobytes(), rom0=False)
+
+
+def sbytes(values):
+    return bytes(int(v) & 0xFF for v in values)
 
 
 def main():
-    BUILD.mkdir(exist_ok=True)
-    model = ref.Model()
+    BLOBS.mkdir(parents=True, exist_ok=True)
+    model, tok = ref.Model(), ref.Tokenizer()
+    c = model.cfg
     print("calibrating...", flush=True)
-    sites = Q.calibrate(model)
-    q = Q.quantize_model(model, sites, weight_bits=WEIGHT_BITS,
-                         bits_override={"tok_emb": CLASSIFIER_BITS})
+    sites = Q.calibrate(model, seq_len=SEQ)
+    q = Q.quantize_model(model, sites, weight_bits=WEIGHT_BITS)
 
-    # --- the Phase 1 test case: w1, layer 0 ---
-    idx = q.indices["w1"][0]                 # (hidden_dim, dim) codebook indices
-    cb = q.codebooks["w1"]
-    m, n = idx.shape
+    S = lambda n, l=0: q.site(n, l)
+    lines, consts = [], []
 
+    def const(name, value):
+        consts.append(f"DEF {name} EQU {value}")
+
+    const("DIM", c.dim)
+    const("HIDDEN", c.hidden_dim)
+    const("N_LAYERS", c.n_layers)
+    const("N_HEADS", c.n_heads)
+    const("N_KV_HEADS", c.n_kv_heads)
+    const("HEAD_SIZE", c.head_size)
+    const("KV_DIM", c.kv_dim)
+    const("KV_MUL", c.kv_mul)
+    const("VOCAB", c.vocab_size)
+    const("SEQ_LEN", SEQ)
+    const("CB_LEVELS", 1 << WEIGHT_BITS)
+    const("MV_BIAS", BIAS)
+    const("HLUT_BASE", f"${HLUT_BASE:02X}")
+    const("EXP_BITS", Q.EXP_BITS)
+    const("SIG_BITS", Q.SIG_BITS)
+    const("RSQRT_BITS", Q.RSQRT_BITS)
+    const("X_EXP", S("x"))
+
+    # --- lookup tables ---
+    t = Q.TABLES
+    blob("tbl_rsqrt", t["rsqrt"].astype("<u2").tobytes())
+    blob("tbl_sigmoid", t["sigmoid"].astype(np.uint8).tobytes())
+    blob("tbl_exp", t["exp"].astype("<u2").tobytes())
+    blob("tbl_rope", Q.rope_table(SEQ, c.head_size).astype("<i2").tobytes())
+
+    # --- token embedding: output-major rows for the lookup ---
+    emb = q.weights["tok_emb"]                       # int8 codebook values, (vocab, dim)
+    nparts, per = blob_split("emb_rows", emb.astype(np.int8).tobytes(), c.vocab_size)
+    const("EMB_PARTS", nparts)
+    const("EMB_PER_PART", per)
+    blob("emb_shift", sbytes(
+        S("x") - q.e("tok_emb") - q.rowexp["tok_emb"]
+    ))
+
+    # --- classifier: input-major, plus the left shift that makes rows comparable ---
+    cls_off = q.indices["tok_emb"].T.astype(np.int32) * 2 + HLUT_BASE
+    nparts, per = blob_split("cls_w", cls_off.astype(np.uint8).tobytes(), c.dim)
+    const("CLS_PARTS", nparts)
+    const("CLS_INPUTS_PER_PART", per)
+    rex = q.rowexp["tok_emb"].astype(np.int32)
+    blob("cls_lshift", sbytes(rex - rex.min()))
+    blob("cb_cls", q.codebooks["tok_emb"].astype(np.int8).tobytes())
+
+    # --- rmsnorm gains (kept int8; 320 bytes total and outside every hot loop) ---
+    for name, shift_name in (("rms_att", "RMSATT"), ("rms_ffn", "RMSFFN")):
+        blob(name, q.weights[name].astype(np.int8).tobytes())
+    blob("rms_final", q.weights["rms_final"].astype(np.int8).tobytes())
+
+    # rmsnorm lands on `-11 + w_exp`, so the closing shift is a per-layer constant.
+    root_n_shift = int(np.log2(c.dim)) // 2
+    const("RMS_ROOTN", root_n_shift)
+    blob("rmsatt_shift", sbytes(S("xb_att", l) - (-11 + q.e("rms_att")) for l in range(c.n_layers)))
+    blob("rmsffn_shift", sbytes(S("xb_ffn", l) - (-11 + q.e("rms_ffn")) for l in range(c.n_layers)))
+    const("RMSFINAL_SHIFT", S("xb_final") - (-11 + q.e("rms_final")))
+
+    # --- per-matrix codebooks and per-layer weights + requant shifts ---
+    out_site = {"wq": "q", "wk": "k", "wv": "v", "wo": "x", "w1": "h1", "w2": "x", "w3": "h3"}
+    in_site = {"wq": "xb_att", "wk": "xb_att", "wv": "xb_att", "wo": "att_out",
+               "w1": "xb_ffn", "w2": "hb", "w3": "xb_ffn"}
+    for name in MATS:
+        blob(f"cb_{name}", q.codebooks[name].astype(np.int8).tobytes())
+        for l in range(c.n_layers):
+            weight_blob(f"{name}_l{l}", q.indices[name][l])
+            to_exp = S("x") if out_site[name] == "x" else S(out_site[name], l)
+            base = to_exp - q.e(name) - S(in_site[name], l)
+            blob(f"{name}_sh_l{l}", sbytes(base - q.rowexp[name][l]))
+
+    # --- per-layer shifts for the nonlinearities ---
+    blob("att_shift", sbytes(-(S("q", l) + S("k", l)) - 4 for l in range(c.n_layers)))
+    blob("attout_shift", sbytes(
+        S("att_out", l) - (S("v", l) - Q.EXP_BITS) for l in range(c.n_layers)))
+    blob("silu_idx_shift", sbytes(-S("h1", l) - Q.SIG_SHIFT for l in range(c.n_layers)))
+    blob("silu_out_shift", sbytes(
+        S("hb", l) - (S("h1", l) - Q.SIG_BITS + S("h3", l)) for l in range(c.n_layers)))
+
+    # --- detokenizer: vocabulary pieces, with byte-fallback tokens resolved ---
+    pieces, offsets = bytearray(), []
+    for i, piece in enumerate(tok.vocab):
+        m = ref._BYTE_PIECE.fullmatch(piece)
+        if m:
+            piece = bytes([int(m.group(1), 16)])
+        offsets.append(len(pieces))
+        pieces += bytes([len(piece)]) + piece
+    assert len(pieces) < 1 << 16
+    blob("vocab_data", bytes(pieces), rom0=False)
+    blob("vocab_off", np.array(offsets, dtype="<u2").tobytes())
+
+    # --- a matvec+requant case the ROM can be checked against bit-exactly ---
     rng = np.random.default_rng(1234)
-    x = rng.integers(-127, 128, size=n).astype(np.int8)
+    tx = rng.integers(-127, 128, size=c.dim).astype(np.int8)
+    blob("test_x", tx.tobytes())
+    acc = Q.matvec(q.weights["w1"][0], tx)
+    want = Q.requant_rows(acc, q.e("w1") + S("xb_ffn", 0), q.rowexp["w1"][0], S("h1", 0))
+    blob("test_h1", want.astype(np.int8).tobytes())
+    print(f"test matvec w1[0]: {c.hidden_dim}x{c.dim}, h1 range {want.min()}..{want.max()}")
 
-    # Weights input-major: for input j, m contiguous bytes, one per output.
-    # Each byte is a ready-to-use HRAM offset into the product table.
-    offsets = idx.T.astype(np.int32) * 2 + HLUT_BASE
-    assert offsets.max() < HLUT_BASE + (1 << WEIGHT_BITS) * 2 <= 0x100
-    packed = offsets.astype(np.uint8).tobytes()
-    assert len(packed) == n * m
+    prompt_tokens = tok.encode("Once upon a time")
+    blob("prompt", np.array(prompt_tokens, dtype="<u2").tobytes())
+    const("PROMPT_LEN", len(prompt_tokens))
 
-    expected = matvec_expected(idx, cb, x)
-    assert expected.min() >= 0 and expected.max() < (1 << 24), "outside int24"
+    # --- generated assembly ---
+    lines.append("; Generated by py/export.py - do not edit.")
+    lines.append('INCLUDE "model.inc"')
+    lines.append("")
+    for name, size, rom0 in _blobs:
+        lines.append(f'SECTION "{name}", {"ROM0" if rom0 else "ROMX"}')
+        lines.append(f"{name}:: INCBIN \"build/blobs/{name}.bin\"   ; {size} bytes")
+        lines.append("")
 
-    (BUILD / "mv_weights.bin").write_bytes(packed)
-    (BUILD / "mv_x.bin").write_bytes(x.astype(np.int8).tobytes())
-    (BUILD / "mv_cb.bin").write_bytes(cb.astype(np.int8).tobytes())
-    (BUILD / "mv_expected.bin").write_bytes(
-        b"".join(struct.pack("<I", int(v))[:3] for v in expected)
-    )
+    # Manifest: bank + address per (tensor, layer), resolved by the linker.
+    lines.append('SECTION "Model manifest", ROM0')
+    for name in MATS:
+        lines.append(f"{name}_banks:: db " + ", ".join(f"BANK({name}_l{l})" for l in range(c.n_layers)))
+        lines.append(f"{name}_addrs:: dw " + ", ".join(f"{name}_l{l}" for l in range(c.n_layers)))
+        lines.append(f"{name}_shifts:: dw " + ", ".join(f"{name}_sh_l{l}" for l in range(c.n_layers)))
+        lines.append(f"{name}_shbanks:: db " + ", ".join(f"BANK({name}_sh_l{l})" for l in range(c.n_layers)))
+    lines.append("")
 
-    INC.write_text(
+    WEIGHTS_ASM.write_text("\n".join(lines), encoding="utf-8")
+    MODEL_INC.write_text(
         "; Generated by py/export.py - do not edit.\n"
-        f"DEF MV_N EQU {n}          ; inputs\n"
-        f"DEF MV_M EQU {m}          ; outputs\n"
-        f"DEF MV_MACS EQU {n * m}\n"
-        f"DEF MV_BIAS EQU {BIAS}\n"
-        f"DEF CB_LEVELS EQU {1 << WEIGHT_BITS}\n"
-        f"DEF HLUT_BASE EQU ${HLUT_BASE:02X}\n",
+        "IF !DEF(MODEL_INC)\nDEF MODEL_INC EQU 1\n" + "\n".join(consts) + "\nENDC\n",
         encoding="utf-8",
     )
-    print(f"w1[0]: {m} outputs x {n} inputs = {n * m:,} MACs")
-    print(f"codebook: {list(cb)}")
-    print(f"accumulator range: {expected.min():,} .. {expected.max():,}")
+
+    total = sum(s for _, s, _r in _blobs)
+    r0 = sum(s for _, s, r in _blobs if r)
+    print(f"{len(_blobs)} blobs, {total:,} bytes ({total / 16384:.1f} banks); ROM0 {r0:,} bytes")
+    print(f"prompt tokens for 'Once upon a time': {tok.encode('Once upon a time')}")
 
 
 if __name__ == "__main__":

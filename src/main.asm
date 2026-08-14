@@ -75,8 +75,7 @@ Main:
 
     call RecordStatus
     call Measure
-    call MeasureAddRow          ; leaves junk accumulators, so run it first
-    call MeasureMatvec          ; this one's accumulators are what the tests check
+    call MeasureMatvec
     call Report
     call Console_Flush
 
@@ -188,18 +187,11 @@ Measure:
     jr SaveCycles
 
 MeasureMatvec:
+    call Phase2_Setup
     call Prof_Start
-    call Matvec_Run
+    call Phase2_Run
     call Prof_Stop
     ld de, wMvCycles
-    jr SaveCycles
-
-MeasureAddRow:
-    call Matvec_Load
-    call Prof_Start
-    call Matvec_RunNoLut
-    call Prof_Stop
-    ld de, wRowCycles
     ; fall through
 
 ; Copies the profiler result to de, so successive measurements both survive.
@@ -244,11 +236,11 @@ Report:
     ld hl, wMvCycles
     jp Print_Dec32At
 
-sBanner:   db "CHATGBC PHASE 1", $0A, $0A, 0
+sBanner:   db "CHATGBC PHASE 2", $0A, $0A, 0
 sSpeedOn:  db "CGB OK   2X ON", $0A, $0A, 0
 sSpeedOff: db "CGB OK   2X OFF", $0A, $0A, 0
 sCal:      db "CAL {d:CAL_ITERS} = ", 0
-sMacs:     db "MATVEC {d:MV_M}x{d:MV_N}", $0A, 0
+sMacs:     db "MATVEC {d:HIDDEN}x{d:DIM}", $0A, 0
 sMv:       db "CYC ", 0
 
 INCLUDE "font.inc"
