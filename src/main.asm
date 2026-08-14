@@ -7,6 +7,7 @@
 
 INCLUDE "hardware.inc"
 INCLUDE "chatgbc.inc"
+INCLUDE "model.inc"
 
 ; The calibration block below costs exactly 9 M-cycles per iteration
 ; (nop 1 + nop 1 + dec bc 2 + ld a,b 1 + or c 1 + jr taken 3), less 1 for the
@@ -26,8 +27,11 @@ SECTION "Stack", WRAMX[$DF00], BANK[1]
 wStack: ds 256
 
 SECTION "Main state", WRAM0
-wStatus:: db                    ; STATUS_* flags
-wReady::  db                    ; READY_MAGIC once the ROM is finished
+wStatus::    db                 ; STATUS_* flags
+wReady::     db                 ; READY_MAGIC once the ROM is finished
+wCalCycles:: ds 4               ; hand-countable block, proves the profiler
+wMvCycles::  ds 4               ; the matvec kernel
+wRowCycles:: ds 4               ; the same sweep without the table build
 
 SECTION "Main", ROM0
 
@@ -71,6 +75,8 @@ Main:
 
     call RecordStatus
     call Measure
+    call MeasureAddRow          ; leaves junk accumulators, so run it first
+    call MeasureMatvec          ; this one's accumulators are what the tests check
     call Report
     call Console_Flush
 
@@ -177,7 +183,36 @@ Measure:
     ld a, b
     or c
     jr nz, .loop
-    jp Prof_Stop
+    call Prof_Stop
+    ld de, wCalCycles
+    jr SaveCycles
+
+MeasureMatvec:
+    call Prof_Start
+    call Matvec_Run
+    call Prof_Stop
+    ld de, wMvCycles
+    jr SaveCycles
+
+MeasureAddRow:
+    call Matvec_Load
+    call Prof_Start
+    call Matvec_RunNoLut
+    call Prof_Stop
+    ld de, wRowCycles
+    ; fall through
+
+; Copies the profiler result to de, so successive measurements both survive.
+SaveCycles:
+    ld hl, wProfCycles
+    ld b, 4
+.loop
+    ld a, [hl+]
+    ld [de], a
+    inc de
+    dec b
+    jr nz, .loop
+    ret
 
 
 ; --- Display ----------------------------------------------------------------
@@ -197,23 +232,24 @@ Report:
     ld hl, sCal
     call Console_PrintStr
 
-    ld hl, sTicks
-    call Console_PrintStr
-    ld hl, wProfTicks
+    ld hl, wCalCycles
     call Print_Dec32At
     ld a, $0A
     call Console_PutChar
 
-    ld hl, sCyc
+    ld hl, sMacs
     call Console_PrintStr
-    ld hl, wProfCycles
+    ld hl, sMv
+    call Console_PrintStr
+    ld hl, wMvCycles
     jp Print_Dec32At
 
-sBanner:   db "CHATGBC PHASE 0", $0A, $0A, 0
+sBanner:   db "CHATGBC PHASE 1", $0A, $0A, 0
 sSpeedOn:  db "CGB OK   2X ON", $0A, $0A, 0
 sSpeedOff: db "CGB OK   2X OFF", $0A, $0A, 0
-sCal:      db "CAL   {d:CAL_ITERS}", $0A, 0
-sTicks:    db "TICKS ", 0
-sCyc:      db "CYC   ", 0
+sCal:      db "CAL {d:CAL_ITERS} = ", 0
+sMacs:     db "MATVEC {d:MV_M}x{d:MV_N}", $0A, 0
+sMv:       db "CYC ", 0
 
 INCLUDE "font.inc"
+

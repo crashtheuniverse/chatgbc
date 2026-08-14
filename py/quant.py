@@ -248,6 +248,18 @@ def lloyd_max(values, levels, exp, iters=40):
     return cb[:levels].astype(np.int8)
 
 
+def uniform_codebook(levels):
+    """cb[u] = (u - levels/2) * step, with step a power of two.
+
+    This is what lets the ROM build its product table with shifts and adds
+    alone: table[0] = -(x << 7), then step through by (x << 4). A Lloyd-Max
+    codebook would need 16 real multiplies per input instead.
+    """
+    step = 256 // levels
+    return np.array([(u - levels // 2) * step for u in range(levels)], dtype=np.int16) \
+        .clip(-QMAX, QMAX).astype(np.int8)
+
+
 def quantize_to_codebook(arr, codebook, exp):
     v = np.asarray(arr, dtype=np.float64) / 2.0**exp
     idx = np.abs(v[..., None] - codebook[None, :].astype(np.float64)).argmin(axis=-1)
@@ -266,7 +278,7 @@ def row_exponents(mat, base_exp):
     return np.array([exp_for(r) - base_exp if r > 0 else 0 for r in rows], dtype=np.int8)
 
 
-def quantize_model(model, sites, weight_bits=8, bits_override=None):
+def quantize_model(model, sites, weight_bits=8, bits_override=None, uniform=False):
     """`bits_override` sets per-tensor widths. The classifier is the natural
     exception: with 512 outputs it amortizes a 256-entry product table down to
     ~8 cycles/MAC, so 8-bit costs little there and it is what decides argmax."""
@@ -295,8 +307,9 @@ def quantize_model(model, sites, weight_bits=8, bits_override=None):
         rex = np.stack([row_exponents(arr[l], e) for l in range(arr.shape[0])]) \
             if arr.ndim == 3 else row_exponents(arr, e)
         scaled = arr / 2.0 ** (e + rex[..., None].astype(np.float64))
-        cb = lloyd_max(scaled, 1 << weight_bits, 0)
+        cb = uniform_codebook(1 << bits) if uniform else lloyd_max(scaled, 1 << bits, 0)
         idx = quantize_to_codebook(scaled, cb, 0)
+        assert idx.max() < (1 << bits)
         q.codebooks[name], q.indices[name], q.rowexp[name] = cb, idx, rex
         q.weights[name] = cb[idx]   # int8 codebook values; the row scale is applied at requant
 

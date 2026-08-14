@@ -15,7 +15,7 @@ def test_reports_cgb_and_double_speed(rom):
 
 def test_banner_rendered(rom):
     lines = rom.console_lines()
-    assert lines[0] == "CHATGBC PHASE 0"
+    assert lines[0].startswith("CHATGBC PHASE")
     assert "2X ON" in lines[2]
 
 
@@ -26,6 +26,8 @@ def test_vram_matches_shadow(rom):
 
 
 def test_cycles_are_ticks_times_divider(rom):
+    """wProfTicks/wProfCycles hold the most recent measurement, which is the
+    matvec; the calibration result is copied aside into wCalCycles."""
     ticks = rom.read_u32("wProfTicks")
     cycles = rom.read_u32("wProfCycles")
     assert ticks > 0
@@ -39,7 +41,7 @@ def test_profiler_matches_hand_counted_cycles(rom):
     iters = rom.defs["CAL_ITERS"]
     expected = 3 + 9 * iters - 1
 
-    measured = rom.read_u32("wProfCycles")
+    measured = rom.read_u32("wCalCycles")
     tick = rom.defs["PROF_TICK_CYCLES"]
 
     # The measured span also covers Prof_Start's tail, the call to Prof_Stop and

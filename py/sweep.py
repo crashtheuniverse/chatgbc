@@ -86,12 +86,13 @@ def main():
     paths = reference_paths(model, tok)
 
     configs = [
-        ("all 8-bit", 8, None),
-        ("all 4-bit", 4, None),
-        ("4-bit layers, 8-bit classifier", 4, {"tok_emb": 8}),
+        ("all 8-bit", 8, None, False),
+        ("4-bit Lloyd-Max, 8-bit classifier", 4, {"tok_emb": 8}, False),
+        ("4-bit uniform, 8-bit classifier", 4, {"tok_emb": 8}, True),
     ]
-    for label, bits, override in configs:
-        q = Q.quantize_model(model, sites, weight_bits=bits, bits_override=override)
+    for label, bits, override, uniform in configs:
+        q = Q.quantize_model(model, sites, weight_bits=bits,
+                             bits_override=override, uniform=uniform)
         rom = sum(q.weights[n].size * q.bits[n] // 8 for n in Q.MATMULS)
         print(f"\n=== {label} ===")
         print(f"  matmul weight RMSE / sigma  : {weight_error(model, q):.4f}")
