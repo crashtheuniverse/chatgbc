@@ -53,7 +53,12 @@ Write-Host "[4/5] font8x8 (Daniel Hepper, public domain)"
 Get-File 'https://raw.githubusercontent.com/dhepper/font8x8/master/font8x8_basic.h' `
          (Join-Path $tools 'font8x8_basic.h')
 
-Write-Host "[5/5] Python venv"
+Write-Host "[5/6] TinyStories-260K checkpoint + tokenizer"
+$hf = 'https://huggingface.co/karpathy/tinyllamas/resolve/main/stories260K'
+Get-File "$hf/stories260K.bin" (Join-Path $root 'models\stories260K.bin')
+Get-File "$hf/tok512.bin"      (Join-Path $root 'models\tok512.bin')
+
+Write-Host "[6/6] Python venv"
 $venv = Join-Path $root '.venv'
 $py   = Join-Path $venv 'Scripts\python.exe'
 if (-not (Test-Path $py)) { & python -m venv $venv }
