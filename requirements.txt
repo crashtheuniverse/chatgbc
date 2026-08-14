@@ -1,0 +1,4 @@
+pyboy==2.7.0
+numpy>=2.0
+pytest>=8.0
+pillow>=10.0
