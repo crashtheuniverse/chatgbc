@@ -8,6 +8,12 @@ INCLUDE "hardware.inc"
 INCLUDE "chatgbc.inc"
 INCLUDE "model.inc"
 
+SECTION "Forward debug", WRAM0
+; Layer 0 snapshots, so py/diffstep.py can tell an attention bug from an FFN one.
+wDbgAtt::   ds DIM
+wDbgFfn::   ds DIM
+wDbgRes::   ds DIM
+
 SECTION "Forward state", WRAM0
 wToken::    dw
 wStep::     db
@@ -184,6 +190,14 @@ ForwardLayer::
     ld [wAttOutShift], a
     call Attention
 
+    ld a, [wLayer]                  ; snapshot layer 0's attention output
+    or a
+    jr nz, :+
+    ld hl, wXb2
+    ld de, wDbgAtt
+    ld bc, DIM
+    call CopyBytes
+:
     ld hl, wXb2
     call SetXPtr
     ld a, DIM
@@ -208,6 +222,14 @@ ForwardLayer::
     ld de, wX
     ld b, DIM
     call AddSaturating
+    ld a, [wLayer]                  ; snapshot x after the attention residual
+    or a
+    jr nz, :+
+    ld hl, wX
+    ld de, wDbgRes
+    ld bc, DIM
+    call CopyBytes
+:
 
     ; --- feed-forward block ---
     ld hl, rms_ffn
@@ -309,6 +331,14 @@ ForwardLayer::
     ld e, l
     ld bc, wXb
     call Requant_All
+    ld a, [wLayer]                  ; snapshot layer 0's FFN output
+    or a
+    jr nz, :+
+    ld hl, wXb
+    ld de, wDbgFfn
+    ld bc, DIM
+    call CopyBytes
+:
     ld hl, wXb
     ld de, wX
     ld b, DIM
@@ -341,9 +371,13 @@ OffsetByLayer:
 
 ; de[i] = sat8(de[i] + hl[i]) for b elements.
 ; Requant_Sat8 uses b and c as scratch, so the counter has to be saved.
+; Both operands are sign-extended to a full 32 bits before adding. Extending
+; only one of them and carrying `adc a, 0` into the top bytes turns a negative
+; addend into a huge positive, which then saturates to +127.
 AddSaturating::
     ld a, [hl+]
     push hl
+    push de
     push bc
     ld [wTmp32 + 0], a
     add a, a
@@ -352,26 +386,16 @@ AddSaturating::
     ld [wTmp32 + 2], a
     ld [wTmp32 + 3], a
     ld a, [de]
-    ld [wMy + 0], a
+    ld [wSave32 + 0], a
     add a, a
     sbc a, a
-    ld [wMy + 1], a
-    ld hl, wMy                      ; wTmp32 += sign-extended de[i]
-    ld a, [wTmp32 + 0]
-    add a, [hl]
-    ld [wTmp32 + 0], a
-    inc hl
-    ld a, [wTmp32 + 1]
-    adc a, [hl]
-    ld [wTmp32 + 1], a
-    ld a, [wTmp32 + 2]
-    adc a, 0
-    ld [wTmp32 + 2], a
-    ld a, [wTmp32 + 3]
-    adc a, 0
-    ld [wTmp32 + 3], a
+    ld [wSave32 + 1], a
+    ld [wSave32 + 2], a
+    ld [wSave32 + 3], a
+    call AddSaveToTmp
     call Requant_Sat8
     pop bc
+    pop de
     ld [de], a
     inc de
     pop hl
@@ -642,6 +666,7 @@ ENDR
     ld a, [wRnShift]
     call Requant_Shift
     call Requant_Sat8
+    pop bc
     pop hl
     ld [hl+], a
     dec b

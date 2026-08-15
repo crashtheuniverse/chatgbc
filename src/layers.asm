@@ -190,9 +190,9 @@ RmsNorm::
     ld hl, wSS
     call Shift32Trunc               ; index = ss >> (e - 8)
     ld a, [wSS + 0]
-    add a, a                        ; 16-bit table entries
-    ld l, a
-    ld h, 0
+    ld l, a                         ; index * 2 must be computed 16-bit: the
+    ld h, 0                         ; table has 256 entries and dd a, a
+    add hl, hl                      ; would drop bit 8 for indices >= 128
     ld de, tbl_rsqrt
     add hl, de
     ld a, [hl+]

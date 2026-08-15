@@ -128,7 +128,7 @@ if __name__ == "__main__":
     import sys
 
     rom = Rom()
-    frames = rom.run_until_ready()
+    frames = rom.run_until_ready(max_frames=400000)
     print(f"ready after {frames} frames\n")
     print(rom.text())
     print()

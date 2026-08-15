@@ -207,9 +207,9 @@ Attn_Softmax:
     call Requant_Shift
     call ClampIndex255
 
-    add a, a                        ; 16-bit table entries
-    ld l, a
+    ld l, a                         ; 16-bit index; dd a, a would drop bit 8
     ld h, 0
+    add hl, hl
     ld de, tbl_exp
     add hl, de
     ld a, [hl+]
@@ -218,9 +218,9 @@ Attn_Softmax:
     ld b, a                         ; bc = exp value
 
     ld a, [wAtT]                    ; store it in wAtt
-    add a, a
     ld l, a
     ld h, 0
+    add hl, hl
     ld de, wAtt
     add hl, de
     ld a, c
@@ -254,9 +254,9 @@ Attn_Softmax:
     ld hl, wTotal
     call Shift32Trunc
     ld a, [wTotal + 0]
-    add a, a
-    ld l, a
+    ld l, a                         ; 16-bit index; recip indices are always >= 128
     ld h, 0
+    add hl, hl
     ld de, tbl_recip
     add hl, de
     ld a, [hl+]
@@ -268,9 +268,9 @@ Attn_Softmax:
     ld [wAtT], a
 .normLoop
     ld a, [wAtT]
-    add a, a
     ld l, a
     ld h, 0
+    add hl, hl
     ld de, wAtt
     add hl, de
     push hl
@@ -369,9 +369,9 @@ Attn_Weighted:
     ld [wMulA8], a
 
     ld a, [wAtT]
-    add a, a
     ld l, a
     ld h, 0
+    add hl, hl
     ld de, wAtt
     add hl, de
     ld a, [hl+]

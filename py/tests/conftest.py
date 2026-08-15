@@ -12,6 +12,6 @@ from harness import Rom  # noqa: E402
 def rom():
     """One booted, finished ROM shared by the whole session."""
     r = Rom()
-    r.run_until_ready()
+    r.run_until_ready(max_frames=400000)   # generation needs ~16k frames
     yield r
     r.close()

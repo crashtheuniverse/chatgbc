@@ -18,7 +18,7 @@ DEF CAL_ITERS EQU 10000
 ; way through its first pass and wedges the emulator; with generation off the
 ; ROM still boots, renders and profiles, so the suite stays green while the
 ; forward pass is debugged. Raise this to re-enable generation.
-DEF GEN_STEPS EQU 0
+DEF GEN_STEPS EQU 24
 
 SECTION "VBlank IRQ", ROM0[$40]
     reti
@@ -82,7 +82,6 @@ Main:
 
     call RecordStatus
     call Measure
-    call MeasureSelftest
     call Report
     call Console_Flush
 IF GEN_STEPS > 0
@@ -93,6 +92,8 @@ IF GEN_STEPS > 0
     call ReportTiming
     call Console_Flush
 ENDC
+    ; Last, so the forward pass cannot overwrite the buffer it checks.
+    call MeasureSelftest
 
     ld a, READY_MAGIC           ; last, so the harness never sees a half-drawn screen
     ld [wReady], a
