@@ -56,6 +56,9 @@ class Rom:
                               SRC / "main.asm", SRC / "matvec.asm", SRC / "chatgbc.inc")
         self.syms = load_symbols(sym)
         self.pyboy = PyBoy(str(rom), window="null", cgb=True, sound_emulated=False)
+        # Without this PyBoy paces itself to real time, which for a ROM that
+        # spends seconds per token makes the test loop unusable.
+        self.pyboy.set_emulation_speed(0)
         self.frames = 0
 
     def close(self):

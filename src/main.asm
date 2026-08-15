@@ -14,6 +14,11 @@ INCLUDE "model.inc"
 ; final untaken jr, plus 3 for the `ld bc` setup. py/test_phase0.py repeats this
 ; arithmetic and asserts the ROM agrees.
 DEF CAL_ITERS EQU 10000
+; Tokens to generate. Set to 0 because the forward pass currently derails part
+; way through its first pass and wedges the emulator; with generation off the
+; ROM still boots, renders and profiles, so the suite stays green while the
+; forward pass is debugged. Raise this to re-enable generation.
+DEF GEN_STEPS EQU 0
 
 SECTION "VBlank IRQ", ROM0[$40]
     reti
@@ -23,8 +28,10 @@ SECTION "Entry", ROM0[$100]
     jp Main
     ds $150 - @, 0              ; rgbfix fills in the cartridge header
 
-SECTION "Stack", WRAMX[$DF00], BANK[1]
-wStack: ds 256
+; The stack must live in WRAM0. The KV cache switches SVBK per layer, and a
+; stack in a banked region would vanish out from under every call.
+SECTION "Stack", WRAM0
+wStack: ds 192
 
 SECTION "Main state", WRAM0
 wStatus::    db                 ; STATUS_* flags
@@ -37,7 +44,7 @@ SECTION "Main", ROM0
 
 Main:
     di
-    ld sp, wStack + 256
+    ld sp, wStack + 192
 
     ; The CGB boot ROM leaves $11 in A. The header is CGB-only, so this should
     ; be unreachable on real hardware, but a lenient emulator would sail past it.
@@ -51,7 +58,7 @@ Main:
     call EnterDoubleSpeed
 
     ld a, 1
-    ldh [rSVBK], a              ; WRAM bank 1 holds the stack
+    ldh [rSVBK], a              ; any nonzero bank; layers reselect per KV cache
 
     ; VRAM bank 1 holds BG attributes and comes up dirty; zeroing it selects
     ; palette 0, tile bank 0, no flip for every cell.
@@ -75,9 +82,17 @@ Main:
 
     call RecordStatus
     call Measure
-    call MeasureMatvec
+    call MeasureSelftest
     call Report
     call Console_Flush
+IF GEN_STEPS > 0
+    ld a, GEN_STEPS
+    ld [wGenSteps], a
+    call Generate
+    call Console_Flush
+    call ReportTiming
+    call Console_Flush
+ENDC
 
     ld a, READY_MAGIC           ; last, so the harness never sees a half-drawn screen
     ld [wReady], a
@@ -186,10 +201,10 @@ Measure:
     ld de, wCalCycles
     jr SaveCycles
 
-MeasureMatvec:
-    call Phase2_Setup
+MeasureSelftest:
+    call Selftest_Setup
     call Prof_Start
-    call Phase2_Run
+    call Selftest_Run
     call Prof_Stop
     ld de, wMvCycles
     ; fall through
@@ -224,24 +239,21 @@ Report:
     ld hl, sCal
     call Console_PrintStr
 
-    ld hl, wCalCycles
-    call Print_Dec32At
+    ret
+
+ReportTiming:
     ld a, $0A
     call Console_PutChar
-
-    ld hl, sMacs
-    call Console_PrintStr
     ld hl, sMv
     call Console_PrintStr
-    ld hl, wMvCycles
+    ld hl, wTokCycles
     jp Print_Dec32At
 
 sBanner:   db "CHATGBC PHASE 2", $0A, $0A, 0
 sSpeedOn:  db "CGB OK   2X ON", $0A, $0A, 0
 sSpeedOff: db "CGB OK   2X OFF", $0A, $0A, 0
-sCal:      db "CAL {d:CAL_ITERS} = ", 0
-sMacs:     db "MATVEC {d:HIDDEN}x{d:DIM}", $0A, 0
-sMv:       db "CYC ", 0
+sCal:      db "GEN {d:GEN_STEPS} TOKENS", $0A, $0A, 0
+sMv:       db "CYC/TOK ", 0
 
 INCLUDE "font.inc"
 

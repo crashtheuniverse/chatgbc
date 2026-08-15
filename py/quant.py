@@ -29,7 +29,10 @@ ACC_MAX = (1 << 23) - 1          # int24 accumulator range the ROM provides
 SIG_SHIFT = 4                    # sigmoid table input is Q4.4, i.e. +/-8.0
 SIG_BITS = 8                     # sigmoid table output is Q0.8
 EXP_BITS = 12                    # softmax exp table output is Q0.12
-RSQRT_BITS = 15                  # rsqrt table output is Q1.15
+# 14, not 15, so every table entry stays inside signed 16-bit: the SM83 helper
+# multiplies signed operands, and a value above 32767 would read as negative.
+RSQRT_BITS = 14
+RECIP_BITS = 14                  # same constraint for the softmax reciprocal
 
 
 # --- shared helpers ---------------------------------------------------------
@@ -95,7 +98,14 @@ def build_tables():
     for i in range(256):
         expt[i] = round((1 << EXP_BITS) * np.exp(-i / 16.0))
 
-    return {"rsqrt": rsqrt, "sigmoid": sigmoid, "exp": expt}
+    # 1/f for f in [0.5, 1), indexed by the top 8 bits of a normalized total.
+    # Softmax normalizes with this instead of dividing - the SM83 has no divide
+    # instruction, and this is the same normalize-and-index trick as rsqrt.
+    recip = np.zeros(256, dtype=np.uint16)
+    for i in range(128, 256):
+        recip[i] = min(0x7FFF, round((1 << RECIP_BITS) / ((i + 0.5) / 256.0)))
+
+    return {"rsqrt": rsqrt, "sigmoid": sigmoid, "exp": expt, "recip": recip}
 
 
 TABLES = build_tables()
@@ -147,6 +157,8 @@ def rmsnorm(x, w_int, w_exp, out_exp):
     r = int(TABLES["rsqrt"][idx])          # ~ 2**15 / sqrt(f)
 
     # x_hat = x * sqrt(n) / sqrt(ss) held as Q11; sqrt(n) = 2**3 for dim 64.
+    # With RSQRT_BITS 14 and root_n_shift 3 the constant part cancels, leaving a
+    # shift of exactly e/2 - which is why the assembly needs no bias term here.
     root_n_shift = int(np.log2(n)) // 2
     xh = shr_round(x * r, RSQRT_BITS - 11 - root_n_shift + e // 2)
 
@@ -180,9 +192,13 @@ def softmax_weights(scores, score_exp):
     if total == 0:
         e = np.ones_like(e)
         total = int(e.sum())
-    # One reciprocal per head, then multiply - the ROM does the same.
-    recip = ((1 << 24) + total // 2) // total
-    return shr_round(e * recip, 24 - EXP_BITS)
+
+    # Normalize total to 2**bits * f with f in [0.5, 1), look up 1/f, and fold
+    # the exponent into the shift. One table read per head instead of a divide.
+    bits = total.bit_length()
+    idx = total >> (bits - 8) if bits >= 8 else total << (8 - bits)
+    r = int(TABLES["recip"][idx])
+    return shr_round(e * r, RECIP_BITS + bits - EXP_BITS)
 
 
 # --- quantized model --------------------------------------------------------

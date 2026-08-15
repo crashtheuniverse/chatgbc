@@ -116,6 +116,12 @@ def main():
     const("EXP_BITS", Q.EXP_BITS)
     const("SIG_BITS", Q.SIG_BITS)
     const("RSQRT_BITS", Q.RSQRT_BITS)
+    const("RECIP_BITS", Q.RECIP_BITS)
+    const("KV_BANK_BASE", 2)        # banks 2..6 hold layers 0..4; 1 holds the stack
+    # One layer of KV is SEQ * KV_DIM of K then the same of V, which is exactly
+    # 4096 bytes - a whole WRAM bank - so every offset inside is a constant.
+    const("KV_K_BASE", "$D000")
+    const("KV_V_BASE", f"${0xD000 + SEQ * c.kv_dim:04X}")
     const("X_EXP", S("x"))
 
     # --- lookup tables ---
@@ -123,6 +129,7 @@ def main():
     blob("tbl_rsqrt", t["rsqrt"].astype("<u2").tobytes())
     blob("tbl_sigmoid", t["sigmoid"].astype(np.uint8).tobytes())
     blob("tbl_exp", t["exp"].astype("<u2").tobytes())
+    blob("tbl_recip", t["recip"].astype("<u2").tobytes())
     blob("tbl_rope", Q.rope_table(SEQ, c.head_size).astype("<i2").tobytes())
 
     # --- token embedding: output-major rows for the lookup ---

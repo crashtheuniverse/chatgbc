@@ -1,7 +1,12 @@
-; Activation buffers and requantization.
+; Activation buffers, the shared 32-bit scratch, and requantization.
 ;
 ; Everything lives in WRAM bank 0 so it is always mapped; the switchable banks
-; are reserved entirely for the KV cache, one bank per layer.
+; are reserved for the KV cache, one bank per layer.
+;
+; wTmp32 is the scratch every kernel funnels through: multiplies land in it,
+; Requant_Shift rescales it, Requant_Sat8 reads it out as int8. Having one
+; scratch and one shift routine is why there is no second, subtly different
+; rounding rule anywhere in the model.
 
 INCLUDE "hardware.inc"
 INCLUDE "chatgbc.inc"
@@ -13,21 +18,20 @@ wX::     ds DIM                     ; residual stream
 wXb::    ds DIM                     ; post-rmsnorm activations
 wXb2::   ds DIM                     ; attention output
 wQ::     ds DIM
-wKvec::  ds KV_DIM
-wVvec::  ds KV_DIM
 wH1::    ds HIDDEN
 wH3::    ds HIDDEN
 wHb::    ds HIDDEN
+wScores:: ds SEQ_LEN * ACC_BYTES    ; raw attention scores, int24
 wAtt::   ds SEQ_LEN * 2             ; softmax weights, Q0.12
 wCbBuf:: ds CB_LEVELS               ; working copy of the active codebook
-wTmp24:: ds 3
+wTmp32:: ds 4                       ; shared signed scratch
 wBias::  ds 3                       ; nIn * MV_BIAS, removed once per matvec
 
 SECTION "Requant state", WRAM0
-wRqAcc:  dw
-wRqSh:   dw
-wRqDst:  dw
-wRqCnt:  dw
+wRqAcc:: dw
+wRqSh::  dw
+wRqDst:: dw
+wRqCnt:: dw
 
 SECTION "Requant code", ROM0
 
@@ -54,60 +58,78 @@ Requant_SetBias::
     ld [wBias + 1], a               ; (nIn << 6) & $FF
     ret
 
-; hl -> accumulator slot. Loads it into wTmp24 minus the bias, leaving a signed
-; int24, and advances hl past the slot.
-Requant_LoadUnbiased:
+; Sign-extends wTmp32's third byte into the fourth.
+Tmp32_SignExtend::
+    ld a, [wTmp32 + 2]
+    add a, a
+    sbc a, a                        ; $FF if negative, else $00
+    ld [wTmp32 + 3], a
+    ret
+
+; hl -> accumulator slot. Loads it into wTmp32 minus the bias, leaving a signed
+; value, and advances hl past the slot.
+Requant_LoadUnbiased::
     ld a, [wBias + 0]
     ld c, a
     ld a, [hl+]
     sub a, c
-    ld [wTmp24 + 0], a
+    ld [wTmp32 + 0], a
     ld a, [wBias + 1]
     ld c, a
     ld a, [hl+]
     sbc a, c
-    ld [wTmp24 + 1], a
+    ld [wTmp32 + 1], a
     ld a, [wBias + 2]
     ld c, a
     ld a, [hl+]
     sbc a, c
-    ld [wTmp24 + 2], a
+    ld [wTmp32 + 2], a
+    push hl
+    call Tmp32_SignExtend
+    pop hl
     ret
 
-; Shifts wTmp24 by the signed count in a. Negative shifts left.
+; Shifts wTmp32 by the signed count in a. Negative shifts left.
+; Clobbers a and b - callers holding a loop counter there must save it.
 ;
 ; Round-half-up needs no precomputed constant: (x + 2^(s-1)) >> s carries into
 ; bit s exactly when bit s-1 of x was set, and that bit is what the final shift
 ; leaves in the carry flag. `dec b` and `jr nz` touch Z/N/H but not C, so the
 ; carry survives the loop and a chain of `adc a, 0` applies it.
-Requant_Shift:
+Requant_Shift::
     bit 7, a
     jr nz, .leftShift
     or a
     ret z
     ld b, a
 .right
-    ld a, [wTmp24 + 2]
+    ld a, [wTmp32 + 3]
     sra a                           ; arithmetic: preserves sign
-    ld [wTmp24 + 2], a
-    ld a, [wTmp24 + 1]
+    ld [wTmp32 + 3], a
+    ld a, [wTmp32 + 2]
     rra
-    ld [wTmp24 + 1], a
-    ld a, [wTmp24 + 0]
+    ld [wTmp32 + 2], a
+    ld a, [wTmp32 + 1]
     rra
-    ld [wTmp24 + 0], a
+    ld [wTmp32 + 1], a
+    ld a, [wTmp32 + 0]
+    rra
+    ld [wTmp32 + 0], a
     dec b
     jr nz, .right
 
-    ld a, [wTmp24 + 0]              ; carry still holds the last bit shifted out
+    ld a, [wTmp32 + 0]              ; carry still holds the last bit shifted out
     adc a, 0
-    ld [wTmp24 + 0], a
-    ld a, [wTmp24 + 1]
+    ld [wTmp32 + 0], a
+    ld a, [wTmp32 + 1]
     adc a, 0
-    ld [wTmp24 + 1], a
-    ld a, [wTmp24 + 2]
+    ld [wTmp32 + 1], a
+    ld a, [wTmp32 + 2]
     adc a, 0
-    ld [wTmp24 + 2], a
+    ld [wTmp32 + 2], a
+    ld a, [wTmp32 + 3]
+    adc a, 0
+    ld [wTmp32 + 3], a
     ret
 
 .leftShift
@@ -115,30 +137,37 @@ Requant_Shift:
     inc a                           ; a = -shift
     ld b, a
 .left
-    ld a, [wTmp24 + 0]
+    ld a, [wTmp32 + 0]
     add a, a
-    ld [wTmp24 + 0], a
-    ld a, [wTmp24 + 1]
+    ld [wTmp32 + 0], a
+    ld a, [wTmp32 + 1]
     adc a, a
-    ld [wTmp24 + 1], a
-    ld a, [wTmp24 + 2]
+    ld [wTmp32 + 1], a
+    ld a, [wTmp32 + 2]
     adc a, a
-    ld [wTmp24 + 2], a
+    ld [wTmp32 + 2], a
+    ld a, [wTmp32 + 3]
+    adc a, a
+    ld [wTmp32 + 3], a
     dec b
     jr nz, .left
     ret
 
-; Saturates wTmp24 into a, matching quant.py's sat8 range of [-127, 127].
-Requant_Sat8:
-    ld a, [wTmp24 + 0]
+; Saturates wTmp32 into a, matching quant.py's sat8 range of [-127, 127].
+; Clobbers b and c.
+Requant_Sat8::
+    ld a, [wTmp32 + 0]
     ld c, a
     add a, a
-    sbc a, a                        ; b = $FF if the low byte is negative, else $00
+    sbc a, a                        ; b = $FF if the low byte is negative
     ld b, a
-    ld a, [wTmp24 + 1]
+    ld a, [wTmp32 + 1]
     cp b
     jr nz, .clamp
-    ld a, [wTmp24 + 2]
+    ld a, [wTmp32 + 2]
+    cp b
+    jr nz, .clamp
+    ld a, [wTmp32 + 3]
     cp b
     jr nz, .clamp
     ld a, c                         ; the high bytes are pure sign extension
@@ -147,7 +176,7 @@ Requant_Sat8:
     ld a, -127                      ; -128 is outside the symmetric range
     ret
 .clamp
-    ld a, [wTmp24 + 2]
+    ld a, [wTmp32 + 3]
     bit 7, a
     ld a, 127
     ret z

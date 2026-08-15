@@ -10,6 +10,9 @@ tbl_sigmoid:: INCBIN "build/blobs/tbl_sigmoid.bin"   ; 256 bytes
 SECTION "tbl_exp", ROM0
 tbl_exp:: INCBIN "build/blobs/tbl_exp.bin"   ; 512 bytes
 
+SECTION "tbl_recip", ROM0
+tbl_recip:: INCBIN "build/blobs/tbl_recip.bin"   ; 512 bytes
+
 SECTION "tbl_rope", ROM0
 tbl_rope:: INCBIN "build/blobs/tbl_rope.bin"   ; 1024 bytes
 

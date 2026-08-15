@@ -40,8 +40,7 @@ wMvRem::    db                      ; ... plus remainder, so the inner loop can
                                     ; use an 8-bit counter and leave c free
 wMvXPtr::   dw                      ; input activation vector
 wMvCb::     dw                      ; codebook (16 int8 values)
-wMulA::     db
-wMulB::     db
+wMvNoZero:: db                      ; set to continue accumulating across banks
 
 SECTION "Matvec code", ROM0
 
@@ -96,7 +95,7 @@ Matvec_Zero::
 ; weights are 4-bit. It is also the single biggest remaining cost in the whole
 ; model (measured at ~202 cycles per table entry), and Phase 3's first target.
 Mul8x8::
-    ld a, [wMulA]
+    ld a, [wMulA8]
     ld c, 0                         ; counts negative operands
     bit 7, a
     jr z, :+
@@ -105,7 +104,7 @@ Mul8x8::
     inc c
 :   ld d, a                         ; |A|, the multiplier
 
-    ld a, [wMulB]
+    ld a, [wMulB8]
     bit 7, a
     jr z, :+
     cpl
@@ -141,7 +140,7 @@ ENDR
 
 ; Builds hLut for the activation in a: entry u = a * codebook[u] + MV_BIAS.
 Matvec_BuildLut::
-    ld [wMulB], a
+    ld [wMulB8], a
     ld a, [wMvCb + 0]
     ld l, a
     ld a, [wMvCb + 1]
@@ -150,7 +149,7 @@ Matvec_BuildLut::
     ld b, CB_LEVELS
 .entry
     ld a, [hl+]
-    ld [wMulA], a
+    ld [wMulA8], a
     push hl
     push bc
     call Mul8x8
@@ -230,7 +229,11 @@ Matvec_Run::
     ld [wMvWCur + 0], a
     ld a, [wMvW + 1]
     ld [wMvWCur + 1], a
+    ld a, [wMvNoZero]
+    or a
+    jr nz, :+
     call Matvec_Zero
+:
 
     ld a, [wMvXPtr + 0]
     ld l, a
