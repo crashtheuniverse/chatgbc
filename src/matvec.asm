@@ -35,9 +35,7 @@ wMvWCur:    dw                      ; working copy that walks forward through th
 wMvBank::   db                      ; ROM bank holding those weights
 wMvIn::     db                      ; number of inputs
 wMvOut::    dw                      ; number of outputs
-wMvFull::   db                      ; the same count as 256-blocks ...
-wMvRem::    db                      ; ... plus remainder, so the inner loop can
-                                    ; use an 8-bit counter and leave c free
+wMvGroups:: db                      ; the same count in groups of four
 wMvXPtr::   dw                      ; input activation vector
 wMvLutBank:: db                     ; ROM bank of this matrix's product tables
 wMvLutAddr:: dw                     ; base of the 256 precomputed tables
@@ -56,15 +54,21 @@ CopyBytes::
     jr nz, CopyBytes
     ret
 
-; Splits wMvOut into whole 256-blocks plus a remainder, so Matvec_Chunk can
-; count with b alone and leave c free for the HRAM table index.
+; hl = number of outputs. The inner loop runs four outputs per iteration, so it
+; counts groups of four - and every count the model uses (32, 64, 172, 512) is a
+; multiple of four, which also keeps the group count inside a single 8-bit
+; register and leaves c free for the HRAM table index.
 Matvec_SetOut::
     ld a, l
     ld [wMvOut + 0], a
-    ld [wMvRem], a
     ld a, h
     ld [wMvOut + 1], a
-    ld [wMvFull], a
+    srl h
+    rr l
+    srl h
+    rr l                            ; hl = outputs / 4
+    ld a, l
+    ld [wMvGroups], a
     ret
 
 Matvec_Zero::
@@ -119,9 +123,21 @@ ENDR
     ld [rROMB0], a
     ret
 
-; hl = accumulators, de = weights, b = outputs this chunk (0 means 256).
-; 26 M-cycles per MAC.
-Matvec_Chunk:
+; One pass over every output for a single input: acc[i] += hLut[w[i]].
+;
+; 24 M-cycles per MAC. Four outputs per iteration so `dec b` / `jr nz` costs one
+; cycle per MAC instead of four; every output count in the model is a multiple
+; of four, so no remainder path is needed.
+Matvec_AddRow:
+    ld hl, wAcc
+    ld a, [wMvWCur + 0]
+    ld e, a
+    ld a, [wMvWCur + 1]
+    ld d, a
+    ld a, [wMvGroups]
+    ld b, a
+.group
+REPT 4
     ld a, [de]                      ; 2  weight index, already an HRAM offset
     inc de                          ; 2
     ld c, a                         ; 1
@@ -135,36 +151,10 @@ Matvec_Chunk:
     ld a, [hl]                      ; 2
     adc a, 0                        ; 2  unsigned products, so no sign extension
     ld [hl+], a                     ; 2
+ENDR
     dec b                           ; 1
-    jr nz, Matvec_Chunk             ; 3
-    ret
+    jr nz, .group                   ; 3
 
-; One pass over every output for a single input.
-Matvec_AddRow:
-    ld hl, wAcc
-    ld a, [wMvWCur + 0]
-    ld e, a
-    ld a, [wMvWCur + 1]
-    ld d, a
-
-    ld a, [wMvFull]
-    or a
-    jr z, .remainder
-    ld c, a
-.block
-    push bc
-    ld b, 0                         ; 0 counts as 256
-    call Matvec_Chunk
-    pop bc
-    dec c
-    jr nz, .block
-.remainder
-    ld a, [wMvRem]
-    or a
-    jr z, .save
-    ld b, a
-    call Matvec_Chunk
-.save
     ld a, e
     ld [wMvWCur + 0], a
     ld a, d
