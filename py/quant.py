@@ -294,7 +294,8 @@ def row_exponents(mat, base_exp):
     return np.array([exp_for(r) - base_exp if r > 0 else 0 for r in rows], dtype=np.int8)
 
 
-def quantize_model(model, sites, weight_bits=8, bits_override=None, uniform=False):
+def quantize_model(model, sites, weight_bits=8, bits_override=None, uniform=False,
+                   fixed_codebook=None):
     """`bits_override` sets per-tensor widths. The classifier is the natural
     exception: with 512 outputs it amortizes a 256-entry product table down to
     ~8 cycles/MAC, so 8-bit costs little there and it is what decides argmax."""
@@ -323,7 +324,12 @@ def quantize_model(model, sites, weight_bits=8, bits_override=None, uniform=Fals
         rex = np.stack([row_exponents(arr[l], e) for l in range(arr.shape[0])]) \
             if arr.ndim == 3 else row_exponents(arr, e)
         scaled = arr / 2.0 ** (e + rex[..., None].astype(np.float64))
-        cb = uniform_codebook(1 << bits) if uniform else lloyd_max(scaled, 1 << bits, 0)
+        if fixed_codebook is not None:
+            cb = fixed_codebook
+        elif uniform:
+            cb = uniform_codebook(1 << bits)
+        else:
+            cb = lloyd_max(scaled, 1 << bits, 0)
         idx = quantize_to_codebook(scaled, cb, 0)
         assert idx.max() < (1 << bits)
         q.codebooks[name], q.indices[name], q.rowexp[name] = cb, idx, rex
