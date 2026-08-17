@@ -13,7 +13,15 @@ DEF CON_SIZE   EQU CON_W * CON_H          ; 576 bytes = 36 GDMA blocks
 DEF FONT_FIRST EQU 32                     ; VRAM tile N holds ASCII N + 32
 
 ; --- Model arithmetic -------------------------------------------------------
-DEF ACC_BYTES EQU 3                 ; int24 matvec accumulators
+; Products are halved in the exported tables, which keeps the running sum inside
+; signed 16-bit. That drops the third accumulator byte from the inner loop and
+; removes the bias correction from requantization.
+DEF ACC_BYTES EQU 2
+
+; Attention scores are a separate width and must not be tied to ACC_BYTES: a
+; score is q.k over HEAD_SIZE terms, up to 8 * 127 * 127 = 129,032, so it needs
+; 24 bits regardless of how wide the matvec accumulator happens to be.
+DEF SCORE_BYTES EQU 3
 
 ; --- Profiler ---------------------------------------------------------------
 ; TAC_16KHZ makes TIMA tick once per 64 M-cycles. That ratio is fixed to the CPU

@@ -101,7 +101,7 @@ def product_lut(codebook):
     out = bytearray()
     for x in range(-128, 128):
         for w in codebook:
-            out += int(x * int(w) + BIAS).to_bytes(2, "little")
+            out += int(Q.shr_round(x * int(w), Q.ACC_SHIFT)).to_bytes(2, "little", signed=True)
     assert len(out) == 256 * 16 * 2
     return bytes(out)
 
@@ -191,7 +191,7 @@ def main():
         for l in range(c.n_layers):
             weight_blob(f"{name}_l{l}", q.indices[name][l])
             to_exp = S("x") if out_site[name] == "x" else S(out_site[name], l)
-            base = to_exp - q.e(name) - S(in_site[name], l)
+            base = to_exp - q.e(name) - S(in_site[name], l) - Q.ACC_SHIFT
             blob(f"{name}_sh_l{l}", sbytes(base - q.rowexp[name][l]))
 
     # --- per-layer shifts for the nonlinearities ---
@@ -215,11 +215,15 @@ def main():
     blob("vocab_off", np.array(offsets, dtype="<u2").tobytes())
 
     # --- a matvec+requant case the ROM can be checked against bit-exactly ---
-    rng = np.random.default_rng(1234)
-    tx = rng.integers(-127, 128, size=c.dim).astype(np.int8)
+    # A real post-RMSNorm activation, not uniform noise: the kernel should be
+    # checked on the distribution it actually sees.
+    tok0 = tok.encode("Once upon a time")[0]
+    x0 = Q.requant(q.w("tok_emb")[tok0].astype(np.int32),
+                   q.e("tok_emb") + int(q.rex("tok_emb")[tok0]), S("x"))
+    tx = Q.rmsnorm(x0, q.w("rms_ffn", 0), q.e("rms_ffn"), S("xb_ffn", 0))
     blob("test_x", tx.tobytes())
     acc = Q.matvec(q.weights["w1"][0], tx)
-    want = Q.requant_rows(acc, q.e("w1") + S("xb_ffn", 0), q.rowexp["w1"][0], S("h1", 0))
+    want = Q.requant_rows(acc, q.e("w1") + S("xb_ffn", 0) + Q.ACC_SHIFT, q.rowexp["w1"][0], S("h1", 0))
     blob("test_h1", want.astype(np.int8).tobytes())
     print(f"test matvec w1[0]: {c.hidden_dim}x{c.dim}, h1 range {want.min()}..{want.max()}")
 

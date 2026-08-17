@@ -25,7 +25,14 @@ import numpy as np
 import reference as ref
 
 QMAX = 127
-ACC_MAX = (1 << 23) - 1          # int24 accumulator range the ROM provides
+# Products are halved before accumulating, which keeps the running sum inside
+# signed 16-bit and lets the kernel drop the third accumulator byte entirely.
+# The cost is one bit per product, rounded at export time: over 172 terms that
+# is ~4 of accumulator error against a requantization LSB of ~32. Two bits, not
+# one: one bit fits real activations (peak 20,767 of 32,767) but not an adversarial
+# uniform-random vector, and the extra bit costs nothing measurable.
+ACC_SHIFT = 2
+ACC_MAX = (1 << 15) - 1          # signed int16, the accumulator the ROM provides
 SIG_SHIFT = 4                    # sigmoid table input is Q4.4, i.e. +/-8.0
 SIG_BITS = 8                     # sigmoid table output is Q0.8
 EXP_BITS = 12                    # softmax exp table output is Q0.12
@@ -120,9 +127,10 @@ def matvec(w, x, acc_check=True):
     of x[j] * w for every possible weight byte, then sweeps the outputs adding
     table lookups into int24 accumulators.
     """
-    acc = w.astype(np.int32) @ x.astype(np.int32)
+    prod = w.astype(np.int64) * x.astype(np.int64)[None, :]
+    acc = shr_round(prod, ACC_SHIFT).sum(axis=1)
     if acc_check and np.abs(acc).max() > ACC_MAX:
-        raise OverflowError(f"accumulator {np.abs(acc).max()} exceeds int24")
+        raise OverflowError(f"accumulator {np.abs(acc).max()} exceeds int16")
     return acc
 
 
@@ -395,9 +403,9 @@ def forward_q(q, state, token, pos, rtbl):
         xb = rmsnorm(x, q.w("rms_att", l), q.e("rms_att"), exb)
 
         eq_, ek_, ev_ = q.site("q", l), q.site("k", l), q.site("v", l)
-        qv = requant_rows(matvec(q.w("wq", l), xb), q.e("wq") + exb, q.rex("wq", l), eq_)
-        kv = requant_rows(matvec(q.w("wk", l), xb), q.e("wk") + exb, q.rex("wk", l), ek_)
-        vv = requant_rows(matvec(q.w("wv", l), xb), q.e("wv") + exb, q.rex("wv", l), ev_)
+        qv = requant_rows(matvec(q.w("wq", l), xb), q.e("wq") + exb + ACC_SHIFT, q.rex("wq", l), eq_)
+        kv = requant_rows(matvec(q.w("wk", l), xb), q.e("wk") + exb + ACC_SHIFT, q.rex("wk", l), ek_)
+        vv = requant_rows(matvec(q.w("wv", l), xb), q.e("wv") + exb + ACC_SHIFT, q.rex("wv", l), ev_)
 
         qv = rope_q(qv, pos, rtbl)
         kv = rope_q(kv, pos, rtbl)
@@ -415,18 +423,18 @@ def forward_q(q, state, token, pos, rtbl):
             acc = (att[:, None] * vals).sum(axis=0)
             xb2[h * hs : (h + 1) * hs] = sat8(rescale(acc, ev_ - EXP_BITS, eout))
 
-        wo = requant_rows(matvec(q.w("wo", l), xb2), q.e("wo") + eout, q.rex("wo", l), ex)
+        wo = requant_rows(matvec(q.w("wo", l), xb2), q.e("wo") + eout + ACC_SHIFT, q.rex("wo", l), ex)
         x = add_requant(x, ex, wo, ex, ex)
 
         exf = q.site("xb_ffn", l)
         xb = rmsnorm(x, q.w("rms_ffn", l), q.e("rms_ffn"), exf)
 
         e1, e3, eh = q.site("h1", l), q.site("h3", l), q.site("hb", l)
-        h1 = requant_rows(matvec(q.w("w1", l), xb), q.e("w1") + exf, q.rex("w1", l), e1)
-        h3 = requant_rows(matvec(q.w("w3", l), xb), q.e("w3") + exf, q.rex("w3", l), e3)
+        h1 = requant_rows(matvec(q.w("w1", l), xb), q.e("w1") + exf + ACC_SHIFT, q.rex("w1", l), e1)
+        h3 = requant_rows(matvec(q.w("w3", l), xb), q.e("w3") + exf + ACC_SHIFT, q.rex("w3", l), e3)
         hb = silu_mul(h1, e1, h3, e3, eh)
 
-        w2 = requant_rows(matvec(q.w("w2", l), hb), q.e("w2") + eh, q.rex("w2", l), ex)
+        w2 = requant_rows(matvec(q.w("w2", l), hb), q.e("w2") + eh + ACC_SHIFT, q.rex("w2", l), ex)
         x = add_requant(x, ex, w2, ex, ex)
 
     xf = rmsnorm(x, q.w("rms_final"), q.e("rms_final"), q.site("xb_final", 0))

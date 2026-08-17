@@ -112,9 +112,35 @@ Console_NewLine::
     inc a
     cp CON_H
     jr c, .store
-    ld a, CON_H - 1             ; Phase 0 does not scroll; clamp to the last row
+    call Console_Scroll         ; stay on the last row, move everything else up
+    ld a, CON_H - 1
 .store
     ld [wCursorY], a
+    ret
+
+; Shifts the shadow buffer up one row and blanks the bottom one. The rows are
+; contiguous in the shadow (stride CON_W), so this is one forward copy, and the
+; next flush pushes the result out with the usual single GDMA.
+Console_Scroll::
+    ld de, wConsole
+    ld hl, wConsole + CON_W
+    ld bc, (CON_H - 1) * CON_W
+.move
+    ld a, [hl+]
+    ld [de], a
+    inc de
+    dec bc
+    ld a, b
+    or c
+    jr nz, .move
+
+    ld hl, wConsole + (CON_H - 1) * CON_W
+    ld b, CON_W
+    ld a, ' ' - FONT_FIRST
+.blank
+    ld [hl+], a
+    dec b
+    jr nz, .blank
     ret
 
 ; hl = pointer to a $00-terminated string.

@@ -13,10 +13,10 @@
 ;   reaches HRAM with one 8-bit register, freeing hl for the accumulators and
 ;   their `ld [hl+], a` auto-increment.
 ;
-; * The table is biased so entries are unsigned. A signed product would need
-;   sign extension into the third accumulator byte and there is no register left
-;   to hold it; unsigned makes that byte a plain `adc a, 0`. The result carries
-;   nIn * MV_BIAS, removed once per matvec by Requant rather than once per MAC.
+; * Table entries are signed and pre-halved, so the accumulator fits signed
+;   16-bit and there is no third byte and no bias to unwind. Two's-complement
+;   add works identically for signed and unsigned, so the loop is unchanged
+;   apart from being shorter.
 ;
 ; * The carry from the low add survives the high-byte fetch, because `inc c` is
 ;   an 8-bit increment and those leave C alone on SM83.
@@ -76,10 +76,7 @@ Matvec_Zero::
     ld l, a
     ld a, [wMvOut + 1]
     ld h, a
-    ld d, h
-    ld e, l
-    add hl, de
-    add hl, de                      ; hl = outputs * ACC_BYTES
+    add hl, hl                      ; hl = outputs * ACC_BYTES
     ld b, h
     ld c, l
     ld hl, wAcc
@@ -125,7 +122,7 @@ ENDR
 
 ; One pass over every output for a single input: acc[i] += hLut[w[i]].
 ;
-; 24 M-cycles per MAC. Four outputs per iteration so `dec b` / `jr nz` costs one
+; 19 M-cycles per MAC. Four outputs per iteration so `dec b` / `jr nz` costs one
 ; cycle per MAC instead of four; every output count in the model is a multiple
 ; of four, so no remainder path is needed.
 Matvec_AddRow:
@@ -147,9 +144,6 @@ REPT 4
     inc c                           ; 1  8-bit inc: leaves carry intact
     ldh a, [c]                      ; 2  product high byte
     adc a, [hl]                     ; 2
-    ld [hl+], a                     ; 2
-    ld a, [hl]                      ; 2
-    adc a, 0                        ; 2  unsigned products, so no sign extension
     ld [hl+], a                     ; 2
 ENDR
     dec b                           ; 1

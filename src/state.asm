@@ -21,7 +21,7 @@ wQ::     ds DIM
 wH1::    ds HIDDEN
 wH3::    ds HIDDEN
 wHb::    ds HIDDEN
-wScores:: ds SEQ_LEN * ACC_BYTES    ; raw attention scores, int24
+wScores:: ds SEQ_LEN * SCORE_BYTES  ; raw attention scores, int24
 wAtt::   ds SEQ_LEN * 2             ; softmax weights, Q0.12
 wCbBuf:: ds CB_LEVELS               ; working copy of the active codebook
 wTmp32:: ds 4                       ; shared signed scratch
@@ -35,27 +35,9 @@ wRqCnt:: dw
 
 SECTION "Requant code", ROM0
 
-; The matvec accumulates nIn * MV_BIAS. MV_BIAS is 1<<14, so the correction is
-; just nIn shifted left 14 - no multiply.
+; Nothing to unwind: the exported tables are signed and pre-halved, so the
+; accumulator is a plain signed 16-bit sum.
 Requant_SetBias::
-    ld a, [wMvIn]
-    ld b, a
-    xor a
-    ld [wBias + 0], a               ; low byte is always zero
-    ld a, b
-    rrca
-    rrca
-    and %00111111
-    ld [wBias + 2], a               ; nIn >> 2
-    ld a, b
-    rlca
-    rlca
-    rlca
-    rlca
-    rlca
-    rlca
-    and %11000000
-    ld [wBias + 1], a               ; (nIn << 6) & $FF
     ret
 
 ; Sign-extends wTmp32's third byte into the fourth.
@@ -66,27 +48,17 @@ Tmp32_SignExtend::
     ld [wTmp32 + 3], a
     ret
 
-; hl -> accumulator slot. Loads it into wTmp32 minus the bias, leaving a signed
-; value, and advances hl past the slot.
+; hl -> accumulator slot. Sign-extends the signed 16-bit accumulator into
+; wTmp32 and advances hl past the slot.
 Requant_LoadUnbiased::
-    ld a, [wBias + 0]
-    ld c, a
     ld a, [hl+]
-    sub a, c
     ld [wTmp32 + 0], a
-    ld a, [wBias + 1]
-    ld c, a
     ld a, [hl+]
-    sbc a, c
     ld [wTmp32 + 1], a
-    ld a, [wBias + 2]
-    ld c, a
-    ld a, [hl+]
-    sbc a, c
+    add a, a                        ; carry = bit 15
+    sbc a, a                        ; $FF if negative, else $00
     ld [wTmp32 + 2], a
-    push hl
-    call Tmp32_SignExtend
-    pop hl
+    ld [wTmp32 + 3], a
     ret
 
 ; Shifts wTmp32 by the signed count in a. Negative shifts left.
