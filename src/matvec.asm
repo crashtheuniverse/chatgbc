@@ -91,10 +91,18 @@ Matvec_Zero::
 
 ; Loads hLut with the product table for the activation in a.
 ;
-; Every table this could ever need is already in ROM - the operands are the
-; activation and the matrix's codebook, both known at export time - so this is a
-; 32-byte copy instead of sixteen shift-add multiplies. That trade is the whole
-; point: ROM is abundant here and cycles are not. ~190 cycles against ~3,200.
+; Every table this could ever need is already in ROM. The operands are the
+; activation and the matrix's codebook, both known at export time, and there are
+; only 256 possible activations - so py/export.py emits all 256 tables per
+; matrix (8 KB each) and this becomes a 32-byte copy instead of sixteen
+; shift-add multiplies. ~190 cycles against ~3,200. ROM is abundant here (368 KB
+; of 8 MB) and cycles are not.
+;
+; Entries are `round(x * codebook[u] / 4)`, signed. The division by four is what
+; lets the accumulator be 16-bit: without it the running sum peaks at 41,534
+; against int16's 32,767. Two bits rather than one because one bit covers real
+; activations (peak 20,767) but not an adversarial uniform-random vector, and
+; the extra bit costs ~4 accumulator units against a requant LSB of ~32.
 Matvec_BuildLut::
     add a, 128                      ; signed activation -> unsigned table index
     ld l, a

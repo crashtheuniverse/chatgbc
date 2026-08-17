@@ -388,7 +388,7 @@ class QState:
         self.v = np.zeros((cfg.n_layers, seq_len, cfg.kv_dim), dtype=np.int8)
 
 
-def forward_q(q, state, token, pos, rtbl):
+def forward_q(q, state, token, pos, rtbl, window=None):
     """Integer-only decode step. Returns int32 logits; greedy decode just needs
     their argmax, so the ROM never has to store or rescale them."""
     c = q.cfg
@@ -416,9 +416,11 @@ def forward_q(q, state, token, pos, rtbl):
         for h in range(c.n_heads):
             qh = qv[h * hs : (h + 1) * hs].astype(np.int32)
             base = (h // kvm) * hs
-            keys = state.k[l, : pos + 1, base : base + hs].astype(np.int32)
+            # A sliding window drops the oldest positions instead of growing.
+            lo = 0 if window is None else max(0, pos + 1 - window)
+            keys = state.k[l, lo : pos + 1, base : base + hs].astype(np.int32)
             att = softmax_weights(keys @ qh, eq_ + ek_)
-            vals = state.v[l, : pos + 1, base : base + hs].astype(np.int64)
+            vals = state.v[l, lo : pos + 1, base : base + hs].astype(np.int64)
             # sum(att) == 1<<EXP_BITS, so this stays inside int24.
             acc = (att[:, None] * vals).sum(axis=0)
             xb2[h * hs : (h + 1) * hs] = sat8(rescale(acc, ev_ - EXP_BITS, eout))
@@ -528,14 +530,14 @@ def calibrate(model, prompts=CAL_PROMPTS, steps=64, seq_len=64, headroom=1.15):
     return {k: Site(exp_for(v * headroom), v) for k, v in obs.items()}
 
 
-def generate_q(q, tokenizer, prompt="", steps=64, seq_len=64):
+def generate_q(q, tokenizer, prompt="", steps=64, seq_len=64, window=None):
     state = QState(q.cfg, seq_len)
     rtbl = rope_table(seq_len, q.cfg.head_size)
     toks = tokenizer.encode(prompt)
     token = toks[0]
 
     for pos in range(min(steps, seq_len)):
-        logits = forward_q(q, state, token, pos, rtbl)
+        logits = forward_q(q, state, token, pos, rtbl, window)
         nxt = toks[pos + 1] if pos + 1 < len(toks) else int(logits.argmax())
         if nxt == ref.EOS:
             break
