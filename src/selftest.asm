@@ -12,14 +12,12 @@ INCLUDE "model.inc"
 SECTION "Selftest code", ROM0
 
 Selftest_Setup::
-    ld hl, cb_w1
-    ld de, wCbBuf
-    ld bc, CB_LEVELS
-    call CopyBytes
-    ld a, LOW(wCbBuf)
-    ld [wMvCb + 0], a
-    ld a, HIGH(wCbBuf)
-    ld [wMvCb + 1], a
+    ld a, BANK(lut_w1)
+    ld [wMvLutBank], a
+    ld a, LOW(lut_w1)
+    ld [wMvLutAddr + 0], a
+    ld a, HIGH(lut_w1)
+    ld [wMvLutAddr + 1], a
 
     ld hl, test_x
     ld de, wXb

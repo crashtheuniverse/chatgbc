@@ -86,6 +86,26 @@ def sbytes(values):
     return bytes(int(v) & 0xFF for v in values)
 
 
+def product_lut(codebook):
+    """Every product table the matvec could ever need, precomputed.
+
+    The table for input j is `x[j] * cb[u] + BIAS` for the 16 codebook entries.
+    Both operands are known at export time, so all 256 possible tables fit in
+    8 KB of ROM and the kernel's per-input work collapses from sixteen shift-add
+    multiplies (~3,200 cycles) to a 32-byte copy into HRAM (~200). ROM is the
+    one resource this project has in abundance; cycles are the scarce one.
+
+    Indexed by `(x + 128) * 32`, so a signed activation becomes an offset with
+    one add. Entries stay unsigned: |x*cb| <= 16256 < BIAS.
+    """
+    out = bytearray()
+    for x in range(-128, 128):
+        for w in codebook:
+            out += int(x * int(w) + BIAS).to_bytes(2, "little")
+    assert len(out) == 256 * 16 * 2
+    return bytes(out)
+
+
 def main():
     BLOBS.mkdir(parents=True, exist_ok=True)
     model, tok = ref.Model(), ref.Tokenizer()
@@ -148,7 +168,7 @@ def main():
     const("CLS_INPUTS_PER_PART", per)
     rex = q.rowexp["tok_emb"].astype(np.int32)
     blob("cls_lshift", sbytes(rex - rex.min()))
-    blob("cb_cls", q.codebooks["tok_emb"].astype(np.int8).tobytes())
+    blob("lut_cls", product_lut(q.codebooks["tok_emb"]), rom0=False)
 
     # --- rmsnorm gains (kept int8; 320 bytes total and outside every hot loop) ---
     for name, shift_name in (("rms_att", "RMSATT"), ("rms_ffn", "RMSFFN")):
@@ -167,7 +187,7 @@ def main():
     in_site = {"wq": "xb_att", "wk": "xb_att", "wv": "xb_att", "wo": "att_out",
                "w1": "xb_ffn", "w2": "hb", "w3": "xb_ffn"}
     for name in MATS:
-        blob(f"cb_{name}", q.codebooks[name].astype(np.int8).tobytes())
+        blob(f"lut_{name}", product_lut(q.codebooks[name]), rom0=False)
         for l in range(c.n_layers):
             weight_blob(f"{name}_l{l}", q.indices[name][l])
             to_exp = S("x") if out_site[name] == "x" else S(out_site[name], l)
@@ -223,6 +243,8 @@ def main():
         lines.append(f"{name}_addrs:: dw " + ", ".join(f"{name}_l{l}" for l in range(c.n_layers)))
         lines.append(f"{name}_shifts:: dw " + ", ".join(f"{name}_sh_l{l}" for l in range(c.n_layers)))
         lines.append(f"{name}_shbanks:: db " + ", ".join(f"BANK({name}_sh_l{l})" for l in range(c.n_layers)))
+        lines.append(f"{name}_lutbank:: db BANK(lut_{name})")
+        lines.append(f"{name}_lutaddr:: dw lut_{name}")
     lines.append("")
 
     WEIGHTS_ASM.write_text("\n".join(lines), encoding="utf-8")

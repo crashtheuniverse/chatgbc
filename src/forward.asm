@@ -26,16 +26,14 @@ SECTION "Forward code", ROM0
 
 ; --- matvec plumbing -------------------------------------------------------
 
-; Loads a codebook from ROM0 into the working buffer.
-;   hl = codebook
-SetCodebook:
-    ld de, wCbBuf
-    ld bc, CB_LEVELS
-    call CopyBytes
-    ld a, LOW(wCbBuf)
-    ld [wMvCb + 0], a
-    ld a, HIGH(wCbBuf)
-    ld [wMvCb + 1], a
+; Points the matvec at a matrix's precomputed product tables.
+;   a = bank, hl = base address
+SetLut:
+    ld [wMvLutBank], a
+    ld a, l
+    ld [wMvLutAddr + 0], a
+    ld a, h
+    ld [wMvLutAddr + 1], a
     ret
 
 ; Points the matvec at one (tensor, layer) chunk.
@@ -110,8 +108,9 @@ ForwardLayer::
     ld a, DIM
     ld [wMvIn], a
 
-    ld hl, cb_wq
-    call SetCodebook
+    ld a, BANK(lut_wq)
+    ld hl, lut_wq
+    call SetLut
     ld hl, wq_banks
     ld de, wq_addrs
     ld a, [wLayer]
@@ -127,8 +126,9 @@ ForwardLayer::
     ld bc, wQ
     call Requant_All
 
-    ld hl, cb_wk
-    call SetCodebook
+    ld a, BANK(lut_wk)
+    ld hl, lut_wk
+    call SetLut
     ld hl, wk_banks
     ld de, wk_addrs
     ld a, [wLayer]
@@ -144,8 +144,9 @@ ForwardLayer::
     ld bc, wKvec
     call Requant_All
 
-    ld hl, cb_wv
-    call SetCodebook
+    ld a, BANK(lut_wv)
+    ld hl, lut_wv
+    call SetLut
     ld hl, wv_banks
     ld de, wv_addrs
     ld a, [wLayer]
@@ -202,8 +203,9 @@ ForwardLayer::
     call SetXPtr
     ld a, DIM
     ld [wMvIn], a
-    ld hl, cb_wo
-    call SetCodebook
+    ld a, BANK(lut_wo)
+    ld hl, lut_wo
+    call SetLut
     ld hl, wo_banks
     ld de, wo_addrs
     ld a, [wLayer]
@@ -258,8 +260,9 @@ ForwardLayer::
     ld a, DIM
     ld [wMvIn], a
 
-    ld hl, cb_w1
-    call SetCodebook
+    ld a, BANK(lut_w1)
+    ld hl, lut_w1
+    call SetLut
     ld hl, w1_banks
     ld de, w1_addrs
     ld a, [wLayer]
@@ -275,8 +278,9 @@ ForwardLayer::
     ld bc, wH1
     call Requant_All
 
-    ld hl, cb_w3
-    call SetCodebook
+    ld a, BANK(lut_w3)
+    ld hl, lut_w3
+    call SetLut
     ld hl, w3_banks
     ld de, w3_addrs
     ld a, [wLayer]
@@ -315,8 +319,9 @@ ForwardLayer::
     call SetXPtr
     ld a, HIDDEN
     ld [wMvIn], a
-    ld hl, cb_w2
-    call SetCodebook
+    ld a, BANK(lut_w2)
+    ld hl, lut_w2
+    call SetLut
     ld hl, w2_banks
     ld de, w2_addrs
     ld a, [wLayer]
@@ -462,8 +467,9 @@ Forward::
 ; have to be stored. Each vocabulary row carries its own scale, so the raw
 ; accumulators are not comparable until the row shift is applied.
 Classify::
-    ld hl, cb_cls
-    call SetCodebook
+    ld a, BANK(lut_cls)
+    ld hl, lut_cls
+    call SetLut
     ld hl, VOCAB
     call Matvec_SetOut
 

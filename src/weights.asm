@@ -34,8 +34,8 @@ cls_w_p1:: INCBIN "build/blobs/cls_w_p1.bin"   ; 16384 bytes
 SECTION "cls_lshift", ROM0
 cls_lshift:: INCBIN "build/blobs/cls_lshift.bin"   ; 512 bytes
 
-SECTION "cb_cls", ROM0
-cb_cls:: INCBIN "build/blobs/cb_cls.bin"   ; 16 bytes
+SECTION "lut_cls", ROMX
+lut_cls:: INCBIN "build/blobs/lut_cls.bin"   ; 8192 bytes
 
 SECTION "rms_att", ROM0
 rms_att:: INCBIN "build/blobs/rms_att.bin"   ; 320 bytes
@@ -52,8 +52,8 @@ rmsatt_shift:: INCBIN "build/blobs/rmsatt_shift.bin"   ; 5 bytes
 SECTION "rmsffn_shift", ROM0
 rmsffn_shift:: INCBIN "build/blobs/rmsffn_shift.bin"   ; 5 bytes
 
-SECTION "cb_wq", ROM0
-cb_wq:: INCBIN "build/blobs/cb_wq.bin"   ; 16 bytes
+SECTION "lut_wq", ROMX
+lut_wq:: INCBIN "build/blobs/lut_wq.bin"   ; 8192 bytes
 
 SECTION "wq_l0", ROMX
 wq_l0:: INCBIN "build/blobs/wq_l0.bin"   ; 4096 bytes
@@ -85,8 +85,8 @@ wq_l4:: INCBIN "build/blobs/wq_l4.bin"   ; 4096 bytes
 SECTION "wq_sh_l4", ROM0
 wq_sh_l4:: INCBIN "build/blobs/wq_sh_l4.bin"   ; 64 bytes
 
-SECTION "cb_wk", ROM0
-cb_wk:: INCBIN "build/blobs/cb_wk.bin"   ; 16 bytes
+SECTION "lut_wk", ROMX
+lut_wk:: INCBIN "build/blobs/lut_wk.bin"   ; 8192 bytes
 
 SECTION "wk_l0", ROMX
 wk_l0:: INCBIN "build/blobs/wk_l0.bin"   ; 2048 bytes
@@ -118,8 +118,8 @@ wk_l4:: INCBIN "build/blobs/wk_l4.bin"   ; 2048 bytes
 SECTION "wk_sh_l4", ROM0
 wk_sh_l4:: INCBIN "build/blobs/wk_sh_l4.bin"   ; 32 bytes
 
-SECTION "cb_wv", ROM0
-cb_wv:: INCBIN "build/blobs/cb_wv.bin"   ; 16 bytes
+SECTION "lut_wv", ROMX
+lut_wv:: INCBIN "build/blobs/lut_wv.bin"   ; 8192 bytes
 
 SECTION "wv_l0", ROMX
 wv_l0:: INCBIN "build/blobs/wv_l0.bin"   ; 2048 bytes
@@ -151,8 +151,8 @@ wv_l4:: INCBIN "build/blobs/wv_l4.bin"   ; 2048 bytes
 SECTION "wv_sh_l4", ROM0
 wv_sh_l4:: INCBIN "build/blobs/wv_sh_l4.bin"   ; 32 bytes
 
-SECTION "cb_wo", ROM0
-cb_wo:: INCBIN "build/blobs/cb_wo.bin"   ; 16 bytes
+SECTION "lut_wo", ROMX
+lut_wo:: INCBIN "build/blobs/lut_wo.bin"   ; 8192 bytes
 
 SECTION "wo_l0", ROMX
 wo_l0:: INCBIN "build/blobs/wo_l0.bin"   ; 4096 bytes
@@ -184,8 +184,8 @@ wo_l4:: INCBIN "build/blobs/wo_l4.bin"   ; 4096 bytes
 SECTION "wo_sh_l4", ROM0
 wo_sh_l4:: INCBIN "build/blobs/wo_sh_l4.bin"   ; 64 bytes
 
-SECTION "cb_w1", ROM0
-cb_w1:: INCBIN "build/blobs/cb_w1.bin"   ; 16 bytes
+SECTION "lut_w1", ROMX
+lut_w1:: INCBIN "build/blobs/lut_w1.bin"   ; 8192 bytes
 
 SECTION "w1_l0", ROMX
 w1_l0:: INCBIN "build/blobs/w1_l0.bin"   ; 11008 bytes
@@ -217,8 +217,8 @@ w1_l4:: INCBIN "build/blobs/w1_l4.bin"   ; 11008 bytes
 SECTION "w1_sh_l4", ROM0
 w1_sh_l4:: INCBIN "build/blobs/w1_sh_l4.bin"   ; 172 bytes
 
-SECTION "cb_w2", ROM0
-cb_w2:: INCBIN "build/blobs/cb_w2.bin"   ; 16 bytes
+SECTION "lut_w2", ROMX
+lut_w2:: INCBIN "build/blobs/lut_w2.bin"   ; 8192 bytes
 
 SECTION "w2_l0", ROMX
 w2_l0:: INCBIN "build/blobs/w2_l0.bin"   ; 11008 bytes
@@ -250,8 +250,8 @@ w2_l4:: INCBIN "build/blobs/w2_l4.bin"   ; 11008 bytes
 SECTION "w2_sh_l4", ROM0
 w2_sh_l4:: INCBIN "build/blobs/w2_sh_l4.bin"   ; 64 bytes
 
-SECTION "cb_w3", ROM0
-cb_w3:: INCBIN "build/blobs/cb_w3.bin"   ; 16 bytes
+SECTION "lut_w3", ROMX
+lut_w3:: INCBIN "build/blobs/lut_w3.bin"   ; 8192 bytes
 
 SECTION "w3_l0", ROMX
 w3_l0:: INCBIN "build/blobs/w3_l0.bin"   ; 11008 bytes
@@ -315,27 +315,41 @@ wq_banks:: db BANK(wq_l0), BANK(wq_l1), BANK(wq_l2), BANK(wq_l3), BANK(wq_l4)
 wq_addrs:: dw wq_l0, wq_l1, wq_l2, wq_l3, wq_l4
 wq_shifts:: dw wq_sh_l0, wq_sh_l1, wq_sh_l2, wq_sh_l3, wq_sh_l4
 wq_shbanks:: db BANK(wq_sh_l0), BANK(wq_sh_l1), BANK(wq_sh_l2), BANK(wq_sh_l3), BANK(wq_sh_l4)
+wq_lutbank:: db BANK(lut_wq)
+wq_lutaddr:: dw lut_wq
 wk_banks:: db BANK(wk_l0), BANK(wk_l1), BANK(wk_l2), BANK(wk_l3), BANK(wk_l4)
 wk_addrs:: dw wk_l0, wk_l1, wk_l2, wk_l3, wk_l4
 wk_shifts:: dw wk_sh_l0, wk_sh_l1, wk_sh_l2, wk_sh_l3, wk_sh_l4
 wk_shbanks:: db BANK(wk_sh_l0), BANK(wk_sh_l1), BANK(wk_sh_l2), BANK(wk_sh_l3), BANK(wk_sh_l4)
+wk_lutbank:: db BANK(lut_wk)
+wk_lutaddr:: dw lut_wk
 wv_banks:: db BANK(wv_l0), BANK(wv_l1), BANK(wv_l2), BANK(wv_l3), BANK(wv_l4)
 wv_addrs:: dw wv_l0, wv_l1, wv_l2, wv_l3, wv_l4
 wv_shifts:: dw wv_sh_l0, wv_sh_l1, wv_sh_l2, wv_sh_l3, wv_sh_l4
 wv_shbanks:: db BANK(wv_sh_l0), BANK(wv_sh_l1), BANK(wv_sh_l2), BANK(wv_sh_l3), BANK(wv_sh_l4)
+wv_lutbank:: db BANK(lut_wv)
+wv_lutaddr:: dw lut_wv
 wo_banks:: db BANK(wo_l0), BANK(wo_l1), BANK(wo_l2), BANK(wo_l3), BANK(wo_l4)
 wo_addrs:: dw wo_l0, wo_l1, wo_l2, wo_l3, wo_l4
 wo_shifts:: dw wo_sh_l0, wo_sh_l1, wo_sh_l2, wo_sh_l3, wo_sh_l4
 wo_shbanks:: db BANK(wo_sh_l0), BANK(wo_sh_l1), BANK(wo_sh_l2), BANK(wo_sh_l3), BANK(wo_sh_l4)
+wo_lutbank:: db BANK(lut_wo)
+wo_lutaddr:: dw lut_wo
 w1_banks:: db BANK(w1_l0), BANK(w1_l1), BANK(w1_l2), BANK(w1_l3), BANK(w1_l4)
 w1_addrs:: dw w1_l0, w1_l1, w1_l2, w1_l3, w1_l4
 w1_shifts:: dw w1_sh_l0, w1_sh_l1, w1_sh_l2, w1_sh_l3, w1_sh_l4
 w1_shbanks:: db BANK(w1_sh_l0), BANK(w1_sh_l1), BANK(w1_sh_l2), BANK(w1_sh_l3), BANK(w1_sh_l4)
+w1_lutbank:: db BANK(lut_w1)
+w1_lutaddr:: dw lut_w1
 w2_banks:: db BANK(w2_l0), BANK(w2_l1), BANK(w2_l2), BANK(w2_l3), BANK(w2_l4)
 w2_addrs:: dw w2_l0, w2_l1, w2_l2, w2_l3, w2_l4
 w2_shifts:: dw w2_sh_l0, w2_sh_l1, w2_sh_l2, w2_sh_l3, w2_sh_l4
 w2_shbanks:: db BANK(w2_sh_l0), BANK(w2_sh_l1), BANK(w2_sh_l2), BANK(w2_sh_l3), BANK(w2_sh_l4)
+w2_lutbank:: db BANK(lut_w2)
+w2_lutaddr:: dw lut_w2
 w3_banks:: db BANK(w3_l0), BANK(w3_l1), BANK(w3_l2), BANK(w3_l3), BANK(w3_l4)
 w3_addrs:: dw w3_l0, w3_l1, w3_l2, w3_l3, w3_l4
 w3_shifts:: dw w3_sh_l0, w3_sh_l1, w3_sh_l2, w3_sh_l3, w3_sh_l4
 w3_shbanks:: db BANK(w3_sh_l0), BANK(w3_sh_l1), BANK(w3_sh_l2), BANK(w3_sh_l3), BANK(w3_sh_l4)
+w3_lutbank:: db BANK(lut_w3)
+w3_lutaddr:: dw lut_w3

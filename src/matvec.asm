@@ -39,7 +39,8 @@ wMvFull::   db                      ; the same count as 256-blocks ...
 wMvRem::    db                      ; ... plus remainder, so the inner loop can
                                     ; use an 8-bit counter and leave c free
 wMvXPtr::   dw                      ; input activation vector
-wMvCb::     dw                      ; codebook (16 int8 values)
+wMvLutBank:: db                     ; ROM bank of this matrix's product tables
+wMvLutAddr:: dw                     ; base of the 256 precomputed tables
 
 
 SECTION "Matvec code", ROM0
@@ -87,86 +88,35 @@ Matvec_Zero::
     jr nz, .loop
     ret
 
-; Signed 8x8 -> 16, wMulA * wMulB into de. Shift-and-add over magnitudes with
-; the sign applied at the end.
+; Loads hLut with the product table for the activation in a.
 ;
-; This is the only real multiply left in the matvec path. It runs CB_LEVELS
-; times per input and is amortized over the outputs - which is exactly why the
-; weights are 4-bit. It is also the single biggest remaining cost in the whole
-; model (measured at ~202 cycles per table entry), and Phase 3's first target.
-Mul8x8::
-    ld a, [wMulA8]
-    ld c, 0                         ; counts negative operands
-    bit 7, a
-    jr z, :+
-    cpl
-    inc a
-    inc c
-:   ld d, a                         ; |A|, the multiplier
-
-    ld a, [wMulB8]
-    bit 7, a
-    jr z, :+
-    cpl
-    inc a
-    inc c
-:   ld e, a
-    push bc                         ; bc becomes the multiplicand; save the sign count
-    ld b, 0
-    ld c, e
-
-    ld hl, 0
-REPT 8
-    add hl, hl
-    sla d
-    jr nc, :+
-    add hl, bc
-:
-ENDR
-
-    pop bc
-    bit 0, c                        ; exactly one negative operand -> negate
-    jr z, .done
-    xor a
-    sub a, l
-    ld l, a
-    ld a, 0
-    sbc a, h
-    ld h, a
-.done
-    ld d, h
-    ld e, l
-    ret
-
-; Builds hLut for the activation in a: entry u = a * codebook[u] + MV_BIAS.
+; Every table this could ever need is already in ROM - the operands are the
+; activation and the matrix's codebook, both known at export time - so this is a
+; 32-byte copy instead of sixteen shift-add multiplies. That trade is the whole
+; point: ROM is abundant here and cycles are not. ~190 cycles against ~3,200.
 Matvec_BuildLut::
-    ld [wMulB8], a
-    ld a, [wMvCb + 0]
+    add a, 128                      ; signed activation -> unsigned table index
     ld l, a
-    ld a, [wMvCb + 1]
-    ld h, a
+    ld h, 0
+REPT 5
+    add hl, hl                      ; * CB_LEVELS * 2 bytes per table
+ENDR
+    ld a, [wMvLutAddr + 0]
+    ld e, a
+    ld a, [wMvLutAddr + 1]
+    ld d, a
+    add hl, de
+
+    ld a, [wMvLutBank]
+    ld [rROMB0], a
     ld c, HLUT_BASE
-    ld b, CB_LEVELS
-.entry
+REPT CB_LEVELS * 2
     ld a, [hl+]
-    ld [wMulA8], a
-    push hl
-    push bc
-    call Mul8x8
-    pop bc
-    pop hl
-
-    ld a, e
-    add a, LOW(MV_BIAS)
     ldh [c], a
     inc c
-    ld a, d
-    adc a, HIGH(MV_BIAS)
-    ldh [c], a
-    inc c
-
-    dec b
-    jr nz, .entry
+ENDR
+    ld a, [wMvBank]                 ; back to the weights
+    ld [rROMB0], a
     ret
 
 ; hl = accumulators, de = weights, b = outputs this chunk (0 means 256).
