@@ -40,7 +40,7 @@ wMvRem::    db                      ; ... plus remainder, so the inner loop can
                                     ; use an 8-bit counter and leave c free
 wMvXPtr::   dw                      ; input activation vector
 wMvCb::     dw                      ; codebook (16 int8 values)
-wMvNoZero:: db                      ; set to continue accumulating across banks
+
 
 SECTION "Matvec code", ROM0
 
@@ -222,18 +222,28 @@ Matvec_AddRow:
     ret
 
 ; Runs the configured matvec, leaving biased int24 accumulators in wAcc.
+;
+; Two entry points rather than a mode flag. A flag would be persistent state
+; that is read before anything writes it, and WRAM boots to garbage on real
+; hardware - accumulators would then never be cleared and every matvec would
+; pile onto the last one.
 Matvec_Run::
+    call Matvec_Zero
+    jr Matvec_Body
+
+; Continues accumulating into whatever wAcc already holds. Used to carry a
+; matvec across a ROM bank boundary, where one group of inputs ends and the
+; next continues into the same accumulators.
+Matvec_RunAccum::
+    ; fall through
+
+Matvec_Body:
     ld a, [wMvBank]
     ld [rROMB0], a
     ld a, [wMvW + 0]
     ld [wMvWCur + 0], a
     ld a, [wMvW + 1]
     ld [wMvWCur + 1], a
-    ld a, [wMvNoZero]
-    or a
-    jr nz, :+
-    call Matvec_Zero
-:
 
     ld a, [wMvXPtr + 0]
     ld l, a

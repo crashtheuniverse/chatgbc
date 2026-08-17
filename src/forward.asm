@@ -477,8 +477,6 @@ Classify::
     ld [wMvIn], a
     ld hl, wXb
     call SetXPtr
-    xor a
-    ld [wMvNoZero], a
     call Matvec_Run
 
     ld a, BANK(cls_w_p1)            ; second bank continues the same accumulators
@@ -489,11 +487,7 @@ Classify::
     ld [wMvW + 1], a
     ld hl, wXb + CLS_INPUTS_PER_PART
     call SetXPtr
-    ld a, 1
-    ld [wMvNoZero], a
-    call Matvec_Run
-    xor a
-    ld [wMvNoZero], a
+    call Matvec_RunAccum            ; same accumulators, second half of the inputs
 
     ld a, DIM                       ; the bias covers every input, both banks
     ld [wMvIn], a

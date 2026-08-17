@@ -14,10 +14,8 @@ INCLUDE "model.inc"
 ; final untaken jr, plus 3 for the `ld bc` setup. py/test_phase0.py repeats this
 ; arithmetic and asserts the ROM agrees.
 DEF CAL_ITERS EQU 10000
-; Tokens to generate. Set to 0 because the forward pass currently derails part
-; way through its first pass and wedges the emulator; with generation off the
-; ROM still boots, renders and profiles, so the suite stays green while the
-; forward pass is debugged. Raise this to re-enable generation.
+; Tokens to generate. 0 compiles the generation call out entirely, which leaves
+; a ROM that still boots, renders and profiles.
 DEF GEN_STEPS EQU 24
 
 SECTION "VBlank IRQ", ROM0[$40]
@@ -44,7 +42,6 @@ SECTION "Main", ROM0
 
 Main:
     di
-    ld sp, wStack + 192
 
     ; The CGB boot ROM leaves $11 in A. The header is CGB-only, so this should
     ; be unreachable on real hardware, but a lenient emulator would sail past it.
@@ -53,6 +50,8 @@ Main:
 .hang
     jr .hang
 .isCgb
+    call ClearWram              ; before sp is set, since the stack lives in WRAM0
+    ld sp, wStack + 192
 
     call LcdOff                 ; disabling the LCD outside VBlank is not safe
     call EnterDoubleSpeed
@@ -127,6 +126,36 @@ EnterDoubleSpeed:
     ld a, SPD_PREPARE
     ldh [rKEY1], a
     stop
+    ret
+
+; Zeroes every WRAM bank. Real hardware powers up with garbage in RAM, and an
+; emulator that happens to start it at zero will hide any dependency on that -
+; which is exactly how a stale accumulator flag survived testing under PyBoy and
+; produced nonsense on SameBoy.
+ClearWram:
+    ld a, 7                     ; banks 7..1 at $D000, then WRAM0
+.bank
+    ldh [rSVBK], a
+    push af
+    ld hl, $D000
+    ld bc, $1000
+    call ZeroBlock
+    pop af
+    dec a
+    jr nz, .bank
+    ld a, 1
+    ldh [rSVBK], a
+    ld hl, $C000
+    ld bc, $1000
+    ; fall through
+
+ZeroBlock:
+    xor a
+    ld [hl+], a
+    dec bc
+    ld a, b
+    or c
+    jr nz, ZeroBlock
     ret
 
 ClearVram:

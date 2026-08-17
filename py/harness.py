@@ -49,7 +49,14 @@ def load_defs(*paths):
 class Rom:
     """A booted ROM plus typed accessors for its WRAM."""
 
-    def __init__(self, rom=ROM, sym=SYM):
+    def __init__(self, rom=ROM, sym=SYM, dirty_ram=False):
+        """dirty_ram fills WRAM with a non-zero pattern before the CPU runs.
+
+        PyBoy powers up with RAM at zero; real hardware and SameBoy do not. Any
+        variable the ROM reads before writing therefore behaves differently on
+        hardware, which is exactly how a stale accumulator flag passed every
+        headless test and produced nonsense on a real emulator.
+        """
         if not rom.exists():
             raise FileNotFoundError(f"{rom} missing - run .\\build.ps1")
         self.defs = load_defs(SRC / "chatgbc.inc", SRC / "model.inc",
@@ -60,6 +67,15 @@ class Rom:
         # spends seconds per token makes the test loop unusable.
         self.pyboy.set_emulation_speed(0)
         self.frames = 0
+        if dirty_ram:
+            self._dirty_ram()
+
+    def _dirty_ram(self):
+        """Scribble over WRAM before the first tick, simulating a cold boot."""
+        junk = bytes(range(256)) * 16                     # 4 KB, no long zero runs
+        self.pyboy.memory[0xC000:0xD000] = junk
+        for bank in range(1, 8):
+            self.pyboy.memory[bank, 0xD000:0xE000] = junk
 
     def close(self):
         self.pyboy.stop(save=False)

@@ -42,8 +42,6 @@ Selftest_Setup::
     ld [wMvXPtr + 0], a
     ld a, HIGH(wXb)
     ld [wMvXPtr + 1], a
-    xor a
-    ld [wMvNoZero], a
     ret
 
 Selftest_Run::
