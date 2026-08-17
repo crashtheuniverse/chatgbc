@@ -40,7 +40,7 @@ def main():
     model, tok = ref.Model(), ref.Tokenizer()
     sites = Q.calibrate(model, seq_len=E.SEQ)
     q = Q.quantize_model(model, sites, weight_bits=E.WEIGHT_BITS)
-    rtbl = Q.rope_table(E.SEQ, q.cfg.head_size)
+    rtbl = Q.rope_table(E.MAX_POS, q.cfg.head_size)
     c = q.cfg
     pos = 0
 
@@ -58,9 +58,9 @@ def main():
         if l == 0:
             want_xb0 = xb
         eq_, ek_, ev_ = q.site("q", l), q.site("k", l), q.site("v", l)
-        qv = Q.requant_rows(Q.matvec(q.w("wq", l), xb), q.e("wq") + exb, q.rex("wq", l), eq_)
-        kv = Q.requant_rows(Q.matvec(q.w("wk", l), xb), q.e("wk") + exb, q.rex("wk", l), ek_)
-        vv = Q.requant_rows(Q.matvec(q.w("wv", l), xb), q.e("wv") + exb, q.rex("wv", l), ev_)
+        qv = Q.requant_rows(Q.matvec(q.w("wq", l), xb), q.e("wq") + exb + Q.ACC_SHIFT, q.rex("wq", l), eq_)
+        kv = Q.requant_rows(Q.matvec(q.w("wk", l), xb), q.e("wk") + exb + Q.ACC_SHIFT, q.rex("wk", l), ek_)
+        vv = Q.requant_rows(Q.matvec(q.w("wv", l), xb), q.e("wv") + exb + Q.ACC_SHIFT, q.rex("wv", l), ev_)
         qv = Q.rope_q(qv, pos, rtbl)
         kv = Q.rope_q(kv, pos, rtbl)
         state.k[l, pos], state.v[l, pos] = kv, vv
@@ -80,7 +80,7 @@ def main():
             xb2[h * hs:(h + 1) * hs] = Q.sat8(Q.rescale(acc, ev_ - Q.EXP_BITS, eout))
         if l == 0:
             want_xb2 = xb2.astype(np.int64)
-        wo = Q.requant_rows(Q.matvec(q.w("wo", l), xb2), q.e("wo") + eout, q.rex("wo", l), ex)
+        wo = Q.requant_rows(Q.matvec(q.w("wo", l), xb2), q.e("wo") + eout + Q.ACC_SHIFT, q.rex("wo", l), ex)
         x = Q.add_requant(x, ex, wo, ex, ex)
         if l == 0:
             want_res = x.astype(np.int64)
@@ -89,10 +89,10 @@ def main():
         exf = q.site("xb_ffn", l)
         xbf = Q.rmsnorm(x, q.w("rms_ffn", l), q.e("rms_ffn"), exf)
         e1, e3, eh = q.site("h1", l), q.site("h3", l), q.site("hb", l)
-        h1 = Q.requant_rows(Q.matvec(q.w("w1", l), xbf), q.e("w1") + exf, q.rex("w1", l), e1)
-        h3 = Q.requant_rows(Q.matvec(q.w("w3", l), xbf), q.e("w3") + exf, q.rex("w3", l), e3)
+        h1 = Q.requant_rows(Q.matvec(q.w("w1", l), xbf), q.e("w1") + exf + Q.ACC_SHIFT, q.rex("w1", l), e1)
+        h3 = Q.requant_rows(Q.matvec(q.w("w3", l), xbf), q.e("w3") + exf + Q.ACC_SHIFT, q.rex("w3", l), e3)
         hb = Q.silu_mul(h1, e1, h3, e3, eh)
-        w2 = Q.requant_rows(Q.matvec(q.w("w2", l), hb), q.e("w2") + eh, q.rex("w2", l), ex)
+        w2 = Q.requant_rows(Q.matvec(q.w("w2", l), hb), q.e("w2") + eh + Q.ACC_SHIFT, q.rex("w2", l), ex)
         if l == 0:
             want_ffn0 = w2.astype(np.int64)
         x = Q.add_requant(x, ex, w2, ex, ex)

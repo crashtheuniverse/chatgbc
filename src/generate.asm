@@ -12,6 +12,11 @@ wPrev::      dw                     ; previous token, for the BOS space rule
 wGenSteps::  db
 wTokCycles:: ds 4                   ; cycles for the most recent forward pass
 wGenCount::  db                     ; tokens emitted so far
+; Every token the model emits, so tests can check the model rather than the
+; screen. Once the console scrolls, scraping the display stops being a faithful
+; record of what was generated.
+DEF OUT_MAX EQU 128
+wOutTokens:: ds OUT_MAX * 2
 
 SECTION "Generate code", ROM0
 
@@ -65,6 +70,7 @@ PrintToken::
 Generate::
     xor a
     ld [wPos], a
+    ld [wAbsPos], a
     ld [wGenCount], a
     ld [wPrev + 0], a
     ld [wPrev + 1], a
@@ -95,7 +101,7 @@ Generate::
 .skipStop
 
     ; Prompt tokens are forced; after that the model's own argmax continues.
-    ld a, [wPos]
+    ld a, [wAbsPos]
     inc a
     cp PROMPT_LEN
     jr nc, .useModel
@@ -127,6 +133,20 @@ Generate::
     ld a, [wBestTok + 1]
     ld [wToken + 1], a
 
+    ld a, [wGenCount]               ; record it before printing
+    cp OUT_MAX
+    jr nc, .noRecord
+    ld l, a
+    ld h, 0
+    add hl, hl
+    ld de, wOutTokens
+    add hl, de
+    ld a, [wToken + 0]
+    ld [hl+], a
+    ld a, [wToken + 1]
+    ld [hl], a
+.noRecord
+
     call PrintToken
     call Console_Flush
 
@@ -138,12 +158,18 @@ Generate::
     cp b
     ret z
 
-    ld a, [wPos]
+    ; Advance the true position, then clamp the attended-slot bound. The cache
+    ; rings, so once SEQ_LEN slots are live every step attends all of them.
+    ld a, [wAbsPos]
     inc a
-    ld [wPos], a
+    ld [wAbsPos], a
+    ret z                           ; wrapped past 255: the RoPE table ends there
     cp SEQ_LEN
-    jr c, .step
-    ret
+    jr c, .withinWindow
+    ld a, SEQ_LEN - 1
+.withinWindow
+    ld [wPos], a
+    jp .step
 
 ; hl -> de, b bytes.
 CopyN::

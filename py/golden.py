@@ -29,7 +29,7 @@ def build():
 def main():
     steps = int(sys.argv[1]) if len(sys.argv) > 1 else 24
     model, tok, q = build()
-    rtbl = Q.rope_table(E.SEQ, q.cfg.head_size)
+    rtbl = Q.rope_table(E.MAX_POS, q.cfg.head_size)
     state = Q.QState(q.cfg, E.SEQ)
 
     prompt = tok.encode("Once upon a time")

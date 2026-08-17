@@ -60,7 +60,7 @@ class Rom:
         if not rom.exists():
             raise FileNotFoundError(f"{rom} missing - run .\\build.ps1")
         self.defs = load_defs(SRC / "chatgbc.inc", SRC / "model.inc",
-                              SRC / "main.asm", SRC / "matvec.asm", SRC / "chatgbc.inc")
+                              SRC / "main.asm", SRC / "matvec.asm", SRC / "generate.asm")
         self.syms = load_symbols(sym)
         self.pyboy = PyBoy(str(rom), window="null", cgb=True, sound_emulated=False)
         # Without this PyBoy paces itself to real time, which for a ROM that

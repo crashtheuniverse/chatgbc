@@ -26,6 +26,8 @@ SECTION "Rope code", ROM0
 ; so one position is HEAD_SIZE/2 * 2 * 2 = 16 bytes.
 ;   hl = vector, b = element count
 Rope::
+    ld a, BANK(tbl_rope)
+    ld [rROMB0], a
     ld a, l
     ld [wRopePtr + 0], a
     ld a, h

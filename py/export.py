@@ -34,6 +34,11 @@ BIAS = 1 << 14
 HLUT_BASE = 0x80          # product table pinned here so weight bytes are HRAM offsets
 WEIGHT_BITS = 4
 SEQ = 64                  # KV cache: one WRAM bank per layer holds exactly 64 positions
+# Absolute positions for RoPE. The cache rings at SEQ, but RoPE needs the true
+# position - an old key keeps the rotation it was written with, and q.k depends
+# on the difference, so positions must keep counting. 256 fits a byte and needs
+# only a 4 KB table; past that RoPE extrapolates badly anyway (trained to 512).
+MAX_POS = 256
 
 MATS = ("wq", "wk", "wv", "wo", "w1", "w2", "w3")
 
@@ -130,6 +135,7 @@ def main():
     const("KV_MUL", c.kv_mul)
     const("VOCAB", c.vocab_size)
     const("SEQ_LEN", SEQ)
+    const("MAX_POS", MAX_POS)
     const("CB_LEVELS", 1 << WEIGHT_BITS)
     const("MV_BIAS", BIAS)
     const("HLUT_BASE", f"${HLUT_BASE:02X}")
@@ -150,7 +156,7 @@ def main():
     blob("tbl_sigmoid", t["sigmoid"].astype(np.uint8).tobytes())
     blob("tbl_exp", t["exp"].astype("<u2").tobytes())
     blob("tbl_recip", t["recip"].astype("<u2").tobytes())
-    blob("tbl_rope", Q.rope_table(SEQ, c.head_size).astype("<i2").tobytes())
+    blob("tbl_rope", Q.rope_table(MAX_POS, c.head_size).astype("<i2").tobytes(), rom0=False)
 
     # --- token embedding: output-major rows for the lookup ---
     emb = q.weights["tok_emb"]                       # int8 codebook values, (vocab, dim)

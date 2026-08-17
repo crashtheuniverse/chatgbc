@@ -33,13 +33,15 @@ def test_generates_correctly_from_dirty_ram(dirty_rom):
     path = BUILD / "golden.json"
     if not path.exists():
         pytest.skip("run py/golden.py to produce build/golden.json")
-    want = "".join(json.loads(path.read_text(encoding="utf-8"))["text"].split())
-    got = "".join("".join(dirty_rom.console_lines()[6:]).split())
-    n = min(len(want), len(got))
-    assert n > 0
-    assert got[:n] == want[:n], (
+    want = json.loads(path.read_text(encoding="utf-8"))["tokens"]
+    n = min(dirty_rom.read("wGenCount")[0], dirty_rom.defs["OUT_MAX"])
+    raw = dirty_rom.read("wOutTokens", n * 2)
+    got = [int.from_bytes(raw[i * 2 : i * 2 + 2], "little") for i in range(n)]
+    m = min(len(got), len(want))
+    assert m > 0
+    assert got[:m] == want[:m], (
         "output differs when RAM starts dirty, so something is read before it "
-        f"is written\n  rom:  {got[:80]!r}\n  want: {want[:80]!r}"
+        f"is written\n  rom:  {got[:12]}\n  want: {want[:12]}"
     )
 
 

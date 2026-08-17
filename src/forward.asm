@@ -162,12 +162,12 @@ ForwardLayer::
     ld bc, wVvec
     call Requant_All
 
-    ld a, [wPos]
+    ld a, [wAbsPos]
     ld [wRopePos], a
     ld hl, wQ
     ld b, DIM
     call Rope
-    ld a, [wPos]
+    ld a, [wAbsPos]
     ld [wRopePos], a
     ld hl, wKvec
     ld b, KV_DIM
@@ -410,7 +410,8 @@ AddSaturating::
 
 ; Copies wKvec/wVvec into this layer's cache slot for the current position.
 StoreKV:
-    ld a, [wPos]
+    ld a, [wAbsPos]
+    and SEQ_LEN - 1                 ; ring: position p occupies slot p mod SEQ_LEN
     ld l, a
     ld h, 0
 REPT 5

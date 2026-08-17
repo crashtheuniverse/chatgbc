@@ -16,7 +16,7 @@ INCLUDE "model.inc"
 DEF CAL_ITERS EQU 10000
 ; Tokens to generate. 0 compiles the generation call out entirely, which leaves
 ; a ROM that still boots, renders and profiles.
-DEF GEN_STEPS EQU 64
+DEF GEN_STEPS EQU 96
 
 SECTION "VBlank IRQ", ROM0[$40]
     reti

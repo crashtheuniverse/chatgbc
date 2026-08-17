@@ -382,6 +382,13 @@ def add_requant(a, ea, b, eb, eout):
 
 
 class QState:
+    """KV cache as a ring: position p occupies slot p % seq_len.
+
+    Old entries keep the absolute RoPE rotation they were written with, and a
+    new query carries its own, so q.k still depends only on the difference. The
+    cache never needs re-positioning - the oldest slot is simply overwritten.
+    """
+
     def __init__(self, cfg, seq_len):
         self.seq_len = seq_len
         self.k = np.zeros((cfg.n_layers, seq_len, cfg.kv_dim), dtype=np.int8)
@@ -395,6 +402,8 @@ def forward_q(q, state, token, pos, rtbl, window=None):
     hs, kvm = c.head_size, c.kv_mul
     ex = q.site("x", 0)
 
+    slot = pos % state.seq_len
+    count = min(pos + 1, state.seq_len)      # attended slots, 0..count-1
     x = requant(q.w("tok_emb")[token].astype(np.int32),
                 q.e("tok_emb") + int(q.rex("tok_emb")[token]), ex)
 
@@ -409,18 +418,16 @@ def forward_q(q, state, token, pos, rtbl, window=None):
 
         qv = rope_q(qv, pos, rtbl)
         kv = rope_q(kv, pos, rtbl)
-        state.k[l, pos], state.v[l, pos] = kv, vv
+        state.k[l, slot], state.v[l, slot] = kv, vv
 
         eout = q.site("att_out", l)
         xb2 = np.zeros(c.dim, dtype=np.int8)
         for h in range(c.n_heads):
             qh = qv[h * hs : (h + 1) * hs].astype(np.int32)
             base = (h // kvm) * hs
-            # A sliding window drops the oldest positions instead of growing.
-            lo = 0 if window is None else max(0, pos + 1 - window)
-            keys = state.k[l, lo : pos + 1, base : base + hs].astype(np.int32)
+            keys = state.k[l, :count, base : base + hs].astype(np.int32)
             att = softmax_weights(keys @ qh, eq_ + ek_)
-            vals = state.v[l, lo : pos + 1, base : base + hs].astype(np.int64)
+            vals = state.v[l, :count, base : base + hs].astype(np.int64)
             # sum(att) == 1<<EXP_BITS, so this stays inside int24.
             acc = (att[:, None] * vals).sum(axis=0)
             xb2[h * hs : (h + 1) * hs] = sat8(rescale(acc, ev_ - EXP_BITS, eout))
@@ -495,7 +502,7 @@ def calibrate(model, prompts=CAL_PROMPTS, steps=64, seq_len=64, headroom=1.15):
                 note("q", l, qv)
                 note("k", l, kv)
                 note("v", l, vv)
-                state.k[l, pos], state.v[l, pos] = kv, vv
+                state.k[l, pos], state.v[l, pos] = kv, vv   # calibration stays linear
 
                 xb2 = np.zeros(c.dim, dtype=np.float32)
                 for h in range(c.n_heads):
