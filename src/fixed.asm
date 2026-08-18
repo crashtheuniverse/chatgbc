@@ -4,14 +4,11 @@
 ; rescales it, Requant_Sat8 reads it out as int8. One scratch and one shift
 ; routine is why there is no second, subtly different rounding rule anywhere
 ; in the model. wSave32 is the second operand for the 32-bit add/subtract.
+; Both live in HRAM, declared alongside wTmp32 in state.asm.
 
 INCLUDE "hardware.inc"
 INCLUDE "chatgbc.inc"
 INCLUDE "model.inc"
-
-SECTION "Fixed state", WRAM0
-wTotal::  ds 4
-wSave32:: ds 4
 
 SECTION "Fixed code", ROM0
 

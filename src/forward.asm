@@ -384,19 +384,19 @@ AddSaturating::
     push hl
     push de
     push bc
-    ld [wTmp32 + 0], a
+    ldh [wTmp32 + 0], a
     add a, a
     sbc a, a
-    ld [wTmp32 + 1], a
-    ld [wTmp32 + 2], a
-    ld [wTmp32 + 3], a
+    ldh [wTmp32 + 1], a
+    ldh [wTmp32 + 2], a
+    ldh [wTmp32 + 3], a
     ld a, [de]
-    ld [wSave32 + 0], a
+    ldh [wSave32 + 0], a
     add a, a
     sbc a, a
-    ld [wSave32 + 1], a
-    ld [wSave32 + 2], a
-    ld [wSave32 + 3], a
+    ldh [wSave32 + 1], a
+    ldh [wSave32 + 2], a
+    ldh [wSave32 + 3], a
     call AddSaveToTmp
     call Requant_Sat8
     pop bc
@@ -571,7 +571,7 @@ Classify::
 ; bits differ the positive value wins, otherwise an unsigned compare from the
 ; top byte down gives the right answer.
 CompareBest:
-    ld a, [wTmp32 + 3]
+    ldh a, [wTmp32 + 3]
     ld b, a
     ld a, [wBest + 3]
     ld c, a
@@ -588,17 +588,17 @@ CompareBest:
     ret c
     jr nz, .take
     ld hl, wBest + 2
-    ld a, [wTmp32 + 2]
+    ldh a, [wTmp32 + 2]
     cp [hl]
     ret c
     jr nz, .take
     ld hl, wBest + 1
-    ld a, [wTmp32 + 1]
+    ldh a, [wTmp32 + 1]
     cp [hl]
     ret c
     jr nz, .take
     ld hl, wBest + 0
-    ld a, [wTmp32 + 0]
+    ldh a, [wTmp32 + 0]
     cp [hl]
     ret c
     ret z                           ; ties keep the earlier token, as argmax does
@@ -658,12 +658,12 @@ ENDR
     ld a, [hl]
     push hl
     push bc                         ; Requant_Shift and Requant_Sat8 both use b
-    ld [wTmp32 + 0], a
+    ldh [wTmp32 + 0], a
     add a, a
     sbc a, a
-    ld [wTmp32 + 1], a
-    ld [wTmp32 + 2], a
-    ld [wTmp32 + 3], a
+    ldh [wTmp32 + 1], a
+    ldh [wTmp32 + 2], a
+    ldh [wTmp32 + 3], a
     ld a, [wRnShift]
     call Requant_Shift
     call Requant_Sat8

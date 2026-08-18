@@ -46,13 +46,13 @@ REPT 8
 :
 ENDR
     ld a, l
-    ld [wTmp32 + 0], a
+    ldh [wTmp32 + 0], a
     ld a, h
-    ld [wTmp32 + 1], a
+    ldh [wTmp32 + 1], a
     ld a, e
-    ld [wTmp32 + 2], a
+    ldh [wTmp32 + 2], a
     xor a
-    ld [wTmp32 + 3], a
+    ldh [wTmp32 + 3], a
     ret
 
 ; Negates wTmp32 in place.
@@ -133,31 +133,31 @@ MulU16::
 
     ld a, [wMx + 1]
     call MulU8xU16
-    ld a, [wTmp32 + 2]              ; << 8, as a byte move
-    ld [wTmp32 + 3], a
-    ld a, [wTmp32 + 1]
-    ld [wTmp32 + 2], a
-    ld a, [wTmp32 + 0]
-    ld [wTmp32 + 1], a
+    ldh a, [wTmp32 + 2]              ; << 8, as a byte move
+    ldh [wTmp32 + 3], a
+    ldh a, [wTmp32 + 1]
+    ldh [wTmp32 + 2], a
+    ldh a, [wTmp32 + 0]
+    ldh [wTmp32 + 1], a
     xor a
-    ld [wTmp32 + 0], a
+    ldh [wTmp32 + 0], a
 
     ld hl, wMulSv                   ; add the stashed partial product back
-    ld a, [wTmp32 + 0]
+    ldh a, [wTmp32 + 0]
     add a, [hl]
-    ld [wTmp32 + 0], a
+    ldh [wTmp32 + 0], a
     inc hl
-    ld a, [wTmp32 + 1]
+    ldh a, [wTmp32 + 1]
     adc a, [hl]
-    ld [wTmp32 + 1], a
+    ldh [wTmp32 + 1], a
     inc hl
-    ld a, [wTmp32 + 2]
+    ldh a, [wTmp32 + 2]
     adc a, [hl]
-    ld [wTmp32 + 2], a
+    ldh [wTmp32 + 2], a
     inc hl
-    ld a, [wTmp32 + 3]
+    ldh a, [wTmp32 + 3]
     adc a, [hl]
-    ld [wTmp32 + 3], a
+    ldh [wTmp32 + 3], a
     ret
 
 ; Adds wTmp32 into the 4-byte little-endian value at hl.

@@ -96,9 +96,9 @@ RmsNorm::
     ld a, [wRnE]
     call Requant_Shift
 
-    ld a, [wTmp32 + 0]              ; fold in the gain, land on int8
+    ldh a, [wTmp32 + 0]              ; fold in the gain, land on int8
     ld [wMy + 0], a
-    ld a, [wTmp32 + 1]
+    ldh a, [wTmp32 + 1]
     ld [wMy + 1], a
     ld a, [wRnGain + 0]
     ld e, a

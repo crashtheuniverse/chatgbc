@@ -24,8 +24,17 @@ wHb::    ds HIDDEN
 wScores:: ds SEQ_LEN * SCORE_BYTES  ; raw attention scores, int24
 wAtt::   ds SEQ_LEN * 2             ; softmax weights, Q0.12
 wCbBuf:: ds CB_LEVELS               ; working copy of the active codebook
-wTmp32:: ds 4                       ; shared signed scratch
 wBias::  ds 3                       ; nIn * MV_BIAS, removed once per matvec
+
+; The shared 32-bit scratch lives in HRAM, not WRAM. Every kernel funnels
+; through it, and absolute access to $FF00-$FFFE assembles as `ldh` - a two-byte
+; instruction costing 3 M-cycles where `ld a, [nn]` costs 4. One cycle per
+; access does not sound like much until you count how many accesses there are:
+; Requant_Shift alone touches it eight times per bit shifted.
+SECTION "Scratch HRAM", HRAM
+wTmp32::  ds 4                      ; shared signed scratch
+wSave32:: ds 4                      ; second operand for the 32-bit add/subtract
+wTotal::  ds 4                      ; softmax running total
 
 SECTION "Requant state", WRAM0
 wRqAcc:: dw
@@ -42,23 +51,23 @@ Requant_SetBias::
 
 ; Sign-extends wTmp32's third byte into the fourth.
 Tmp32_SignExtend::
-    ld a, [wTmp32 + 2]
+    ldh a, [wTmp32 + 2]
     add a, a
     sbc a, a                        ; $FF if negative, else $00
-    ld [wTmp32 + 3], a
+    ldh [wTmp32 + 3], a
     ret
 
 ; hl -> accumulator slot. Sign-extends the signed 16-bit accumulator into
 ; wTmp32 and advances hl past the slot.
 Requant_LoadUnbiased::
     ld a, [hl+]
-    ld [wTmp32 + 0], a
+    ldh [wTmp32 + 0], a
     ld a, [hl+]
-    ld [wTmp32 + 1], a
+    ldh [wTmp32 + 1], a
     add a, a                        ; carry = bit 15
     sbc a, a                        ; $FF if negative, else $00
-    ld [wTmp32 + 2], a
-    ld [wTmp32 + 3], a
+    ldh [wTmp32 + 2], a
+    ldh [wTmp32 + 3], a
     ret
 
 ; Shifts wTmp32 by the signed count in a. Negative shifts left.
@@ -70,7 +79,7 @@ Requant_LoadUnbiased::
 ; carry survives the loop and a chain of `adc a, 0` applies it.
 Requant_Shift::
     bit 7, a
-    jr nz, .leftShift
+    jp nz, .leftShift
     or a
     ret z
     ld b, a
@@ -82,48 +91,87 @@ Requant_Shift::
 .bytes
     ld a, b
     cp 9
-    jr c, .right
-    ld a, [wTmp32 + 1]
-    ld [wTmp32 + 0], a
-    ld a, [wTmp32 + 2]
-    ld [wTmp32 + 1], a
-    ld a, [wTmp32 + 3]
-    ld [wTmp32 + 2], a
+    jp c, .nibble
+    ldh a, [wTmp32 + 1]
+    ldh [wTmp32 + 0], a
+    ldh a, [wTmp32 + 2]
+    ldh [wTmp32 + 1], a
+    ldh a, [wTmp32 + 3]
+    ldh [wTmp32 + 2], a
     add a, a
     sbc a, a                        ; $FF if negative, else $00
-    ld [wTmp32 + 3], a
+    ldh [wTmp32 + 3], a
     ld a, b
     sub 8
     ld b, a
     jr .bytes
+
+    ; And a shift of four is a nibble swap. `swap` exchanges the two halves of a
+    ; byte in one instruction - it is an SM83 addition the Z80 never had - so a
+    ; 4-bit shift is one pass of swap-and-merge instead of four passes of
+    ; shift-through-carry. At most one of these ever runs, since b is 8 or less
+    ; by the time we get here, and the same `one bit must leave singly` rule
+    ; applies: the threshold is 5, not 4.
+    ;
+    ; Bytes are rewritten low to high. Each one needs the low nibble of the byte
+    ; above it, so that byte has to still be untouched when its turn comes.
+.nibble
+    cp 5
+    jr c, .right
+    push de
+FOR i, 3
+    ldh a, [wTmp32 + i + 1]
+    swap a
+    and $F0                         ; the byte above supplies the high nibble
+    ld d, a
+    ldh a, [wTmp32 + i]
+    swap a
+    and $0F
+    or d
+    ldh [wTmp32 + i], a
+ENDR
+    ldh a, [wTmp32 + 3]
+    add a, a
+    sbc a, a                        ; $FF if negative, else $00
+    and $F0                         ; sign fills the nibble the shift vacates
+    ld d, a
+    ldh a, [wTmp32 + 3]
+    swap a
+    and $0F
+    or d
+    ldh [wTmp32 + 3], a
+    pop de
+    ld a, b
+    sub 4
+    ld b, a
 .right
-    ld a, [wTmp32 + 3]
+    ldh a, [wTmp32 + 3]
     sra a                           ; arithmetic: preserves sign
-    ld [wTmp32 + 3], a
-    ld a, [wTmp32 + 2]
+    ldh [wTmp32 + 3], a
+    ldh a, [wTmp32 + 2]
     rra
-    ld [wTmp32 + 2], a
-    ld a, [wTmp32 + 1]
+    ldh [wTmp32 + 2], a
+    ldh a, [wTmp32 + 1]
     rra
-    ld [wTmp32 + 1], a
-    ld a, [wTmp32 + 0]
+    ldh [wTmp32 + 1], a
+    ldh a, [wTmp32 + 0]
     rra
-    ld [wTmp32 + 0], a
+    ldh [wTmp32 + 0], a
     dec b
     jr nz, .right
 
-    ld a, [wTmp32 + 0]              ; carry still holds the last bit shifted out
+    ldh a, [wTmp32 + 0]              ; carry still holds the last bit shifted out
     adc a, 0
-    ld [wTmp32 + 0], a
-    ld a, [wTmp32 + 1]
+    ldh [wTmp32 + 0], a
+    ldh a, [wTmp32 + 1]
     adc a, 0
-    ld [wTmp32 + 1], a
-    ld a, [wTmp32 + 2]
+    ldh [wTmp32 + 1], a
+    ldh a, [wTmp32 + 2]
     adc a, 0
-    ld [wTmp32 + 2], a
-    ld a, [wTmp32 + 3]
+    ldh [wTmp32 + 2], a
+    ldh a, [wTmp32 + 3]
     adc a, 0
-    ld [wTmp32 + 3], a
+    ldh [wTmp32 + 3], a
     ret
 
 .leftShift
@@ -131,18 +179,18 @@ Requant_Shift::
     inc a                           ; a = -shift
     ld b, a
 .left
-    ld a, [wTmp32 + 0]
+    ldh a, [wTmp32 + 0]
     add a, a
-    ld [wTmp32 + 0], a
-    ld a, [wTmp32 + 1]
+    ldh [wTmp32 + 0], a
+    ldh a, [wTmp32 + 1]
     adc a, a
-    ld [wTmp32 + 1], a
-    ld a, [wTmp32 + 2]
+    ldh [wTmp32 + 1], a
+    ldh a, [wTmp32 + 2]
     adc a, a
-    ld [wTmp32 + 2], a
-    ld a, [wTmp32 + 3]
+    ldh [wTmp32 + 2], a
+    ldh a, [wTmp32 + 3]
     adc a, a
-    ld [wTmp32 + 3], a
+    ldh [wTmp32 + 3], a
     dec b
     jr nz, .left
     ret
@@ -150,18 +198,18 @@ Requant_Shift::
 ; Saturates wTmp32 into a, matching quant.py's sat8 range of [-127, 127].
 ; Clobbers b and c.
 Requant_Sat8::
-    ld a, [wTmp32 + 0]
+    ldh a, [wTmp32 + 0]
     ld c, a
     add a, a
     sbc a, a                        ; b = $FF if the low byte is negative
     ld b, a
-    ld a, [wTmp32 + 1]
+    ldh a, [wTmp32 + 1]
     cp b
     jr nz, .clamp
-    ld a, [wTmp32 + 2]
+    ldh a, [wTmp32 + 2]
     cp b
     jr nz, .clamp
-    ld a, [wTmp32 + 3]
+    ldh a, [wTmp32 + 3]
     cp b
     jr nz, .clamp
     ld a, c                         ; the high bytes are pure sign extension
@@ -170,7 +218,7 @@ Requant_Sat8::
     ld a, -127                      ; -128 is outside the symmetric range
     ret
 .clamp
-    ld a, [wTmp32 + 3]
+    ldh a, [wTmp32 + 3]
     bit 7, a
     ld a, 127
     ret z

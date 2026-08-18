@@ -68,10 +68,10 @@ Attn_Scores:
     push hl
 
     xor a                           ; accumulator
-    ld [wTmp32 + 0], a
-    ld [wTmp32 + 1], a
-    ld [wTmp32 + 2], a
-    ld [wTmp32 + 3], a
+    ldh [wTmp32 + 0], a
+    ldh [wTmp32 + 1], a
+    ldh [wTmp32 + 2], a
+    ldh [wTmp32 + 3], a
     ld hl, wSave32
     ld [hl+], a
     ld [hl+], a
@@ -112,11 +112,11 @@ Attn_Scores:
     add hl, de                      ; t * 3
     ld de, wScores
     add hl, de
-    ld a, [wSave32 + 0]
+    ldh a, [wSave32 + 0]
     ld [hl+], a
-    ld a, [wSave32 + 1]
+    ldh a, [wSave32 + 1]
     ld [hl+], a
-    ld a, [wSave32 + 2]
+    ldh a, [wSave32 + 2]
     ld [hl], a
 
     ld a, [wAtT]
@@ -139,11 +139,11 @@ Attn_LoadScore:
     ld de, wScores
     add hl, de
     ld a, [hl+]
-    ld [wTmp32 + 0], a
+    ldh [wTmp32 + 0], a
     ld a, [hl+]
-    ld [wTmp32 + 1], a
+    ldh [wTmp32 + 1], a
     ld a, [hl]
-    ld [wTmp32 + 2], a
+    ldh [wTmp32 + 2], a
     jp Tmp32_SignExtend
 
 ; exp(score - max) into wAtt, and the running total into wTotal.
@@ -171,7 +171,7 @@ Attn_Softmax:
     ld bc, 4
     call CopyBytes
     call SubTmpFromSave             ; wTmp32 = score - max
-    ld a, [wTmp32 + 3]
+    ldh a, [wTmp32 + 3]
     bit 7, a
     jr nz, .noNewMax
     ld a, [wAtT]
@@ -188,10 +188,10 @@ Attn_Softmax:
 
 .haveMax
     xor a
-    ld [wTotal + 0], a
-    ld [wTotal + 1], a
-    ld [wTotal + 2], a
-    ld [wTotal + 3], a
+    ldh [wTotal + 0], a
+    ldh [wTotal + 1], a
+    ldh [wTotal + 2], a
+    ldh [wTotal + 3], a
     ld [wAtT], a
 .expLoop
     ld a, [wAtT]
@@ -229,12 +229,12 @@ Attn_Softmax:
     ld [hl], a
 
     ld a, c                         ; total += exp
-    ld [wTmp32 + 0], a
+    ldh [wTmp32 + 0], a
     ld a, b
-    ld [wTmp32 + 1], a
+    ldh [wTmp32 + 1], a
     xor a
-    ld [wTmp32 + 2], a
-    ld [wTmp32 + 3], a
+    ldh [wTmp32 + 2], a
+    ldh [wTmp32 + 3], a
     ld hl, wTotal
     call Tmp32_AddTo
 
@@ -253,7 +253,7 @@ Attn_Softmax:
     sub a, 8
     ld hl, wTotal
     call Shift32Trunc
-    ld a, [wTotal + 0]
+    ldh a, [wTotal + 0]
     ld l, a                         ; 16-bit index; recip indices are always >= 128
     ld h, 0
     add hl, hl
@@ -287,9 +287,9 @@ Attn_Softmax:
     add a, RECIP_BITS - EXP_BITS
     call Requant_Shift
     pop hl
-    ld a, [wTmp32 + 0]
+    ldh a, [wTmp32 + 0]
     ld [hl+], a
-    ld a, [wTmp32 + 1]
+    ldh a, [wTmp32 + 1]
     ld [hl], a
 
     ld a, [wAtT]
@@ -319,19 +319,19 @@ SwapSaveTmp:
 
 ; Clamps wTmp32 into 0..255, returned in a.
 ClampIndex255:
-    ld a, [wTmp32 + 3]
+    ldh a, [wTmp32 + 3]
     bit 7, a
     jr nz, .low
-    ld a, [wTmp32 + 3]
+    ldh a, [wTmp32 + 3]
     or a
     jr nz, .high
-    ld a, [wTmp32 + 2]
+    ldh a, [wTmp32 + 2]
     or a
     jr nz, .high
-    ld a, [wTmp32 + 1]
+    ldh a, [wTmp32 + 1]
     or a
     jr nz, .high
-    ld a, [wTmp32 + 0]
+    ldh a, [wTmp32 + 0]
     ret
 .low
     xor a

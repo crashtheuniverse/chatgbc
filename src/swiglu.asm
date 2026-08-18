@@ -41,12 +41,12 @@ SiluMul::
     ld a, [wSiluP1 + 1]
     ld h, a
     ld a, [hl]
-    ld [wTmp32 + 0], a
+    ldh [wTmp32 + 0], a
     add a, a
     sbc a, a
-    ld [wTmp32 + 1], a
-    ld [wTmp32 + 2], a
-    ld [wTmp32 + 3], a
+    ldh [wTmp32 + 1], a
+    ldh [wTmp32 + 2], a
+    ldh [wTmp32 + 3], a
     ld a, [wSiluIdxShift]
     call Requant_Shift
     call Clamp127                   ; the table spans -128..127 in Q4.4
@@ -67,9 +67,9 @@ SiluMul::
     ld a, [hl]
     ld [wMulA8], a
     call MulS8xS16
-    ld a, [wTmp32 + 0]
+    ldh a, [wTmp32 + 0]
     ld [wMy + 0], a
-    ld a, [wTmp32 + 1]
+    ldh a, [wTmp32 + 1]
     ld [wMy + 1], a
 
     ld a, [wSiluP3 + 0]             ; * h3
@@ -115,20 +115,20 @@ SiluMul::
 
 ; Clamps wTmp32's low byte to -128..127 based on the full value.
 Clamp127:
-    ld a, [wTmp32 + 1]
+    ldh a, [wTmp32 + 1]
     ld b, a
-    ld a, [wTmp32 + 0]
+    ldh a, [wTmp32 + 0]
     add a, a
     sbc a, a
     cp b
     jr nz, .out
-    ld a, [wTmp32 + 2]
+    ldh a, [wTmp32 + 2]
     cp b
     jr nz, .out
-    ld a, [wTmp32 + 0]
+    ldh a, [wTmp32 + 0]
     ret
 .out
-    ld a, [wTmp32 + 3]
+    ldh a, [wTmp32 + 3]
     bit 7, a
     ld a, 127
     ret z

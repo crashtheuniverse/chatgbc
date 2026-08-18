@@ -76,6 +76,10 @@ class Rom:
         self.pyboy.memory[0xC000:0xD000] = junk
         for bank in range(1, 8):
             self.pyboy.memory[bank, 0xD000:0xE000] = junk
+        # HRAM holds the shared 32-bit scratch and the matvec product table,
+        # and unlike WRAM the ROM does not clear it at boot - so it needs the
+        # same treatment, or moving a variable there quietly escapes this test.
+        self.pyboy.memory[0xFF80:0xFFFF] = junk[:0x7F]
         # wReady is the harness handshake, not model state. The pattern above can
         # land READY_MAGIC there by coincidence, which makes run_until_ready
         # return before the ROM has executed a single instruction.
