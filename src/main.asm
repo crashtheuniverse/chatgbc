@@ -86,7 +86,6 @@ Main:
     call Keyboard_Run           ; blocks until START
     call Encode
     call Console_Clear
-    call Ui_Header              ; the title bar stays put while output scrolls
     call Console_Flush
 
     ld a, GEN_STEPS

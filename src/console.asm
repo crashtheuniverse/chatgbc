@@ -12,9 +12,6 @@ wConsole:: ds CON_SIZE
 SECTION "Console state", WRAM0
 wCursorX:: db
 wCursorY:: db
-; First row scrolling is allowed to touch. Rows above it are screen furniture -
-; a title bar stays put while the text underneath it moves.
-wScrollTop:: db
 
 SECTION "Console code", ROM0
 
@@ -34,7 +31,6 @@ Console_Clear::
     xor a
     ld [wCursorX], a
     ld [wCursorY], a
-    ld [wScrollTop], a          ; a cleared screen has no furniture left to keep
     ret
 
 ; Copies the shadow buffer to the BG tilemap. Safe only outside rendering, so
@@ -130,34 +126,9 @@ Console_NewLine::
 ; contiguous in the shadow (stride CON_W), so this is one forward copy, and the
 ; next flush pushes the result out with the usual single GDMA.
 Console_Scroll::
-    ld a, [wScrollTop]
-    ld l, a
-    ld h, 0
-REPT 5
-    add hl, hl                  ; top * CON_W
-ENDR
-    ld bc, wConsole
-    add hl, bc
-    ld d, h
-    ld e, l                     ; de = the topmost scrolling row
-    ld a, CON_W
-    add a, l
-    ld l, a
-    jr nc, :+
-    inc h
-:                               ; hl = the row below it
-
-    ld a, [wScrollTop]
-    ld b, a
-    ld a, CON_H - 1
-    sub b
-    ret z                       ; nothing below the furniture to move
-    ld c, a
-    ld b, 0
-REPT 5
-    sla c
-    rl b                        ; bc = rows * CON_W
-ENDR
+    ld de, wConsole
+    ld hl, wConsole + CON_W
+    ld bc, (CON_H - 1) * CON_W
 .move
     ld a, [hl+]
     ld [de], a

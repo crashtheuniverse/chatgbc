@@ -97,25 +97,9 @@ Ui_Frame::
     cp BOX_B
     jr c, .side
     ; fall through, laying the title over the rule already drawn
-
-Ui_Title:
     ld hl, sUiTitle
     ld b, TITLE_COL
     ld c, 0
     jp Ui_PrintAt
-
-; The generation screen keeps the title bar but drops the box, so output gets
-; the full width and scrolls underneath it.
-Ui_Header::
-    ld c, 0
-    ld d, CH_H
-    ld e, CH_H
-    call Ui_Rule
-    call Ui_Title
-    ld a, 1
-    ld [wScrollTop], a              ; row 0 is chrome, scrolling starts below
-    ld b, 0
-    ld c, 1
-    jp Console_SetPos
 
 sUiTitle: db " CHATGBC ", 0

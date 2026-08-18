@@ -107,9 +107,3 @@ def test_no_attribute_stranded_after_leaving(rom):
         "an inverted cell survived into the generation screen, which draws as a "
         "black block over the text"
     )
-
-
-def test_generation_screen_keeps_its_title(rom):
-    """The title bar is above the scroll floor, so output must not push it off."""
-    assert "CHATGBC" in rom.console_lines()[0]
-    assert any(l for l in rom.console_lines()[1:]), "no output under the title"

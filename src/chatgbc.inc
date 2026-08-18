@@ -38,7 +38,8 @@ DEF CH_RT EQU 135
 
 DEF BOX_R     EQU CON_VIS_W - 1           ; rightmost visible column
 DEF BOX_B     EQU CON_H - 1               ; bottom row
-DEF TITLE_COL EQU 5                       ; centres the 9-cell " CHATGBC "
+DEF TITLE_COL EQU 1                       ; against the corner; the title's
+                                          ; first letter lands on the box margin
 
 ; --- Input -----------------------------------------------------------------
 ; Joy_Read returns the d-pad in the high nibble and buttons in the low one.
