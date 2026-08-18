@@ -25,7 +25,7 @@ def lines(rom):
 
 def test_entry_screen_drawn(entry):
     body = lines(entry)
-    assert "CHATGBC" in body[0]
+    assert "ChatGBC v0.1" in body[0], "the title carries the version"
     assert any("a b c d" in l for l in body), "spaced grid missing"
     assert any("SELECT" in l for l in body), "case hint missing"
 
