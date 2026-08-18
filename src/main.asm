@@ -81,6 +81,7 @@ Main:
 
     call RecordStatus
     call Measure
+    call MeasureFetch           ; ROM vs HRAM execution; see src/fetchtest.asm
 
 .app
     call Keyboard_Run           ; blocks until START
@@ -252,7 +253,7 @@ MeasureSelftest:
     ; fall through
 
 ; Copies the profiler result to de, so successive measurements both survive.
-SaveCycles:
+SaveCycles::
     ld hl, wProfCycles
     ld b, 4
 .loop
