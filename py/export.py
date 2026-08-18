@@ -233,6 +233,25 @@ def main():
     blob("test_h1", want.astype(np.int8).tobytes())
     print(f"test matvec w1[0]: {c.hidden_dim}x{c.dim}, h1 range {want.min()}..{want.max()}")
 
+    # --- encoder: raw vocab strings plus merge scores ---
+    # The detokenizer blob above resolved byte-fallback tokens to raw bytes.
+    # Encoding needs the vocabulary as trained: merges concatenate the literal
+    # pieces, and "<0x0A>"-style entries must stay literal so they never merge.
+    enc, enc_off = bytearray(), []
+    for piece in tok.vocab:
+        enc_off.append(len(enc))
+        enc += bytes([len(piece)]) + piece
+    blob("enc_vocab", bytes(enc), rom0=False)
+    blob("enc_off", np.array(enc_off, dtype="<u2").tobytes())
+    # Scores only need to preserve order, so rank them: highest score = rank 0.
+    order = np.argsort(-np.array(tok.scores, dtype=np.float64), kind="stable")
+    rank = np.empty(len(tok.scores), dtype="<u2")
+    rank[order] = np.arange(len(tok.scores), dtype=np.uint16)
+    blob("enc_rank", rank.tobytes())
+    const("TOK_BOS", ref.BOS)
+    const("TOK_EOS", ref.EOS)
+    const("TOK_SPACE", tok.lookup[b" "])
+
     prompt_tokens = tok.encode("Once upon a time")
     blob("prompt", np.array(prompt_tokens, dtype="<u2").tobytes())
     const("PROMPT_LEN", len(prompt_tokens))

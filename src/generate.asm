@@ -4,8 +4,8 @@ INCLUDE "hardware.inc"
 INCLUDE "chatgbc.inc"
 INCLUDE "model.inc"
 
-DEF TOK_BOS EQU 1
-DEF TOK_EOS EQU 2
+
+
 
 SECTION "Generate state", WRAM0
 wPrev::      dw                     ; previous token, for the BOS space rule
@@ -75,9 +75,9 @@ Generate::
     ld [wPrev + 0], a
     ld [wPrev + 1], a
 
-    ld a, [prompt + 0]              ; the prompt's first token starts the run
+    ld a, [wTokBuf + 0]             ; the prompt's first token starts the run
     ld [wToken + 0], a
-    ld a, [prompt + 1]
+    ld a, [wTokBuf + 1]
     ld [wToken + 1], a
 
 .step
@@ -103,11 +103,12 @@ Generate::
     ; Prompt tokens are forced; after that the model's own argmax continues.
     ld a, [wAbsPos]
     inc a
-    cp PROMPT_LEN
-    jr nc, .useModel
+    ld hl, wTokCount
+    cp [hl]
+    jr nc, .useModel                ; prompt exhausted: the model takes over
     ld c, a
     ld b, 0
-    ld hl, prompt
+    ld hl, wTokBuf
     add hl, bc
     add hl, bc
     ld a, [hl+]

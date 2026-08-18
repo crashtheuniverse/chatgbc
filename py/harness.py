@@ -76,6 +76,10 @@ class Rom:
         self.pyboy.memory[0xC000:0xD000] = junk
         for bank in range(1, 8):
             self.pyboy.memory[bank, 0xD000:0xE000] = junk
+        # wReady is the harness handshake, not model state. The pattern above can
+        # land READY_MAGIC there by coincidence, which makes run_until_ready
+        # return before the ROM has executed a single instruction.
+        self.pyboy.memory[self.addr("wReady")] = 0x00
 
     def close(self):
         self.pyboy.stop(save=False)

@@ -80,6 +80,7 @@ Main:
     ldh [rLCDC], a
 
     call RecordStatus
+    call Encode_TestPrompt   ; encode before generating
     call Measure
     call Report
     call Console_Flush
