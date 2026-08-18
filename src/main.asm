@@ -1,9 +1,12 @@
-; ChatGBC - Phase 0
+; ChatGBC - boot, and the loop the user actually sees.
 ;
-; Proves the development loop end to end: boot CGB-only, switch to double speed,
-; render text, and measure a block of work whose exact M-cycle cost is known by
-; inspection. The test harness checks that measurement against the arithmetic,
-; which is what makes every later timing number trustworthy.
+; Brings the machine up (CGB-only, double speed, font, palette, console), then
+; runs keyboard -> encode -> generate -> report, forever.
+;
+; Measure still times a block whose exact M-cycle cost is known by inspection,
+; and py/tests/test_phase0.py checks the ROM's answer against that arithmetic.
+; Nothing depends on it any more, but it is the calibration every other timing
+; number in the project rests on, so it stays.
 
 INCLUDE "hardware.inc"
 INCLUDE "chatgbc.inc"
