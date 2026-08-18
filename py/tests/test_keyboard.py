@@ -30,6 +30,55 @@ def test_entry_screen_drawn(entry):
     assert any("SELECT" in l for l in body), "case hint missing"
 
 
+def test_screen_is_framed(entry):
+    """The frame is drawn cell by cell, so a corner is easy to lose."""
+    con = entry.read("wConsole", entry.defs["CON_SIZE"])
+    w, last = entry.defs["CON_W"], entry.defs["CON_VIS_W"] - 1
+    bottom = entry.defs["CON_H"] - 1
+    tile = {n: entry.defs[n] - entry.defs["FONT_FIRST"]
+            for n in ("CH_TL", "CH_TR", "CH_BL", "CH_BR", "CH_V", "CH_LT", "CH_RT")}
+    assert con[0] == tile["CH_TL"]
+    assert con[last] == tile["CH_TR"]
+    assert con[bottom * w] == tile["CH_BL"]
+    assert con[bottom * w + last] == tile["CH_BR"]
+    # Separator rows cap with tees instead of plain wall, but every row is
+    # closed on both sides - a gap would read as a hole in the frame.
+    for row in range(1, bottom):
+        assert con[row * w] in (tile["CH_V"], tile["CH_LT"]), f"left wall open on row {row}"
+        assert con[row * w + last] in (tile["CH_V"], tile["CH_RT"]), f"right wall open on row {row}"
+    seps = [r for r in range(1, bottom) if con[r * w] == tile["CH_LT"]]
+    assert len(seps) == 2, f"expected a rule above and below the grid, got {seps}"
+
+
+def test_space_is_typable(entry):
+    """A keyboard with no space key can only ever type one word."""
+    def prompt():
+        n = entry.read("wPromptLen")[0]
+        return entry.read("wPromptText", n).decode("latin-1")
+
+    before = prompt()
+    for button in ["down", "down"] + ["right"] * 8:   # to the cell after z
+        entry.pyboy.button_press(button)
+        entry.pyboy.tick(4, False)
+        entry.pyboy.button_release(button)
+        entry.pyboy.tick(8, False)
+    entry.pyboy.button_press("a")
+    entry.pyboy.tick(4, False)
+    entry.pyboy.button_release("a")
+    entry.pyboy.tick(8, False)
+    assert prompt() == before + " ", "the space key did not insert a space"
+
+    entry.pyboy.button_press("b")                     # leave the fixture as found
+    entry.pyboy.tick(4, False)
+    entry.pyboy.button_release("b")
+    entry.pyboy.tick(8, False)
+    for button in ["up", "up"] + ["left"] * 8:
+        entry.pyboy.button_press(button)
+        entry.pyboy.tick(4, False)
+        entry.pyboy.button_release(button)
+        entry.pyboy.tick(8, False)
+
+
 def test_default_prompt_is_editable(entry):
     assert any("Once upon a time" in l for l in lines(entry))
 
@@ -58,3 +107,9 @@ def test_no_attribute_stranded_after_leaving(rom):
         "an inverted cell survived into the generation screen, which draws as a "
         "black block over the text"
     )
+
+
+def test_generation_screen_keeps_its_title(rom):
+    """The title bar is above the scroll floor, so output must not push it off."""
+    assert "CHATGBC" in rom.console_lines()[0]
+    assert any(l for l in rom.console_lines()[1:]), "no output under the title"

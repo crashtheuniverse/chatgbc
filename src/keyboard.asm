@@ -1,6 +1,7 @@
 ; On-screen keyboard: d-pad picks a character, A adds it, SELECT flips case,
 ; START generates. Laid out like the Pokemon name-entry screen - letters spaced
-; two columns apart so the cursor has room to read as a highlight.
+; two columns apart so the cursor has room to read as a highlight - and set
+; inside a framed screen drawn by src/ui.asm.
 ;
 ; The cursor is drawn with CGB background attributes rather than a second font:
 ; moving it is two byte writes to VRAM bank 1 (clear the old cell, set the new),
@@ -22,9 +23,20 @@ DEF P1F_GET_NONE EQU (1 << B_JOYP_GET_BUTTONS) | (1 << B_JOYP_GET_CTRL_PAD)
 
 DEF KB_COLS  EQU 9
 DEF KB_ROWS  EQU 4
-DEF KB_TOP   EQU 6                  ; screen row the grid starts on
 DEF KB_STEP  EQU 2                  ; columns between characters
+DEF KB_STEP_Y EQU 2                 ; and rows between them, so descenders on
+                                    ; j/p/q/y do not run into the row below
 DEF KB_CELLS EQU KB_COLS * KB_ROWS
+
+; Screen rows, top to bottom: title border, prompt, rule, grid, rule, hints,
+; bottom border. KB_COL0 is the left margin everything inside the box lines up
+; to, and the grid's 9 cells at KB_STEP apart end one column short of the wall.
+DEF KB_COL0    EQU 2
+DEF KB_PROMPT  EQU 2                ; prompt occupies rows 2..4
+DEF KB_SEP_A   EQU 5
+DEF KB_TOP     EQU 6                ; grid on rows 6, 8, 10, 12
+DEF KB_SEP_B   EQU 13
+DEF KB_HELP    EQU 14
 
 SECTION "Keyboard state", WRAM0
 wKbCursor:: db
@@ -35,16 +47,19 @@ wJoyNew::   db
 
 SECTION "Keyboard code", ROM0
 
+; The last cell of the third row is a real space - the prompt is a sentence, so
+; a keyboard without one can only ever type a single word. Kb_Draw shows it as
+; an underscore, since a blank cell would look like a hole in the grid.
 KbLower:
     db "abcdefghi"
     db "jklmnopqr"
-    db "stuvwxyz."
-    db ",!?'-;:()"
+    db "stuvwxyz "
+    db ".,!?'-;:\""
 KbUpper:
     db "ABCDEFGHI"
     db "JKLMNOPQR"
-    db "STUVWXYZ."
-    db ",!?'-;:()"
+    db "STUVWXYZ "
+    db ".,!?'-;:\""
 
 ; Reads the pad and leaves newly-pressed buttons in wJoyNew.
 Joy_Read::
@@ -93,9 +108,11 @@ Kb_CellAddr:
     jr c, .haveRow
     sub a, KB_COLS
     inc c
+    inc c                           ; KB_STEP_Y
     jr .rows
 .haveRow
-    add a, a                        ; column = index * KB_STEP
+    add a, a                        ; column = KB_COL0 + index * KB_STEP
+    add a, KB_COL0
     ld b, a
     ld a, c
     ld l, a
@@ -151,61 +168,69 @@ Kb_DrawCursor:
 ; cursor attribute survives and must not be forgotten by the caller.
 Kb_Draw::
     call Console_Clear
-    ld hl, sKbTitle
-    call Console_PrintStr
+    call Ui_Frame
+    ld c, KB_SEP_A                  ; the prompt and the grid are separate things
+    ld d, CH_LT
+    ld e, CH_RT
+    call Ui_Rule
+    ld c, KB_SEP_B                  ; and so are the grid and the button hints
+    ld d, CH_LT
+    ld e, CH_RT
+    call Ui_Rule
 
-    ld b, 0                         ; the prompt, rows 2..4
-    ld c, 2
-    call Console_SetPos
+    ld hl, wPromptText              ; the prompt, wrapped inside the box
+    ld b, KB_COL0
+    ld c, KB_PROMPT
     ld a, [wPromptLen]
+    ld e, a
     or a
     jr z, .caret
-    ld b, a
-    ld hl, wPromptText
 .text
     ld a, [hl+]
-    push hl
-    push bc
-    call Console_PutChar
-    pop bc
-    pop hl
-    dec b
+    call Kb_PutWrapped
+    dec e
     jr nz, .text
 .caret
     ld a, '_'                       ; shows where the next letter lands
-    call Console_PutChar
+    call Kb_PutWrapped
 
     call Kb_Layout                  ; the grid, spaced KB_STEP apart
     ld c, KB_TOP
 .row
-    push bc
-    ld b, 0
-    call Console_SetPos
-    pop bc
-    push bc
-    ld b, KB_COLS
+    ld b, KB_COL0
+    ld d, KB_COLS
 .cell
     ld a, [hl+]
-    push hl
-    push bc
-    call Console_PutChar
-    ld a, ' '
-    call Console_PutChar
-    pop bc
-    pop hl
-    dec b
+    cp ' '
+    jr nz, :+
+    ld a, '_'                       ; the space key needs something to look at
+:   call Ui_PutCell
+    inc b
+    inc b
+    dec d
     jr nz, .cell
-    pop bc
     inc c
+    inc c                           ; KB_STEP_Y
     ld a, c
-    cp KB_TOP + KB_ROWS
+    cp KB_TOP + KB_ROWS * KB_STEP_Y
     jr c, .row
 
-    ld b, 0
-    ld c, KB_TOP + KB_ROWS + 1
-    call Console_SetPos
     ld hl, sKbHelp
-    jp Console_PrintStr
+    ld b, KB_COL0
+    ld c, KB_HELP
+    jp Ui_PrintAt
+
+; a = character, b = column, c = row. Draws it and steps right, wrapping at the
+; box wall rather than at the screen edge.
+Kb_PutWrapped:
+    call Ui_PutCell
+    inc b
+    ld a, b
+    cp BOX_R
+    ret c
+    ld b, KB_COL0
+    inc c
+    ret
 
 ; Runs the entry screen until START, leaving text in wPromptText/wPromptLen.
 Keyboard_Run::
@@ -336,5 +361,4 @@ Keyboard_Run::
     jp .loop
 
 sKbDefault: db "Once upon a time", 0
-sKbTitle:   db "CHATGBC", 0
 sKbHelp:    db "SELECT abc/ABC", $0A, "A ADD    B DEL", $0A, "START GENERATE", 0

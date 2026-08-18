@@ -86,6 +86,7 @@ Main:
     call Keyboard_Run           ; blocks until START
     call Encode
     call Console_Clear
+    call Ui_Header              ; the title bar stays put while output scrolls
     call Console_Flush
 
     ld a, GEN_STEPS
@@ -211,9 +212,9 @@ SetPalette:
     jr nz, .loop
     ret
 
-PaletteData:
-    dw $7FFF, $56B5, $2529, $0000   ; BGR555: white, light grey, dark grey, black
-    dw $0000, $2529, $56B5, $7FFF   ; inverted, used for the keyboard cursor
+PaletteData:                        ; BGR555, parchment and ink
+    dw $5BBF, $3ADA, $21B1, $0CA8   ; cream, tan, umber, dark brown
+    dw $0CA8, $21B1, $3ADA, $5BBF   ; the same inverted, for the keyboard cursor
 
 RecordStatus:
     ld b, STATUS_CGB

@@ -56,8 +56,26 @@ def main():
         rows = ",".join(f"${reverse_bits(b):02X}" for b in glyphs[code])
         label = chr(code) if code != 32 else "space"
         out.append(f"    db {rows}  ; {code} {label}")
+    # Box-drawing pieces the ASCII font has no glyphs for. They sit directly
+    # after the ASCII range, so Console_PutChar reaches them with codes 128+
+    # and needs no special case: tile index is still ASCII - 32.
+    #   line at row 3 / column 3, so corners meet cleanly
+    H, V = 0xFF, 0x10
+    border = {
+        "TL": [0, 0, 0, 0x1F, V, V, V, V],
+        "H":  [0, 0, 0, H, 0, 0, 0, 0],
+        "TR": [0, 0, 0, 0xF0, V, V, V, V],
+        "V":  [V, V, V, V, V, V, V, V],
+        "BL": [V, V, V, 0x1F, 0, 0, 0, 0],
+        "BR": [V, V, V, 0xF0, 0, 0, 0, 0],
+        "LT": [V, V, V, 0x1F, V, V, V, V],
+        "RT": [V, V, V, 0xF0, V, V, V, V],
+    }
+    for name, rows in border.items():
+        out.append("    db " + ",".join(f"${r:02X}" for r in rows) + f"  ; {name}")
+
     out.append("")
-    out.append(f"DEF FONT_GLYPHS EQU {LAST - FIRST + 1}")
+    out.append(f"DEF FONT_GLYPHS EQU {LAST - FIRST + 1 + len(border)}")
     out.append("")
 
     DST.write_text("\n".join(out), encoding="utf-8")

@@ -24,6 +24,22 @@ DEF ACC_BYTES EQU 2
 ; 24 bits regardless of how wide the matvec accumulator happens to be.
 DEF SCORE_BYTES EQU 3
 
+; --- Box drawing -----------------------------------------------------------
+; Border tiles live just past the ASCII range, so Console_PutChar reaches them
+; with ordinary character codes.
+DEF CH_TL EQU 128
+DEF CH_H  EQU 129
+DEF CH_TR EQU 130
+DEF CH_V  EQU 131
+DEF CH_BL EQU 132
+DEF CH_BR EQU 133
+DEF CH_LT EQU 134
+DEF CH_RT EQU 135
+
+DEF BOX_R     EQU CON_VIS_W - 1           ; rightmost visible column
+DEF BOX_B     EQU CON_H - 1               ; bottom row
+DEF TITLE_COL EQU 5                       ; centres the 9-cell " CHATGBC "
+
 ; --- Input -----------------------------------------------------------------
 ; Joy_Read returns the d-pad in the high nibble and buttons in the low one.
 DEF KB_RIGHT EQU %00010000
