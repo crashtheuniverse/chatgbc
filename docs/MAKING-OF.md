@@ -271,4 +271,4 @@ document which registers they destroy.
 
 ---
 
-*ChatGBC v0.1 — 10,266,240 M-cycles per token, measured by the cartridge itself.*
+*ChatGBC v0.1 — 9,658,688 M-cycles per token, measured by the cartridge itself.*

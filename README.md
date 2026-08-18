@@ -8,7 +8,7 @@ assembly**.
 ![ChatGBC generating text](docs/chatgbc.gif)
 
 *One frame per token, which plays back about 40x faster than the hardware. On
-the handheld this is 96 tokens over eight minutes — roughly two seconds per
+the handheld this is 96 tokens over seven minutes — roughly two seconds per
 character.*
 
 ## What it does
@@ -27,7 +27,7 @@ inference stack.
 | Model | TinyStories-260K — 5 layers, dim 64, 8 heads / 4 KV heads, vocab 512 |
 | Weights | 4-bit, Lloyd–Max codebooks, per-output-row scales |
 | Arithmetic | int8 activations, signed 16-bit accumulators, no floating point |
-| Speed | **10,266,240 M-cycles per token** = 4.9 s/token ≈ 2 s/character |
+| Speed | **9,658,688 M-cycles per token** = 4.6 s/token ≈ 1.9 s/character |
 | Kernel | 19 M-cycles per multiply-accumulate in the inner loop |
 | Context | unbounded output; 64-token attention window in a ring buffer |
 | ROM | 512 KB, MBC5 |
@@ -38,7 +38,7 @@ emulator's wall clock, so the number above is what the hardware does.
 
 For scale: the reference implementation that inspired this,
 [gbc-transformer](https://github.com/maddiedreese/gbc-transformer), runs the
-same model in GBDK C at 169 s/token. This is about **34x faster**, which is what
+same model in GBDK C at 169 s/token. This is about **37x faster**, which is what
 you get for writing the kernel yourself.
 
 ## Why it is fast
