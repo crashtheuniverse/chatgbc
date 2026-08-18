@@ -1,37 +1,50 @@
-; On-screen keyboard: d-pad picks a character, A adds it, START generates.
+; On-screen keyboard: d-pad picks a character, A adds it, SELECT flips case,
+; START generates. Laid out like the Pokemon name-entry screen - letters spaced
+; two columns apart so the cursor has room to read as a highlight.
 ;
 ; The cursor is drawn with CGB background attributes rather than a second font:
 ; moving it is two byte writes to VRAM bank 1 (clear the old cell, set the new),
-; with palette 1 defined as the inverse of palette 0. No shadow buffer and no
-; extra GDMA - the tilemap itself never changes as the cursor moves.
+; with palette 1 defined as the inverse of palette 0. The tilemap never changes
+; as the cursor moves, so there is no extra GDMA and no shadow buffer.
+;
+; Exactly one attribute cell is ever set, tracked by wKbPrev. Anything that
+; leaves the screen has to clear it, or an inverted cell is stranded in VRAM and
+; shows up as a black block over whatever is drawn there next.
 
 INCLUDE "hardware.inc"
 INCLUDE "chatgbc.inc"
 INCLUDE "model.inc"
 
-DEF KB_COLS  EQU 20
-DEF KB_ROWS  EQU 3
-DEF KB_TOP   EQU 5                  ; screen row the grid starts on
-DEF KB_CELLS EQU KB_COLS * KB_ROWS
-
-; Writing a 0 to a select bit enables that half of the matrix.
+; Writing a 0 to a select bit enables that half of the button matrix.
 DEF P1F_GET_DPAD EQU 1 << B_JOYP_GET_BUTTONS
 DEF P1F_GET_BTN  EQU 1 << B_JOYP_GET_CTRL_PAD
 DEF P1F_GET_NONE EQU (1 << B_JOYP_GET_BUTTONS) | (1 << B_JOYP_GET_CTRL_PAD)
 
+DEF KB_COLS  EQU 9
+DEF KB_ROWS  EQU 4
+DEF KB_TOP   EQU 6                  ; screen row the grid starts on
+DEF KB_STEP  EQU 2                  ; columns between characters
+DEF KB_CELLS EQU KB_COLS * KB_ROWS
 
 SECTION "Keyboard state", WRAM0
 wKbCursor:: db
-wKbPrev:    db                      ; cell the cursor attribute is currently on
+wKbPrev::   db                      ; the one cell currently holding attribute 1
+wKbCase::   db                      ; 0 = lower, 1 = upper
 wJoyHeld:   db
 wJoyNew::   db
 
 SECTION "Keyboard code", ROM0
 
-KbLayout:
-    db "abcdefghijklmnopqrst"
-    db "uvwxyz ABCDEFGHIJKLM"
-    db "NOPQRSTUVWXYZ.,!?'-;"
+KbLower:
+    db "abcdefghi"
+    db "jklmnopqr"
+    db "stuvwxyz."
+    db ",!?'-;:()"
+KbUpper:
+    db "ABCDEFGHI"
+    db "JKLMNOPQR"
+    db "STUVWXYZ."
+    db ",!?'-;:()"
 
 ; Reads the pad and leaves newly-pressed buttons in wJoyNew.
 Joy_Read::
@@ -63,7 +76,16 @@ ENDR
     ldh [rJOYP], a
     ret
 
-; hl = VRAM address of cell `a` in the grid.
+; hl = the active layout table.
+Kb_Layout:
+    ld a, [wKbCase]
+    or a
+    ld hl, KbLower
+    ret z
+    ld hl, KbUpper
+    ret
+
+; hl = VRAM address of grid cell a.
 Kb_CellAddr:
     ld c, KB_TOP
 .rows
@@ -73,7 +95,8 @@ Kb_CellAddr:
     inc c
     jr .rows
 .haveRow
-    ld b, a                         ; b = column, c = screen row
+    add a, a                        ; column = index * KB_STEP
+    ld b, a
     ld a, c
     ld l, a
     ld h, 0
@@ -89,7 +112,7 @@ ENDR
     add hl, de
     ret
 
-; Writes attribute a to the grid cell in b. Call inside VBlank.
+; Writes attribute a to grid cell b. Must run inside VBlank.
 Kb_SetAttr:
     push af
     ld a, b
@@ -102,8 +125,17 @@ Kb_SetAttr:
     ldh [rVBK], a
     ret
 
+; Clears the stranded attribute cell. Every exit from this screen calls it.
+Kb_ClearCursor::
+    call Console_WaitVBlank
+    ld a, [wKbPrev]
+    ld b, a
+    xor a
+    jp Kb_SetAttr
+
 Kb_DrawCursor:
-    ld a, [wKbPrev]                 ; un-highlight the old cell
+    call Console_WaitVBlank
+    ld a, [wKbPrev]                 ; un-highlight wherever it was
     ld b, a
     xor a
     call Kb_SetAttr
@@ -115,18 +147,19 @@ Kb_DrawCursor:
     ld [wKbPrev], a
     ret
 
-; Redraws the whole entry screen from wPromptText.
+; Redraws the entry screen from wPromptText. Touches the tilemap only, so the
+; cursor attribute survives and must not be forgotten by the caller.
 Kb_Draw::
     call Console_Clear
     ld hl, sKbTitle
     call Console_PrintStr
 
-    ld b, 0                         ; prompt text on row 2
+    ld b, 0                         ; the prompt, rows 2..4
     ld c, 2
     call Console_SetPos
     ld a, [wPromptLen]
     or a
-    jr z, .noText
+    jr z, .caret
     ld b, a
     ld hl, wPromptText
 .text
@@ -138,24 +171,35 @@ Kb_Draw::
     pop hl
     dec b
     jr nz, .text
-.noText
-    ld a, '_'                       ; caret shows where the next letter lands
+.caret
+    ld a, '_'                       ; shows where the next letter lands
     call Console_PutChar
 
-    ld b, 0                         ; the grid
+    call Kb_Layout                  ; the grid, spaced KB_STEP apart
     ld c, KB_TOP
+.row
+    push bc
+    ld b, 0
     call Console_SetPos
-    ld hl, KbLayout
-    ld b, KB_CELLS
-.grid
+    pop bc
+    push bc
+    ld b, KB_COLS
+.cell
     ld a, [hl+]
     push hl
     push bc
     call Console_PutChar
+    ld a, ' '
+    call Console_PutChar
     pop bc
     pop hl
     dec b
-    jr nz, .grid
+    jr nz, .cell
+    pop bc
+    inc c
+    ld a, c
+    cp KB_TOP + KB_ROWS
+    jr c, .row
 
     ld b, 0
     ld c, KB_TOP + KB_ROWS + 1
@@ -163,7 +207,7 @@ Kb_Draw::
     ld hl, sKbHelp
     jp Console_PrintStr
 
-; Runs the entry screen until START. Leaves the text in wPromptText/wPromptLen.
+; Runs the entry screen until START, leaving text in wPromptText/wPromptLen.
 Keyboard_Run::
     ld hl, sKbDefault               ; opens with a prompt rather than a blank line
     ld de, wPromptText
@@ -182,6 +226,7 @@ Keyboard_Run::
     xor a
     ld [wKbCursor], a
     ld [wKbPrev], a
+    ld [wKbCase], a
     ld [wJoyHeld], a
     call Kb_Draw
     call Console_Flush
@@ -196,8 +241,13 @@ Keyboard_Run::
 
     ld b, a
     and KB_START
-    ret nz
-
+    jr z, :+
+    call Kb_ClearCursor             ; never leave an inverted cell behind
+    ret
+:
+    ld a, b
+    and KB_SELECT
+    jr nz, .flipCase
     ld a, b
     and KB_A
     jr nz, .add
@@ -247,6 +297,11 @@ Keyboard_Run::
     call Kb_DrawCursor
     jp .loop
 
+.flipCase
+    ld a, [wKbCase]
+    xor 1
+    ld [wKbCase], a
+    jr .redraw
 .add
     ld a, [wPromptLen]
     cp PROMPT_MAX
@@ -255,11 +310,11 @@ Keyboard_Run::
     ld b, 0
     ld hl, wPromptText
     add hl, bc
+    push hl
+    call Kb_Layout
     ld a, [wKbCursor]
     ld c, a
     ld b, 0
-    push hl
-    ld hl, KbLayout
     add hl, bc
     ld a, [hl]
     pop hl
@@ -277,11 +332,9 @@ Keyboard_Run::
 .redraw
     call Kb_Draw
     call Console_Flush
-    xor a                           ; the redraw wiped the attribute
-    ld [wKbPrev], a
-    call Kb_DrawCursor
+    call Kb_DrawCursor              ; wKbPrev still names the stale cell
     jp .loop
 
 sKbDefault: db "Once upon a time", 0
-sKbTitle: db "CHATGBC", $0A, $0A, 0
-sKbHelp:  db "A ADD   B DEL", $0A, "START = GENERATE", 0
+sKbTitle:   db "CHATGBC", 0
+sKbHelp:    db "SELECT abc/ABC", $0A, "A ADD    B DEL", $0A, "START GENERATE", 0

@@ -32,7 +32,8 @@ DEF KB_UP    EQU %01000000
 DEF KB_DOWN  EQU %10000000
 DEF KB_A     EQU %00000001
 DEF KB_B     EQU %00000010
-DEF KB_START EQU %00001000
+DEF KB_SELECT EQU %00000100
+DEF KB_START  EQU %00001000
 
 ; --- Profiler ---------------------------------------------------------------
 ; TAC_16KHZ makes TIMA tick once per 64 M-cycles. That ratio is fixed to the CPU
