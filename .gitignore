@@ -11,3 +11,6 @@ __pycache__/
 
 # Personal release checklist, not part of the project
 RELEASE.md
+
+# Personal notes
+crash.md
