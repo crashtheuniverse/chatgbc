@@ -29,6 +29,42 @@ Storage never mattered. MBC5 gives 8 MB of ROM and the model is a few hundred
 kilobytes. Compute was the only real budget, and knowing that changed which
 tricks were worth reaching for — nearly every one below trades ROM for cycles.
 
+## Why a Game Boy at all
+
+The honest answer is not nostalgia.
+
+Every interesting question about making a model smaller or faster is bottlenecked
+by how fast you can ask it. Train a real model and you wait hours; prepare the
+data and you wait days. That buys a handful of experiments a week, and at that
+rate you stop asking speculative questions, because a speculative question that
+costs a day is not worth asking.
+
+Here, an idea becomes a measured, bit-exact answer in **fifty-four seconds** —
+assemble, link, boot the ROM headlessly, generate ninety-six tokens, and check
+twenty-nine assertions including exact token equality against the twin. On a
+laptop. That is three to four orders of magnitude more experiments per day, and
+it changes which questions get asked at all.
+
+The constraints that look like limitations are precisely what make the loop fast:
+
+- **A 260K model** runs headless at many times real time, so a full generation is
+  a unit test rather than a job.
+- **Assembly** means every cycle is attributable to a line. Stub a kernel,
+  re-measure, and you have its exact share.
+- **The bit-exact twin** makes every answer definite. Not "this looks better" —
+  identical or not identical.
+- **The ROM times itself** with the hardware timer, so the number is a property
+  of the machine, not of whatever ran it.
+
+Seventeen experiments are recorded in `docs/LOG.md`. Five of them are failures
+kept on purpose: sub-4-bit quantization, ternary weights, shrinking the attention
+window, executing from HRAM, and a couple of dead ends inside the kernel. You
+only keep your failures when running them was cheap enough that being wrong costs
+nothing.
+
+The Game Boy is not the point. It is a laboratory small enough to run the whole
+loop at full speed, and small enough that every part of it fits in one head.
+
 ## Why assembly, and not the obvious thing
 
 The obvious thing is to compile llama2.c with GBDK and be done in an afternoon.
