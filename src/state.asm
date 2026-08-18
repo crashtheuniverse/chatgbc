@@ -74,6 +74,28 @@ Requant_Shift::
     or a
     ret z
     ld b, a
+    ; A shift of eight is a byte move, not eight shifts. The counts here are
+    ; calibration data - 13 to 16 in practice - so peeling whole bytes off first
+    ; replaces ~350 cycles of bit shifting with ~30. The test is `> 8` and not
+    ; `>= 8` on purpose: the last bit to leave the value must still go one bit at
+    ; a time, because the carry it strands is the rounding bit the tail reads.
+.bytes
+    ld a, b
+    cp 9
+    jr c, .right
+    ld a, [wTmp32 + 1]
+    ld [wTmp32 + 0], a
+    ld a, [wTmp32 + 2]
+    ld [wTmp32 + 1], a
+    ld a, [wTmp32 + 3]
+    ld [wTmp32 + 2], a
+    add a, a
+    sbc a, a                        ; $FF if negative, else $00
+    ld [wTmp32 + 3], a
+    ld a, b
+    sub 8
+    ld b, a
+    jr .bytes
 .right
     ld a, [wTmp32 + 3]
     sra a                           ; arithmetic: preserves sign

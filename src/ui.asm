@@ -102,4 +102,5 @@ Ui_Frame::
     ld c, 0
     jp Ui_PrintAt
 
-sUiTitle: db " CHATGBC ", 0
+; Mixed case, on the handheld as everywhere else. It is a name, not a label.
+sUiTitle: db " ChatGBC v0.1 ", 0

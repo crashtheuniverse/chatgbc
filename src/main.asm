@@ -266,23 +266,6 @@ SaveCycles:
 
 ; --- Display ----------------------------------------------------------------
 
-Report:
-    ld hl, sBanner
-    call Console_PrintStr
-
-    ld a, [wStatus]
-    and STATUS_DOUBLE
-    ld hl, sSpeedOn
-    jr nz, .speed
-    ld hl, sSpeedOff
-.speed
-    call Console_PrintStr
-
-    ld hl, sCal
-    call Console_PrintStr
-
-    ret
-
 ReportTiming:
     ld a, $0A
     call Console_PutChar
@@ -291,10 +274,6 @@ ReportTiming:
     ld hl, wTokCycles
     jp Print_Dec32At
 
-sBanner:   db "CHATGBC PHASE 2", $0A, $0A, 0
-sSpeedOn:  db "CGB OK   2X ON", $0A, $0A, 0
-sSpeedOff: db "CGB OK   2X OFF", $0A, $0A, 0
-sCal:      db "GEN {d:GEN_STEPS} TOKENS", $0A, $0A, 0
 sMv:       db "CYC/TOK ", 0
 
 INCLUDE "font.inc"
