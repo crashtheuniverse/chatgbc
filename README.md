@@ -1,24 +1,25 @@
 # ChatGBC
 
-A language model that runs on a Game Boy Color. Not an emulator on a phone
-pretending to be a Game Boy — a 512 KB cartridge, an 8 MHz SM83, 32 KB of RAM,
-and a transformer doing a full forward pass per token in **hand-written
-assembly**.
+A language model that runs on a Game Boy Color. Not an emulator on a phone — a
+512 KB cartridge, an 8 MHz SM83, 32 KB of RAM, and a transformer doing a full
+forward pass per token in hand-written assembly. No C anywhere.
 
 ![ChatGBC generating text](docs/chatgbc.gif)
 
-*One frame per token, which plays back about 40x faster than the hardware. On
-the handheld this is 96 tokens over seven minutes — roughly two seconds per
-character.*
+*One frame per token, roughly 40x the speed of the hardware.*
 
-## What it does
+You type a prompt on an on-screen keyboard. It generates, and keeps generating —
+the text scrolls and it never hits a context limit. Tokenizer, weights and the
+whole inference stack are on the cartridge.
 
-You get an on-screen keyboard. You type a prompt. It generates, and keeps
-generating — the text scrolls, and it does not stop at a context limit.
+## Where this started
 
-Everything happens on the device. There is no host, no companion app, no
-network. The cartridge contains the tokenizer, the weights, and the entire
-inference stack.
+[gbc-transformer](https://github.com/maddiedreese/gbc-transformer) got here
+first, in GBDK C, and set both the model choice and the target. It runs the same
+network at **169 s/token**. I wanted to know what the ceiling was if the kernel
+were written by hand, which turned out to be a question about compilers: that
+implementation spends ~676 cycles per multiply-accumulate, and the assembly
+version spends 19.
 
 ## Numbers
 
@@ -26,106 +27,66 @@ inference stack.
 |---|---|
 | Model | TinyStories-260K — 5 layers, dim 64, 8 heads / 4 KV heads, vocab 512 |
 | Weights | 4-bit, Lloyd–Max codebooks, per-output-row scales |
-| Arithmetic | int8 activations, signed 16-bit accumulators, no floating point |
-| Speed | **9,658,688 M-cycles per token** = 4.6 s/token ≈ 1.9 s/character |
-| Kernel | 19 M-cycles per multiply-accumulate in the inner loop |
-| Context | unbounded output; 64-token attention window in a ring buffer |
+| Arithmetic | int8 activations, 16-bit accumulators, no floating point, no division |
+| **Speed** | **10.1 s/token** averaged over a 96-token run (21,121,834 M-cycles) |
+| | 4.6 s for the first token, 12.8 s once the 64-token window fills |
+| Kernel | 19 M-cycles per multiply-accumulate |
 | ROM | 512 KB, MBC5 |
-| Language | SM83 assembly (RGBDS). No C, anywhere. |
 
-Timing is measured **inside the ROM** using the hardware timer, not by the
-emulator's wall clock, so the number above is what the hardware does.
+Attention is O(context), so a token costs more the deeper into a passage you
+are — the bar at the bottom of the screen shows the figure climbing as it goes,
+then flattening once the window is full. Every number here is measured **by the
+cartridge itself** using the hardware timer, not by an emulator's clock.
 
-For scale: the reference implementation that inspired this,
-[gbc-transformer](https://github.com/maddiedreese/gbc-transformer), runs the
-same model in GBDK C at 169 s/token. This is about **37x faster**, which is what
-you get for writing the kernel yourself.
-
-## Why it is fast
+## Two tricks worth the click
 
 **The multiply is a table lookup.** The SM83 has no multiplier. With 4-bit
-weights there are only sixteen possible weight values, so for every activation
-byte there are only sixteen possible products — 4 KB of precomputed products per
-matrix, sitting in ROM — 8 KB per matrix, all 256 of them. The kernel copies the
-32-byte table for the current activation into HRAM, and from there the
-"multiply" is `ldh a, [c]`: sixteen shift-add multiplies, about 3,200 cycles,
-collapse into one 200-cycle copy. ROM is the one resource this project has in
-abundance. Cycles are the scarce one.
+weights there are sixteen possible weight values and 256 possible activations, so
+every product the model could ever need fits in 8 KB of ROM per matrix. The
+kernel copies 32 bytes into HRAM and from then on "multiply" is `ldh a, [c]` —
+3,200 cycles become 200. This machine has 8 MB of ROM and almost no cycles; the
+whole design is trading the abundant thing for the scarce one.
 
-**Every rescale is a shift.** Quantization exponents are calibrated offline and
-rounded to powers of two, so nothing in the forward pass ever divides. Products
-are exported pre-scaled by a quarter, which keeps every accumulator inside
-signed 16 bits and drops a byte out of the innermost loop.
-
-**Nothing transcendental is computed.** `rsqrt`, `exp`, `sigmoid` and reciprocal
-are all tables.
-
-## Why generation is unbounded
-
-The KV cache is a ring. The cache slot for position `p` is `p mod 64`, while
-RoPE keeps rotating by the **absolute** `p`.
-
-That separation is the whole trick: rotation is a function of where a token
-*is*, storage is a function of where it *fits*. Keeping them apart costs one
-mask instead of a bounds check, and the model never learns that anything wrapped
-— it simply attends to the last 64 positions, forever.
+**Generation never stops, because the cache is a ring.** The slot for position
+`p` is `p mod 64`, while the rotary embedding keeps rotating by the *absolute*
+`p`. Rotation is where a token is; storage is where it fits. Separating them
+costs one mask, and the model simply attends to the last 64 positions forever.
 
 ## Build it
 
-Windows, PowerShell. Everything is fetched into the project; nothing touches
-your PATH.
+Windows, PowerShell. Everything is fetched into the project; nothing touches your
+PATH.
 
 ```powershell
-.\bootstrap.ps1   # RGBDS, SameBoy, hardware.inc, a .venv with PyBoy
+.\bootstrap.ps1   # RGBDS, SameBoy, a .venv with PyBoy
 .\build.ps1       # -> build\chatgbc.gbc
 .\test.ps1        # build, then the headless test suite
-```
-
-Then either drop `build\chatgbc.gbc` on a flashcart, or:
-
-```powershell
 .\tools\sameboy\sameboy.exe build\chatgbc.gbc
 ```
 
 **Controls:** d-pad moves, `A` types, `B` deletes, `SELECT` flips case, `START`
-generates. Press `START` again when it finishes to go back to the keyboard.
+generates — and `START` again goes back to the keyboard.
 
 ## How it is kept honest
 
-There is a Python model in `py/` that is not a reference in the loose sense —
-it is a **bit-exact integer twin**. It implements the same quantization, the same
-rounding, the same saturation, in the same order. The test suite boots the ROM
-headlessly in PyBoy and asserts the assembly produces the identical token
-sequence, not a similar one.
+`py/quant.py` is not a loose reference — it is a **bit-exact integer twin** of the
+assembly: same quantization, rounding, saturation, order and widths. The tests
+boot the ROM headlessly and assert it emits an identical token sequence, not a
+similar one. Every bug becomes "at which layer do the two stop agreeing", which
+is a bisection with a definite answer.
 
-That contract is what made the project tractable. Every bug became a question
-with a definite answer: at which layer do the two stop agreeing?
+## More
 
-```
-py/reference.py   fp32 model, the ground truth
-py/quant.py       the integer twin the assembly must match exactly
-py/export.py      checkpoint -> 4-bit blobs, product tables, src/weights.asm
-py/harness.py     boots the ROM in PyBoy, reads its WRAM back out
-```
-
-## Reading the source
-
-One concept per file. `AGENTS.md` has the suggested order, but the short version:
-`matvec.asm` is the kernel everything else is measured against, `state.asm` holds
-the requantization, and `forward.asm` is the layer loop that ties it together.
-
-- [`docs/MAKING-OF.md`](docs/MAKING-OF.md) — how it was built, and what was tried
-  and thrown away
-- [`docs/LOG.md`](docs/LOG.md) — every experiment with before/after cycle counts,
-  including the ones that failed
-- [`docs/DECISIONS.md`](docs/DECISIONS.md) — decisions made after reading the code
+- [Making of](docs/MAKING-OF.md) — how it was built, and what was thrown away
+- [Experiment log](docs/LOG.md) — every measurement, including the failures
+- [Decisions](docs/DECISIONS.md) — what changed after each read of the code
 
 ## Credits
 
-- [karpathy/tinyllamas](https://huggingface.co/karpathy/tinyllamas) —
-  `stories260K`, the model being run
-- [gbc-transformer](https://github.com/maddiedreese/gbc-transformer) — the
-  reference point that set the target
-- [dhepper/font8x8](https://github.com/dhepper/font8x8) — public-domain font
-- [RGBDS](https://rgbds.gbdev.io), [gbdev hardware.inc](https://github.com/gbdev/hardware.inc),
-  [PyBoy](https://github.com/Baekalfen/PyBoy), [SameBoy](https://sameboy.github.io)
+[karpathy/tinyllamas](https://huggingface.co/karpathy/tinyllamas) (`stories260K`)
+· [gbc-transformer](https://github.com/maddiedreese/gbc-transformer) ·
+[dhepper/font8x8](https://github.com/dhepper/font8x8) ·
+[RGBDS](https://rgbds.gbdev.io) ·
+[gbdev hardware.inc](https://github.com/gbdev/hardware.inc) ·
+[PyBoy](https://github.com/Baekalfen/PyBoy) ·
+[SameBoy](https://sameboy.github.io)

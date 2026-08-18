@@ -90,6 +90,7 @@ Main:
     call Keyboard_Run           ; blocks until START
     call Encode
     call Console_Clear
+    call StatusWin_Show
     call Console_Flush
 
     ld a, GEN_STEPS
@@ -112,6 +113,7 @@ Main:
     jr z, .waitStart
     xor a
     ld [wReady], a
+    call StatusWin_Hide
     jp .app
 
 

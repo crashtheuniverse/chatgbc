@@ -12,6 +12,9 @@ wConsole:: ds CON_SIZE
 SECTION "Console state", WRAM0
 wCursorX:: db
 wCursorY:: db
+; Last row the console may use. The status window covers the rows below it, so
+; text scrolled down there would be written and never seen.
+wConBottom:: db
 
 SECTION "Console code", ROM0
 
@@ -31,6 +34,8 @@ Console_Clear::
     xor a
     ld [wCursorX], a
     ld [wCursorY], a
+    ld a, CON_H - 1
+    ld [wConBottom], a          ; a cleared screen belongs entirely to the console
     ret
 
 ; Copies the shadow buffer to the BG tilemap. Safe only outside rendering, so
@@ -114,10 +119,12 @@ Console_NewLine::
     ld [wCursorX], a
     ld a, [wCursorY]
     inc a
-    cp CON_H
+    ld hl, wConBottom
+    cp [hl]
     jr c, .store
+    jr z, .store
     call Console_Scroll         ; stay on the last row, move everything else up
-    ld a, CON_H - 1
+    ld a, [wConBottom]
 .store
     ld [wCursorY], a
     ret
@@ -126,9 +133,16 @@ Console_NewLine::
 ; contiguous in the shadow (stride CON_W), so this is one forward copy, and the
 ; next flush pushes the result out with the usual single GDMA.
 Console_Scroll::
+    ld a, [wConBottom]
+    ld l, a
+    ld h, 0
+REPT 5
+    add hl, hl                  ; bottom * CON_W = bytes to move
+ENDR
+    ld b, h
+    ld c, l
     ld de, wConsole
     ld hl, wConsole + CON_W
-    ld bc, (CON_H - 1) * CON_W
 .move
     ld a, [hl+]
     ld [de], a
@@ -138,7 +152,14 @@ Console_Scroll::
     or c
     jr nz, .move
 
-    ld hl, wConsole + (CON_H - 1) * CON_W
+    ld a, [wConBottom]
+    ld l, a
+    ld h, 0
+REPT 5
+    add hl, hl
+ENDR
+    ld de, wConsole
+    add hl, de
     ld b, CON_W
     ld a, ' ' - FONT_FIRST
 .blank

@@ -27,6 +27,7 @@ DEF KB_STEP  EQU 2                  ; columns between characters
 DEF KB_STEP_Y EQU 2                 ; and rows between them, so descenders on
                                     ; j/p/q/y do not run into the row below
 DEF KB_CELLS EQU KB_COLS * KB_ROWS
+DEF KB_PROMPTS EQU 8
 
 ; Screen rows, top to bottom: title border, prompt, rule, grid, rule, hints,
 ; bottom border. KB_COL0 is the left margin everything inside the box lines up
@@ -44,6 +45,8 @@ wKbPrev::   db                      ; the one cell currently holding attribute 1
 wKbCase::   db                      ; 0 = lower, 1 = upper
 wJoyHeld:   db
 wJoyNew::   db
+wKbSeen::   db                      ; nonzero once the opening prompt has been shown
+wRng::      db
 
 SECTION "Keyboard code", ROM0
 
@@ -234,7 +237,7 @@ Kb_PutWrapped:
 
 ; Runs the entry screen until START, leaving text in wPromptText/wPromptLen.
 Keyboard_Run::
-    ld hl, sKbDefault               ; opens with a prompt rather than a blank line
+    call Kb_PickPrompt              ; opens with a prompt rather than a blank line
     ld de, wPromptText
     ld b, 0
 .fill
@@ -360,5 +363,58 @@ Keyboard_Run::
     call Kb_DrawCursor              ; wKbPrev still names the stale cell
     jp .loop
 
-sKbDefault: db "Once upon a time", 0
+; hl = one of the starter prompts, so a tester has something new to try.
+;
+; The first one is always the same, deliberately. A fixed opening prompt is what
+; lets the golden-token test assert on an exact sequence and what makes a
+; screenshot reproducible. Every later visit is stirred by rDIV, which by then
+; carries however long the player spent on the previous screen - genuinely
+; unpredictable, unlike rDIV at boot, which reads the same on every run. There
+; is no save RAM and no clock, so that is as much entropy as this cartridge has.
+Kb_PickPrompt:
+    ld a, [wKbSeen]
+    or a
+    jr nz, .roll
+    inc a
+    ld [wKbSeen], a
+    xor a
+    jr .fetch
+.roll
+    call Kb_Rand
+    and KB_PROMPTS - 1
+.fetch
+    add a, a
+    ld l, a
+    ld h, 0
+    ld de, KbPrompts
+    add hl, de
+    ld a, [hl+]
+    ld h, [hl]
+    ld l, a
+    ret
+
+; An 8-bit linear congruential step, stirred with the divider.
+Kb_Rand:
+    ld a, [wRng]
+    ld b, a
+    add a, a
+    add a, a
+    add a, b                        ; 5x
+    inc a
+    ld b, a
+    ldh a, [rDIV]
+    xor b
+    ld [wRng], a
+    ret
+
+KbPrompts:
+    dw sP0, sP1, sP2, sP3, sP4, sP5, sP6, sP7
+sP0: db "Once upon a time", 0
+sP1: db "The little dog", 0
+sP2: db "Lily and Tom went", 0
+sP3: db "One day a boy", 0
+sP4: db "In the big forest", 0
+sP5: db "The cat saw a", 0
+sP6: db "Anna wanted to", 0
+sP7: db "There was a tiny", 0
 sKbHelp:    db "SELECT abc/ABC", $0A, "A ADD    B DEL", $0A, "START GENERATE", 0

@@ -4,7 +4,9 @@ INCLUDE "hardware.inc"
 INCLUDE "chatgbc.inc"
 
 SECTION "Numeric state", WRAM0
-wNum:: ds 4                     ; little-endian working value
+wNum::      ds 4                ; little-endian working value
+wDigits::   ds 10               ; the rendered decimal, no terminator
+wDigitLen:: db
 
 SECTION "Numeric code", ROM0
 
@@ -22,6 +24,30 @@ Print_Dec32At::
 
 ; Prints wNum in decimal with no leading zeros. Destroys wNum.
 Print_Dec32::
+    call Dec32_Render
+    ld hl, wDigits
+    ld a, [wDigitLen]
+    ld b, a
+.out
+    ld a, [hl+]
+    push hl
+    push bc
+    call Console_PutChar
+    pop bc
+    pop hl
+    dec b
+    jr nz, .out
+    ret
+
+; Renders wNum into wDigits with no leading zeros, length in wDigitLen.
+; Destroys wNum.
+;
+; Two things print numbers - the console and the status window - and they format
+; through here rather than each carrying their own loop, which is why they can
+; never disagree about a value.
+Dec32_Render::
+    xor a
+    ld [wDigitLen], a
     ld hl, .powers
     ld c, 0                     ; set once a significant digit has been emitted
     ld d, 10                    ; powers of ten remaining
@@ -46,9 +72,17 @@ Print_Dec32::
     ld c, 1
     push hl
     push de
-    push bc
-    call Console_PutChar
-    pop bc
+    push af
+    ld a, [wDigitLen]
+    inc a
+    ld [wDigitLen], a
+    dec a
+    ld e, a
+    ld d, 0
+    ld hl, wDigits
+    add hl, de
+    pop af
+    ld [hl], a
     pop de
     pop hl
 .skip
@@ -62,8 +96,11 @@ Print_Dec32::
     ld a, c
     or a
     ret nz
-    ld a, '0'                   ; the value was zero, so nothing printed yet
-    jp Console_PutChar
+    ld a, '0'                   ; the value was zero, so nothing emitted yet
+    ld [wDigits], a
+    ld a, 1
+    ld [wDigitLen], a
+    ret
 
 .powers
     dl 1000000000

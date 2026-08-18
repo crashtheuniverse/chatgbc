@@ -1,14 +1,19 @@
 """Record build/chatgbc.gbc generating text, as an animated GIF.
 
-The ROM prints roughly a token every five seconds, which is fine to watch on a
-handheld and useless as a demo loop. So this captures one frame per token
-emitted rather than one frame per emulated frame: the result is honest about
-what the ROM prints and dishonest only about how long it took, which the caption
-has to say out loud.
+Two steps, deliberately separate:
 
-A GIF holds a still by giving one frame a long duration, not by repeating it -
-repeating a frame and then also stretching each copy is how you end up with an
-eleven-second pause on the title screen.
+    python py/gifcap.py capture     ROM -> captures/frame_NNNN.png
+    python py/gifcap.py build       captures/*.png -> build/chatgbc.gif
+    python py/gifcap.py             both
+
+Splitting them means retiming, trimming or hand-picking frames costs nothing -
+the emulator run is the slow part and it only has to happen once. captures/ is
+gitignored.
+
+One frame is captured per token emitted rather than per emulated frame. The ROM
+prints a token every few seconds, which is fine on a handheld and useless as a
+demo loop, so the result is honest about what it prints and dishonest only about
+how long it took. The caption has to say so.
 """
 
 import sys
@@ -17,8 +22,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from harness import Rom, ROOT
 
+CAPTURES = ROOT / "captures"
+OUT = ROOT / "build" / "chatgbc.gif"
+
 CAP = 170               # frame cap; generation normally ends first
-OPEN_MS = 1500          # sit on the entry screen
+OPEN_MS = 1500          # hold on the entry screen
 STEP_MS = 120           # per token, which works out around 40x the hardware
 CLOSE_MS = 2500         # and on the finished text, before the loop restarts
 SCALE = 2
@@ -26,16 +34,22 @@ SCALE = 2
 
 def grab(rom):
     rom.pyboy.tick(1, True)
-    img = rom.pyboy.screen.image.convert("RGB")
-    return img.resize((160 * SCALE, 144 * SCALE), 0)
+    return rom.pyboy.screen.image.convert("RGB").resize(
+        (160 * SCALE, 144 * SCALE), 0)
 
 
-def main():
-    out = ROOT / "build" / "chatgbc.gif"
+def capture():
+    CAPTURES.mkdir(exist_ok=True)
+    for old in CAPTURES.glob("frame_*.png"):
+        old.unlink()
+
     rom = Rom()
     rom.pyboy.tick(400, False)                      # boot to the entry screen
 
-    frames = [grab(rom)]
+    n = 0
+    grab(rom).save(CAPTURES / f"frame_{n:04d}.png")
+    n += 1
+
     rom.pyboy.button_press("start")
     rom.pyboy.tick(4, False)
     rom.pyboy.button_release("start")
@@ -49,7 +63,7 @@ def main():
     # changes again.
     ready, magic = rom.addr("wReady"), rom.defs["READY_MAGIC"]
     seen = printed()
-    while len(frames) < CAP:
+    while n < CAP:
         rom.pyboy.tick(30, False)
         if rom.pyboy.memory[ready] == magic:
             print("  ROM finished generating", flush=True)
@@ -57,22 +71,36 @@ def main():
         now = printed()
         if now != seen:
             seen = now
-            frames.append(grab(rom))
-            if len(frames) % 20 == 0:
-                print(f"  {len(frames)} frames, "
-                      f"{rom.read('wGenCount')[0]} tokens", flush=True)
+            grab(rom).save(CAPTURES / f"frame_{n:04d}.png")
+            n += 1
+            if n % 20 == 0:
+                print(f"  {n} frames, {rom.read('wGenCount')[0]} tokens",
+                      flush=True)
+    rom.close()
+    print(f"captured {n} frames into {CAPTURES}")
 
-    frames.append(frames[-1])
+
+def build():
+    from PIL import Image
+
+    paths = sorted(CAPTURES.glob("frame_*.png"))
+    if not paths:
+        sys.exit(f"no frames in {CAPTURES} - run `gifcap.py capture` first")
+
+    frames = [Image.open(p) for p in paths]
+    frames.append(frames[-1])                       # hold the last one
     durations = [OPEN_MS] + [STEP_MS] * (len(frames) - 2) + [CLOSE_MS]
     frames[0].save(
-        out, save_all=True, append_images=frames[1:],
+        OUT, save_all=True, append_images=frames[1:],
         duration=durations, loop=0, optimize=True,
     )
-    rom.close()
-    secs = sum(durations) / 1000
-    print(f"wrote {out} ({len(frames)} frames, {secs:.1f}s, "
-          f"{out.stat().st_size / 1024:.0f} KB)")
+    print(f"wrote {OUT} ({len(frames)} frames, {sum(durations) / 1000:.1f}s, "
+          f"{OUT.stat().st_size / 1024:.0f} KB)")
 
 
 if __name__ == "__main__":
-    main()
+    what = sys.argv[1] if len(sys.argv) > 1 else "both"
+    if what in ("capture", "both"):
+        capture()
+    if what in ("build", "both"):
+        build()

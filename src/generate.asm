@@ -11,6 +11,10 @@ SECTION "Generate state", WRAM0
 wPrev::      dw                     ; previous token, for the BOS space rule
 wGenSteps::  db
 wTokCycles:: ds 4                   ; cycles for the most recent forward pass
+; Attention is O(T), so the most recent pass is not representative of any other
+; one: the first token attends a single position and the last attends the whole
+; window. The honest per-token figure is this total over wGenCount.
+wGenTotal::  ds 4
 wGenCount::  db                     ; tokens emitted so far
 ; Every token the model emits, so tests can check the model rather than the
 ; screen. Once the console scrolls, scraping the display stops being a faithful
@@ -72,6 +76,10 @@ Generate::
     ld [wPos], a
     ld [wAbsPos], a
     ld [wGenCount], a
+    ld [wGenTotal + 0], a
+    ld [wGenTotal + 1], a
+    ld [wGenTotal + 2], a
+    ld [wGenTotal + 3], a
     ld [wPrev + 0], a
     ld [wPrev + 1], a
 
@@ -81,24 +89,17 @@ Generate::
     ld [wToken + 1], a
 
 .step
-    ; Only the first token is profiled. Leaving the timer running for the whole
-    ; generation is measurably expensive under emulation, and one forward pass
-    ; is all the s/token figure needs.
-    ld a, [wGenCount]
-    or a
-    jr nz, .noProf
+    ; Every token is profiled, not just the first. The ISR costs ~0.15%, and in
+    ; exchange the status bar shows a live figure - which also makes the ring
+    ; visible, since the cost climbs with the number of attended positions until
+    ; the cache is full and then holds flat.
     call Prof_Start
-.noProf
     call Forward
-    ld a, [wGenCount]
-    or a
-    jr nz, .skipStop
     call Prof_Stop
     ld hl, wProfCycles
     ld de, wTokCycles
     ld b, 4
     call CopyN
-.skipStop
 
     ; Prompt tokens are forced; after that the model's own argmax continues.
     ld a, [wAbsPos]
@@ -151,9 +152,30 @@ Generate::
     call PrintToken
     call Console_Flush
 
+    ld hl, wTokCycles               ; running total, for a truthful average
+    ld de, wGenTotal
+    ld c, 4
+    or a                            ; clear carry before the chain
+.total
+    ld a, [de]
+    adc a, [hl]
+    ld [de], a
+    inc hl
+    inc de
+    dec c
+    jr nz, .total
+
     ld a, [wGenCount]
     inc a
     ld [wGenCount], a
+
+    call StatusWin_Update           ; cycles and count, both current
+    call Joy_Read
+    ld a, [wJoyNew]
+    and KB_START
+    ret nz                          ; the player asked to go back
+
+    ld a, [wGenCount]
     ld b, a
     ld a, [wGenSteps]
     cp b

@@ -259,7 +259,13 @@ not hold for a model meant to hold a conversation.
 ## What the cost model actually says
 
 Obtained by stubbing kernels one at a time and re-measuring. The output becomes
-nonsense but the timing stays valid:
+nonsense but the timing stays valid.
+
+**Read the shares below with their caveat**: they were measured on the *first*
+token, where attention touches a single cached position. Attention is
+O(context), and once the 64-position window is full it is roughly 65% of a
+token and these proportions no longer hold. That was found late, by putting a
+live cycle counter on screen — see the log.
 
 | component | share of a token |
 |---|---|
@@ -307,4 +313,5 @@ document which registers they destroy.
 
 ---
 
-*ChatGBC v0.1 — 9,658,688 M-cycles per token, measured by the cartridge itself.*
+*ChatGBC v0.1 — 21,121,834 M-cycles per token averaged over a 96-token run,
+measured by the cartridge itself.*

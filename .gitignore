@@ -2,9 +2,8 @@ tools/
 .venv/
 build/
 models/
+captures/
 src/weights/
-src/hardware.inc
-src/font.inc
 __pycache__/
 *.pyc
 .pytest_cache/
