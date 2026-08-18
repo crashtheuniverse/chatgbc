@@ -98,11 +98,23 @@ class Rom:
 
     # --- execution ------------------------------------------------------
 
-    def run_until_ready(self, max_frames=900):
-        """Tick until the ROM sets wReady, or give up. Returns frames elapsed."""
+    def run_until_ready(self, max_frames=900, press_start=True):
+        """Tick until the ROM sets wReady, or give up. Returns frames elapsed.
+
+        The ROM opens on the keyboard screen with a default prompt, so the
+        harness taps START once to begin generation - the same thing a player
+        does, which means the entry screen is on the tested path too.
+        """
         magic = self.defs["READY_MAGIC"]
         ready = self.addr("wReady")
+        # Tap START repeatedly during startup rather than once: the entry screen
+        # only appears after the VRAM clear, font load and calibration, and a
+        # single early press would land before anything is listening.
         for _ in range(max_frames):
+            if press_start and self.frames < 400 and self.frames % 20 == 0:
+                self.pyboy.button_press("start")
+            elif press_start and self.frames % 20 == 8:
+                self.pyboy.button_release("start")
             self.pyboy.tick(1, False)
             self.frames += 1
             if self.pyboy.memory[ready] == magic:

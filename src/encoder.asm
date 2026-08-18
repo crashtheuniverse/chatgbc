@@ -18,7 +18,6 @@ INCLUDE "chatgbc.inc"
 INCLUDE "model.inc"
 
 DEF ENC_MAX_PIECE EQU 7             ; longest piece in the vocabulary
-DEF PROMPT_MAX    EQU 48            ; characters the user can type
 DEF TOK_MAX       EQU 64            ; tokens after encoding
 
 SECTION "Encoder state", WRAM0
@@ -44,13 +43,13 @@ SECTION "Encoder code", ROM0
 ; The caller must already have selected BANK(enc_vocab).
 Enc_Piece:
     add hl, hl
-    ld de, enc_off
+    ld de, enc_all + ENC_OFF_AT
     add hl, de
     ld a, [hl+]
     ld e, a
     ld a, [hl]
     ld d, a
-    ld hl, enc_vocab
+    ld hl, enc_all + ENC_VOCAB_AT
     add hl, de
     ld d, h
     ld e, l
@@ -117,7 +116,7 @@ Enc_Lookup:
     ret nc
     push hl
     add hl, hl
-    ld de, enc_rank
+    ld de, enc_all + ENC_RANK_AT
     add hl, de
     ld a, [hl+]
     ld c, a
@@ -176,7 +175,7 @@ Enc_AppendPiece:
 
 ; wPromptText/wPromptLen -> wTokBuf/wTokCount.
 Encode::
-    ld a, BANK(enc_vocab)
+    ld a, BANK(enc_all)
     ld [rROMB0], a
 
     ld hl, wTokBuf                  ; BOS

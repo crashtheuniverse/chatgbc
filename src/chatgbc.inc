@@ -11,6 +11,7 @@ DEF CON_H      EQU 18
 DEF CON_VIS_W  EQU 20
 DEF CON_SIZE   EQU CON_W * CON_H          ; 576 bytes = 36 GDMA blocks
 DEF FONT_FIRST EQU 32                     ; VRAM tile N holds ASCII N + 32
+DEF PROMPT_MAX EQU 48                     ; characters the user can type                     ; VRAM tile N holds ASCII N + 32
 
 ; --- Model arithmetic -------------------------------------------------------
 ; Products are halved in the exported tables, which keeps the running sum inside
@@ -22,6 +23,16 @@ DEF ACC_BYTES EQU 2
 ; score is q.k over HEAD_SIZE terms, up to 8 * 127 * 127 = 129,032, so it needs
 ; 24 bits regardless of how wide the matvec accumulator happens to be.
 DEF SCORE_BYTES EQU 3
+
+; --- Input -----------------------------------------------------------------
+; Joy_Read returns the d-pad in the high nibble and buttons in the low one.
+DEF KB_RIGHT EQU %00010000
+DEF KB_LEFT  EQU %00100000
+DEF KB_UP    EQU %01000000
+DEF KB_DOWN  EQU %10000000
+DEF KB_A     EQU %00000001
+DEF KB_B     EQU %00000010
+DEF KB_START EQU %00001000
 
 ; --- Profiler ---------------------------------------------------------------
 ; TAC_16KHZ makes TIMA tick once per 64 M-cycles. That ratio is fixed to the CPU

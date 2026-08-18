@@ -80,25 +80,35 @@ Main:
     ldh [rLCDC], a
 
     call RecordStatus
-    call Encode_TestPrompt   ; encode before generating
     call Measure
-    call Report
+
+.app
+    call Keyboard_Run           ; blocks until START
+    call Encode
+    call Console_Clear
     call Console_Flush
-IF GEN_STEPS > 0
+
     ld a, GEN_STEPS
     ld [wGenSteps], a
     call Generate
     call Console_Flush
     call ReportTiming
     call Console_Flush
-ENDC
+
     ; Last, so the forward pass cannot overwrite the buffer it checks.
     call MeasureSelftest
 
-    ld a, READY_MAGIC           ; last, so the harness never sees a half-drawn screen
+    ld a, READY_MAGIC           ; a stable window for the harness to read
     ld [wReady], a
-.done
-    jr .done
+.waitStart
+    call Console_WaitVBlank
+    call Joy_Read
+    ld a, [wJoyNew]
+    and KB_START
+    jr z, .waitStart
+    xor a
+    ld [wReady], a
+    jp .app
 
 
 ; --- Boot helpers -----------------------------------------------------------
@@ -193,7 +203,7 @@ SetPalette:
     ld a, BGPI_AUTOINC          ; start at index 0 and step after each write
     ldh [rBCPS], a
     ld hl, PaletteData
-    ld b, PAL_SIZE
+    ld b, PAL_SIZE * 2          ; palette 0 normal, palette 1 inverted
 .loop
     ld a, [hl+]
     ldh [rBCPD], a
@@ -203,6 +213,7 @@ SetPalette:
 
 PaletteData:
     dw $7FFF, $56B5, $2529, $0000   ; BGR555: white, light grey, dark grey, black
+    dw $0000, $2529, $56B5, $7FFF   ; inverted, used for the keyboard cursor
 
 RecordStatus:
     ld b, STATUS_CGB

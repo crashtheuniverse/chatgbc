@@ -241,13 +241,20 @@ def main():
     for piece in tok.vocab:
         enc_off.append(len(enc))
         enc += bytes([len(piece)]) + piece
-    blob("enc_vocab", bytes(enc), rom0=False)
-    blob("enc_off", np.array(enc_off, dtype="<u2").tobytes())
     # Scores only need to preserve order, so rank them: highest score = rank 0.
     order = np.argsort(-np.array(tok.scores, dtype=np.float64), kind="stable")
     rank = np.empty(len(tok.scores), dtype="<u2")
     rank[order] = np.arange(len(tok.scores), dtype=np.uint16)
-    blob("enc_rank", rank.tobytes())
+
+    # One blob, because the encoder touches all three together: keeping them in
+    # a single section guarantees they share a bank, so the whole encode needs
+    # exactly one bank switch instead of one per lookup.
+    off_bytes = np.array(enc_off, dtype="<u2").tobytes()
+    rank_bytes = rank.tobytes()
+    blob("enc_all", off_bytes + rank_bytes + bytes(enc), rom0=False)
+    const("ENC_OFF_AT", 0)
+    const("ENC_RANK_AT", len(off_bytes))
+    const("ENC_VOCAB_AT", len(off_bytes) + len(rank_bytes))
     const("TOK_BOS", ref.BOS)
     const("TOK_EOS", ref.EOS)
     const("TOK_SPACE", tok.lookup[b" "])

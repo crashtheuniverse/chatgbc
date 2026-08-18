@@ -307,14 +307,8 @@ test_x:: INCBIN "build/blobs/test_x.bin"   ; 64 bytes
 SECTION "test_h1", ROM0
 test_h1:: INCBIN "build/blobs/test_h1.bin"   ; 172 bytes
 
-SECTION "enc_vocab", ROMX
-enc_vocab:: INCBIN "build/blobs/enc_vocab.bin"   ; 2639 bytes
-
-SECTION "enc_off", ROM0
-enc_off:: INCBIN "build/blobs/enc_off.bin"   ; 1024 bytes
-
-SECTION "enc_rank", ROM0
-enc_rank:: INCBIN "build/blobs/enc_rank.bin"   ; 1024 bytes
+SECTION "enc_all", ROMX
+enc_all:: INCBIN "build/blobs/enc_all.bin"   ; 4687 bytes
 
 SECTION "prompt", ROM0
 prompt:: INCBIN "build/blobs/prompt.bin"   ; 10 bytes

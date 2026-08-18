@@ -53,15 +53,19 @@ Console_Flush::
     ldh a, [rLCDC]
     bit B_LCDC_ENABLE, a
     jr z, Console_FlushNow      ; LCD off: LY never advances, so don't wait on it
-.leaveVBlank
-    ldh a, [rLY]
-    cp 144
-    jr nc, .leaveVBlank         ; already inside VBlank; let it finish
-.enterVBlank
-    ldh a, [rLY]
-    cp 144
-    jr c, .enterVBlank
+    call Console_WaitVBlank
     jr Console_FlushNow
+
+; Blocks until the start of VBlank, when VRAM is safe to touch.
+Console_WaitVBlank::
+    ldh a, [rLY]
+    cp 144
+    jr nc, Console_WaitVBlank   ; already inside VBlank; let it finish
+.enter
+    ldh a, [rLY]
+    cp 144
+    jr c, .enter
+    ret
 
 ; hl = address of the cursor cell in the shadow buffer. Only a and hl change.
 Console_CursorAddr::
