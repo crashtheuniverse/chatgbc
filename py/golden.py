@@ -12,6 +12,7 @@ from pathlib import Path
 import numpy as np
 
 import export as E
+import harness
 import quant as Q
 import reference as ref
 
@@ -26,8 +27,19 @@ def build():
     return model, tok, q
 
 
+def default_steps():
+    """However many tokens the ROM actually generates.
+
+    Hardcoding a smaller number here silently weakens the suite: the test that
+    proves the ring cache wraps skips itself when the golden is shorter than the
+    attention window, so a regeneration can drop coverage without failing.
+    """
+    defs = harness.load_defs(ROOT / "src" / "main.asm")
+    return defs["GEN_STEPS"]
+
+
 def main():
-    steps = int(sys.argv[1]) if len(sys.argv) > 1 else 24
+    steps = int(sys.argv[1]) if len(sys.argv) > 1 else default_steps()
     model, tok, q = build()
     rtbl = Q.rope_table(E.MAX_POS, q.cfg.head_size)
     state = Q.QState(q.cfg, E.SEQ)

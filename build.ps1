@@ -10,9 +10,31 @@ $py    = Join-Path $root '.venv\Scripts\python.exe'
 if (-not (Test-Path (Join-Path $rgbds 'rgbasm.exe'))) { throw 'toolchain missing - run .\bootstrap.ps1' }
 New-Item -ItemType Directory -Force -Path $build | Out-Null
 
-# Generated sources
-& $py (Join-Path $root 'py\gen_font.py')
-if ($LASTEXITCODE -ne 0) { throw 'gen_font.py failed' }
+# Generated sources.
+#
+# src/font.inc is committed, so a clone that only wants to assemble does not
+# need the .venv or the upstream font. Regenerate only when the source is here.
+$fontSrc = Join-Path $root 'tools\font8x8_basic.h'
+$fontInc = Join-Path $root 'src\font.inc'
+if ((Test-Path $fontSrc) -and (Test-Path $py)) {
+    & $py (Join-Path $root 'py\gen_font.py')
+    if ($LASTEXITCODE -ne 0) { throw 'gen_font.py failed' }
+} elseif (-not (Test-Path $fontInc)) {
+    throw 'src\font.inc missing and cannot be generated - run .\bootstrap.ps1'
+}
+
+# The weight blobs are the model itself, far too large to commit. weights.asm
+# INCBINs them, so without this step rgbasm fails on a missing file rather than
+# on anything a reader could act on.
+if (-not (Test-Path (Join-Path $build 'blobs\tbl_rsqrt.bin'))) {
+    if (-not (Test-Path (Join-Path $root 'models\stories260K.bin'))) {
+        throw 'model checkpoint missing - run .\bootstrap.ps1'
+    }
+    if (-not (Test-Path $py)) { throw 'python venv missing - run .\bootstrap.ps1' }
+    if (-not $Quiet) { Write-Host '  exporting weights (first build only)' }
+    & $py (Join-Path $root 'py\export.py')
+    if ($LASTEXITCODE -ne 0) { throw 'export.py failed' }
+}
 
 $sources = Get-ChildItem (Join-Path $root 'src') -Filter *.asm | Sort-Object Name
 $objects = @()
