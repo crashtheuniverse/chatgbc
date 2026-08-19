@@ -14,7 +14,7 @@ can ask it. Train a real model and you wait hours. Prepare the data and you wait
 days. That buys a few experiments a week. At that price you stop asking
 speculative questions.
 
-Here a question costs **fifty-four seconds**. Assemble, link, boot the ROM
+Here a question costs **twenty-five seconds**. Assemble, link, boot the ROM
 headless, generate 96 tokens, check 29 assertions. On a laptop.
 
 The constraints are the instrument, not the price of it:
