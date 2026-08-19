@@ -64,9 +64,6 @@ A C compiler will not find this. The loop wants to be a table lookup indexed by
 a register that happens to be the low byte of a hardware address. There is no
 way to say that in C.
 
-The inner loop does four outputs at a time, so the loop counter costs one cycle
-per MAC instead of four.
-
 ## Everything else is a shift
 
 No division in the forward pass. No floating point after export.
@@ -75,11 +72,70 @@ Quantization exponents are calibrated offline and rounded to powers of two, so
 every rescale is an arithmetic shift. Weight scales are per-output-row, from
 4-bit Lloyd–Max codebooks. `rsqrt`, `exp`, `sigmoid` and reciprocal are tables.
 
-The accumulator started at 24 bits. The instinct is to make it carry-aware and
-squeeze 65K out of 16. The cheaper move was the opposite: **shrink the
-products.** The exported tables are quarter-scaled, and at that scale the sum
-provably stays inside signed 16 bits. That deleted a byte from the innermost
-loop. **1.18x**, from a change in the exporter and none in the kernel.
+That is also what makes the rescale routine worth the attention it gets below:
+if every requantization is a shift, the shift routine is on every hot path in
+the model.
+
+## Making it fast, in order
+
+Every step bit-exact against the twin. These are first-token figures — see the
+caveat further down.
+
+| step | cycles/token | |
+|---|---|---|
+| the first version that generated text | 20,243,136 | |
+| precomputed product tables | 13,835,520 | 1.46x |
+| unrolled inner loop, four outputs | 12,993,984 | 1.065x |
+| quarter-scaled products, 16-bit accumulators | 11,007,296 | 1.18x |
+| byte-stepping the requant shift | 10,266,240 | 6.7% |
+| shared scratch into HRAM | 9,831,424 | 4.4% |
+| `swap` for the 4-bit step | 9,658,688 | 1.8% |
+
+**2.10x overall.**
+
+**Unrolling.** Four outputs per iteration drops the loop counter from 4 cycles
+per MAC to 1. Every output count in the model — 32, 64, 172, 512 — is a multiple
+of four, which also let the block chunking go entirely. The kernel got shorter as
+well as faster.
+
+**16-bit accumulators, rejected and then taken.** The accumulator started at 24
+bits, three bytes touched on every MAC. The obvious fix is to make it
+carry-aware and squeeze 65K out of 16. That attempt died on measurement. I checked the true accumulator range across four prompts: five of
+eight matrices peak past int16, the worst at 41,534 against a 32,767 limit. A
+wrapped accumulator flips sign rather than clamping, which is worse than the
+saturation it replaces.
+
+So I got them the other way round: shrink the **products**, not the accumulator.
+The exported tables are quarter-scaled, and at that scale the sum provably stays
+inside signed 16 bits for every matrix. A byte left the innermost loop and the
+bias correction left requantization — from a change in the exporter and none in
+the kernel. Estimating cycles is cheap. Estimating *ranges* is where intuition
+fails.
+
+**The requant shift stopped being a loop of single-bit shifts.** It rescales the
+shared 32-bit scratch, and its counts are calibration data in the 13-16 range. A
+shift of eight is a byte move. A shift of four is a `swap` — an SM83 instruction
+the Z80 never had, which exchanges a byte's two halves in one go.
+
+So it became a cascade of three step sizes: byte, nibble, bit. Each threshold is
+one higher than the step it admits, so at least one bit always leaves the value
+singly — the carry it strands is the rounding bit that round-half-up reads
+afterwards. Peeling bytes cost ~30 cycles where the bit loop cost ~350.
+
+Worth separating two things that look alike. Where a shift count is known at
+assembly time, nothing needed fixing: `REPT 5 / add hl, hl` is an assembler
+macro, not a runtime loop, and already emits five straight-line instructions.
+`Requant_Shift` is the one place the count genuinely varies.
+
+**HRAM is not faster memory, it is shorter instructions.** `ldh a, [n]` is two
+bytes and 3 M-cycles where `ld a, [nn]` is three and 4; `ldh a, [c]` is one byte
+and 2, which is what the matvec inner loop rides on. HRAM was holding only the
+product table — 32 of its 127 bytes. Moving the shared 32-bit scratch there made
+117 accesses a cycle cheaper each.
+
+The ROM clears WRAM at boot and not HRAM, so the cold-boot test had to start
+dirtying HRAM as well. Otherwise moving a variable there quietly escapes the test
+that exists to catch reading before writing.
 
 ## The ring, and infinite context
 
@@ -193,6 +249,30 @@ starts.
 ids, whose pieces are literal strings like `<0x4F>`. Nothing in the merge table
 matches that, so BPE ran, found no merges, terminated correctly, and accomplished
 nothing. Every test passed. The output was fine — from a worse tokenization.
+
+## How this was made
+
+Worth saying plainly, because the code is unusually clean for a solo project and
+someone will ask.
+
+I did not type this assembly. I directed it, and I read it — which is most of
+why it is in assembly at all. Assembly is legible in a way I can argue with: I
+can look at a loop and know what it costs.
+
+The parts that were mine are the ones that decided the shape of it. Choosing a
+small model and an emulator so the loop would be fast. Insisting on the bit-exact
+twin as a contract. The ring buffer, and with it unbounded context. Asking
+whether a 16-bit accumulator could be made to work, which it could, though not
+the way I first suggested. Asking why a shift was a loop, and how HRAM was being
+used — both of which turned into real cycles. Deciding to ship before touching
+the model.
+
+And several bugs came from sitting down and reading it: a black block from a
+stranded palette attribute, a keyboard with no space key, a headline cycle count
+that turned out to be the cheapest token in the run. None of those had a failing
+test. All of them had a person looking at the thing.
+
+`DECISIONS.md` has the rest.
 
 ---
 

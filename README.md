@@ -77,6 +77,8 @@ is a bisection with a definite answer.
 
 ## More
 
+- [How it works](docs/CONCEPTS.md) — a short tour of the model: tokens, heads,
+  the KV cache, and why the multiply is a table lookup. No ML background needed
 - [Making of](docs/MAKING-OF.md) — how it was built, and what was thrown away
 - [Experiment log](docs/LOG.md) — every measurement, including the failures
 - [Decisions](docs/DECISIONS.md) — what changed after each read of the code
