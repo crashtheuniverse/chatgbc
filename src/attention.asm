@@ -210,15 +210,17 @@ Attn_Softmax:
     ldh [wTotal + 2], a
     ldh [wTotal + 3], a
     ld [wAtT], a
+
+    ; The maximum is fixed for the whole loop, so it is staged once. This used
+    ; to copy it in, copy the score out, swap the two buffers and then subtract -
+    ; three four-byte moves per position to arrange the operands for one.
+    ld hl, wAtMax
+    ld de, wSave32
+    ld bc, 4
+    call CopyBytes
 .expLoop
     ld a, [wAtT]
-    call Attn_LoadScore
-    call SaveTmp32                  ; wSave32 = score
-    ld hl, wAtMax
-    ld de, wTmp32
-    ld bc, 4
-    call CopyBytes                  ; wTmp32 = max
-    call SwapSaveTmp                ; wSave32 = max, wTmp32 = score
+    call Attn_LoadScore             ; wTmp32 = score
     call SubTmpFromSave             ; wTmp32 = max - score, always >= 0
     ld a, [wAttShift]
     call Requant_Shift
