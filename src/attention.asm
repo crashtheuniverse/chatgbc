@@ -218,6 +218,9 @@ Attn_Softmax:
     ld de, wSave32
     ld bc, 4
     call CopyBytes
+
+    ld a, BANK(tbl_exp)             ; banked; every matvec reselects its own
+    ld [rROMB0], a
 .expLoop
     ld a, [wAtT]
     call Attn_LoadScore             ; wTmp32 = score
@@ -266,6 +269,8 @@ Attn_Softmax:
     jp nc, .expLoop
 
     ; Normalize with a reciprocal lookup instead of a division.
+    ld a, BANK(tbl_recip)
+    ld [rROMB0], a
     ld hl, wTotal
     call BitLength32
     ld [wAtBits], a

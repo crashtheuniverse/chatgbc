@@ -154,8 +154,11 @@ def main():
     t = Q.TABLES
     blob("tbl_rsqrt", t["rsqrt"].astype("<u2").tobytes())
     blob("tbl_sigmoid", t["sigmoid"].astype(np.uint8).tobytes())
-    blob("tbl_exp", t["exp"].astype("<u2").tobytes())
-    blob("tbl_recip", t["recip"].astype("<u2").tobytes())
+    # Softmax owns both of these and nothing else touches them, so they are
+    # banked rather than resident. That is a kilobyte back in ROM0, which had
+    # 78 bytes left.
+    blob("tbl_exp", t["exp"].astype("<u2").tobytes(), rom0=False)
+    blob("tbl_recip", t["recip"].astype("<u2").tobytes(), rom0=False)
     blob("tbl_rope", Q.rope_table(MAX_POS, c.head_size).astype("<i2").tobytes(), rom0=False)
 
     # Quarter squares, so attention can multiply without multiplying.

@@ -7,10 +7,10 @@ tbl_rsqrt:: INCBIN "build/blobs/tbl_rsqrt.bin"   ; 512 bytes
 SECTION "tbl_sigmoid", ROM0
 tbl_sigmoid:: INCBIN "build/blobs/tbl_sigmoid.bin"   ; 256 bytes
 
-SECTION "tbl_exp", ROM0
+SECTION "tbl_exp", ROMX
 tbl_exp:: INCBIN "build/blobs/tbl_exp.bin"   ; 512 bytes
 
-SECTION "tbl_recip", ROM0
+SECTION "tbl_recip", ROMX
 tbl_recip:: INCBIN "build/blobs/tbl_recip.bin"   ; 512 bytes
 
 SECTION "tbl_rope", ROMX
