@@ -100,9 +100,18 @@ def test_select_flips_case(entry):
     entry.pyboy.tick(8, False)
 
 
-def test_no_attribute_stranded_after_leaving(rom):
-    """rom has already run START -> generate. Nothing should still be inverted."""
-    attrs = bytes(rom.pyboy.memory[1, 0x9800:0x9800 + 32 * 18])
+def test_no_attribute_stranded_after_leaving(entry):
+    """Leaving the keyboard must clear the cursor cell.
+
+    Runs last in this module, because it takes the fixture off the entry screen.
+    It only needs the transition, not a whole generation - the stranded cell
+    either survives START or it never does.
+    """
+    entry.pyboy.button_press("start")
+    entry.pyboy.tick(4, False)
+    entry.pyboy.button_release("start")
+    entry.pyboy.tick(120, False)
+    attrs = bytes(entry.pyboy.memory[1, 0x9800:0x9800 + 32 * 18])
     assert not any(attrs), (
         "an inverted cell survived into the generation screen, which draws as a "
         "black block over the text"

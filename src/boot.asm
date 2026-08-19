@@ -1,7 +1,11 @@
-; ChatGBC - boot, and the loop the user actually sees.
+; Bringing the machine up, and the pieces both ROMs share.
 ;
-; Brings the machine up (CGB-only, double speed, font, palette, console), then
-; runs keyboard -> encode -> generate -> report, forever.
+; Two entry points build against this. src/app/main.asm is the demo - keyboard,
+; frame, status bar. src/lab/main.asm is the bare one the test suite drives,
+; which exists because the demo path costs wall-clock the loop cannot spare.
+; Whichever is linked provides `Run`, which this jumps to when the machine is
+; up. It has to be a jump, not a call: bring-up moves the stack pointer, so a
+; return address pushed beforehand is popped off a different stack afterwards.
 ;
 ; Measure still times a block whose exact M-cycle cost is known by inspection,
 ; and py/tests/test_phase0.py checks the ROM's answer against that arithmetic.
@@ -17,16 +21,13 @@ INCLUDE "model.inc"
 ; final untaken jr, plus 3 for the `ld bc` setup. py/test_phase0.py repeats this
 ; arithmetic and asserts the ROM agrees.
 DEF CAL_ITERS EQU 10000
-; Tokens to generate. 0 compiles the generation call out entirely, which leaves
-; a ROM that still boots, renders and profiles.
-DEF GEN_STEPS EQU 96
 
 SECTION "VBlank IRQ", ROM0[$40]
     reti
 
 SECTION "Entry", ROM0[$100]
     nop
-    jp Main
+    jp Boot
     ds $150 - @, 0              ; rgbfix fills in the cartridge header
 
 ; The stack must live in WRAM0. The KV cache switches SVBK per layer, and a
@@ -41,9 +42,9 @@ wCalCycles:: ds 4               ; hand-countable block, proves the profiler
 wMvCycles::  ds 4               ; the matvec kernel
 wRowCycles:: ds 4               ; the same sweep without the table build
 
-SECTION "Main", ROM0
+SECTION "Boot", ROM0
 
-Main:
+Boot::
     di
 
     ; The CGB boot ROM leaves $11 in A. The header is CGB-only, so this should
@@ -85,36 +86,8 @@ Main:
     call RecordStatus
     call Measure
     call MeasureFetch           ; ROM vs HRAM execution; see src/fetchtest.asm
+    jp Run                      ; whichever entry point was linked
 
-.app
-    call Keyboard_Run           ; blocks until START
-    call Encode
-    call Console_Clear
-    call StatusWin_Show
-    call Console_Flush
-
-    ld a, GEN_STEPS
-    ld [wGenSteps], a
-    call Generate
-    call Console_Flush
-    call ReportTiming
-    call Console_Flush
-
-    ; Last, so the forward pass cannot overwrite the buffer it checks.
-    call MeasureSelftest
-
-    ld a, READY_MAGIC           ; a stable window for the harness to read
-    ld [wReady], a
-.waitStart
-    call Console_WaitVBlank
-    call Joy_Read
-    ld a, [wJoyNew]
-    and KB_START
-    jr z, .waitStart
-    xor a
-    ld [wReady], a
-    call StatusWin_Hide
-    jp .app
 
 
 ; --- Boot helpers -----------------------------------------------------------
@@ -249,7 +222,7 @@ Measure:
     ld de, wCalCycles
     jr SaveCycles
 
-MeasureSelftest:
+MeasureSelftest::
     call Selftest_Setup
     call Prof_Start
     call Selftest_Run
@@ -272,7 +245,7 @@ SaveCycles::
 
 ; --- Display ----------------------------------------------------------------
 
-ReportTiming:
+ReportTiming::
     ld a, $0A
     call Console_PutChar
     ld hl, sMv

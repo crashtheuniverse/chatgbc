@@ -1,5 +1,9 @@
 # Assembles src/ into build/chatgbc.gbc (CGB-only, MBC5).
-param([switch]$Quiet)
+#
+# Two entry points share everything below src/. -Lab links src/lab/main.asm - no
+# keyboard, no frame, driven by the harness - and writes build/chatgbc-lab.gbc.
+# The default links src/app/main.asm, which is what ships.
+param([switch]$Quiet, [switch]$Lab)
 
 $ErrorActionPreference = 'Stop'
 $root  = $PSScriptRoot
@@ -36,19 +40,27 @@ if (-not (Test-Path (Join-Path $build 'blobs\tbl_rsqrt.bin'))) {
     if ($LASTEXITCODE -ne 0) { throw 'export.py failed' }
 }
 
-$sources = Get-ChildItem (Join-Path $root 'src') -Filter *.asm | Sort-Object Name
+$variant = if ($Lab) { 'lab' } else { 'app' }
+$romName = if ($Lab) { 'chatgbc-lab' } else { 'chatgbc' }
+$outDir  = Join-Path $build $variant
+New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+
+$sources = @(Get-ChildItem (Join-Path $root 'src') -Filter *.asm) +
+           @(Get-ChildItem (Join-Path $root "src\$variant") -Filter *.asm) |
+           Sort-Object Name
 $objects = @()
 foreach ($s in $sources) {
-    $o = Join-Path $build ($s.BaseName + '.o')
+    $o = Join-Path $outDir ($s.BaseName + '.o')
     if (-not $Quiet) { Write-Host "  rgbasm $($s.Name)" }
     & (Join-Path $rgbds 'rgbasm.exe') -Weverything -I (Join-Path $root 'src') -o $o $s.FullName
     if ($LASTEXITCODE -ne 0) { throw "rgbasm failed on $($s.Name)" }
     $objects += $o
 }
 
-$rom = Join-Path $build 'chatgbc.gbc'
+$rom = Join-Path $build ($romName + '.gbc')
 & (Join-Path $rgbds 'rgblink.exe') -o $rom `
-    -n (Join-Path $build 'chatgbc.sym') -m (Join-Path $build 'chatgbc.map') $objects
+    -n (Join-Path $build ($romName + '.sym')) `
+    -m (Join-Path $build ($romName + '.map')) $objects
 if ($LASTEXITCODE -ne 0) { throw 'rgblink failed' }
 
 # -C: CGB only. -v: fix header checksums and logo. -p 0xFF: pad.

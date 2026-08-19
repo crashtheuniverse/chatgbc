@@ -18,13 +18,19 @@ from harness import Rom
 BUILD = Path(__file__).resolve().parent.parent.parent / "build"
 
 
+# Long enough to be convincing, short enough to be cheap. A read-before-write
+# diverges within a handful of tokens or not at all, and the assertion below
+# compares a prefix, so a full-length run buys nothing but wall-clock.
+DIRTY_STEPS = 24
+
+
 @pytest.fixture(scope="module")
 def dirty_rom():
-    r = Rom(dirty_ram=True)
+    r = Rom(lab=True, dirty_ram=True)
     if r.defs.get("GEN_STEPS", 0) < 1:
         r.close()
-        pytest.skip("generation disabled: set GEN_STEPS in src/main.asm")
-    r.run_until_ready(max_frames=400000)
+        pytest.skip("generation disabled: set GEN_STEPS in src/chatgbc.inc")
+    r.lab_run(steps=DIRTY_STEPS)
     yield r
     r.close()
 

@@ -41,6 +41,16 @@ DEF BOX_B     EQU CON_H - 1               ; bottom row
 DEF TITLE_COL EQU 1                       ; against the corner; the title's
                                           ; first letter lands on the box margin
 
+; --- Generation ------------------------------------------------------------
+; Tokens the demo ROM generates per run. The lab ROM takes its count from the
+; harness instead, so a test can ask for the shortest run that proves its point.
+DEF GEN_STEPS EQU 96
+
+; The lab ROM's handshake. It parks in an idle loop advertising LAB_IDLE, the
+; harness fills in the prompt and step count, then writes LAB_GO.
+DEF LAB_IDLE EQU $A5
+DEF LAB_GO   EQU $C3
+
 ; --- Input -----------------------------------------------------------------
 ; Joy_Read returns the d-pad in the high nibble and buttons in the low one.
 DEF KB_RIGHT EQU %00010000

@@ -34,7 +34,7 @@ def default_steps():
     proves the ring cache wraps skips itself when the golden is shorter than the
     attention window, so a regeneration can drop coverage without failing.
     """
-    defs = harness.load_defs(ROOT / "src" / "main.asm")
+    defs = harness.load_defs(ROOT / "src" / "chatgbc.inc")
     return defs["GEN_STEPS"]
 
 

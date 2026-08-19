@@ -13,6 +13,8 @@ from pyboy import PyBoy
 ROOT = Path(__file__).resolve().parent.parent
 ROM = ROOT / "build" / "chatgbc.gbc"
 SYM = ROOT / "build" / "chatgbc.sym"
+LAB_ROM = ROOT / "build" / "chatgbc-lab.gbc"
+LAB_SYM = ROOT / "build" / "chatgbc-lab.sym"
 SRC = ROOT / "src"
 
 _SYM_RE = re.compile(r"^([0-9A-Fa-f]{2}):([0-9A-Fa-f]{4})\s+(\S+)$")
@@ -49,18 +51,29 @@ def load_defs(*paths):
 class Rom:
     """A booted ROM plus typed accessors for its WRAM."""
 
-    def __init__(self, rom=ROM, sym=SYM, dirty_ram=False):
-        """dirty_ram fills WRAM with a non-zero pattern before the CPU runs.
+    def __init__(self, rom=None, sym=None, dirty_ram=False, lab=False):
+        """lab boots build/chatgbc-lab.gbc, the ROM with no keyboard or frame.
+
+        The demo boots into an entry screen and waits for START, which costs the
+        suite wall-clock for presentation no test is checking. The lab ROM parks
+        in an idle loop instead and takes its prompt and token count from here,
+        so a test can ask for the shortest run that proves its point.
+
+        dirty_ram fills WRAM with a non-zero pattern before the CPU runs.
 
         PyBoy powers up with RAM at zero; real hardware and SameBoy do not. Any
         variable the ROM reads before writing therefore behaves differently on
         hardware, which is exactly how a stale accumulator flag passed every
         headless test and produced nonsense on a real emulator.
         """
+        self.lab = lab
+        rom = rom or (LAB_ROM if lab else ROM)
+        sym = sym or (LAB_SYM if lab else SYM)
         if not rom.exists():
-            raise FileNotFoundError(f"{rom} missing - run .\\build.ps1")
+            flag = " -Lab" if lab else ""
+            raise FileNotFoundError(f"{rom} missing - run .\\build.ps1{flag}")
         self.defs = load_defs(SRC / "chatgbc.inc", SRC / "model.inc",
-                              SRC / "main.asm", SRC / "matvec.asm", SRC / "generate.asm")
+                              SRC / "boot.asm", SRC / "matvec.asm", SRC / "generate.asm")
         self.syms = load_symbols(sym)
         self.pyboy = PyBoy(str(rom), window="null", cgb=True, sound_emulated=False)
         # Without this PyBoy paces itself to real time, which for a ROM that
@@ -127,6 +140,47 @@ class Rom:
             f"wReady never reached {magic:#04x} within {max_frames} frames "
             f"(last value {self.pyboy.memory[ready]:#04x})"
         )
+
+    def lab_run(self, steps=None, prompt=None, max_frames=400000):
+        """Drive one generation on the lab ROM. Returns frames elapsed.
+
+        Safe to call repeatedly on the same instance: the ROM returns to its
+        idle loop afterwards, so a booted emulator can serve several runs.
+        """
+        if not self.lab:
+            raise RuntimeError("lab_run needs Rom(lab=True)")
+        idle, go = self.defs["LAB_IDLE"], self.defs["LAB_GO"]
+        state, goflag = self.addr("wLabState"), self.addr("wLabGo")
+        self.pyboy.memory[goflag] = 0
+        self._tick_until(lambda: self.pyboy.memory[state] == idle, 2000,
+                         "lab ROM never reached its idle loop")
+
+        if prompt is not None:
+            raw = prompt.encode("ascii")
+            if len(raw) > self.defs["PROMPT_MAX"]:
+                raise ValueError(f"prompt longer than {self.defs['PROMPT_MAX']}")
+            base = self.addr("wPromptText")
+            self.pyboy.memory[base : base + len(raw)] = list(raw)
+            self.pyboy.memory[self.addr("wPromptLen")] = len(raw)
+        if steps is not None:
+            self.pyboy.memory[self.addr("wGenSteps")] = steps
+
+        ready, magic = self.addr("wReady"), self.defs["READY_MAGIC"]
+        self.pyboy.memory[ready] = 0
+        self.pyboy.memory[goflag] = go
+        start = self.frames
+        self._tick_until(lambda: self.pyboy.memory[ready] == magic, max_frames,
+                         "lab run never finished")
+        self.pyboy.memory[goflag] = 0        # release the ROM back to idle
+        return self.frames - start
+
+    def _tick_until(self, done, max_frames, what):
+        for _ in range(max_frames):
+            if done():
+                return self.frames
+            self.pyboy.tick(1, False)
+            self.frames += 1
+        raise TimeoutError(f"{what} within {max_frames} frames")
 
     # --- text -----------------------------------------------------------
 
