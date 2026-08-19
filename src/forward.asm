@@ -468,35 +468,61 @@ Forward::
 ; have to be stored. Each vocabulary row carries its own scale, so the raw
 ; accumulators are not comparable until the row shift is applied.
 Classify::
-    ld a, BANK(lut_cls)
-    ld hl, lut_cls
-    call SetLut
     ld hl, VOCAB
     call Matvec_SetOut
 
-    ld a, BANK(cls_w_p0)
+    ; Stream the classifier one bank at a time, accumulating into the same
+    ; outputs. Four parts now that each weight carries two HRAM offsets.
+    xor a
+    ld [wClsPart], a
+.part
+    ld a, [wClsPart]
+    ld l, a
+    ld h, 0
+    ld de, cls_banks
+    add hl, de
+    ld a, [hl]
     ld [wMvBank], a
-    ld a, LOW(cls_w_p0)
+
+    ld a, [wClsPart]
+    add a, a
+    ld l, a
+    ld h, 0
+    ld de, cls_addrs
+    add hl, de
+    ld a, [hl+]
     ld [wMvW + 0], a
-    ld a, HIGH(cls_w_p0)
+    ld a, [hl]
     ld [wMvW + 1], a
+
     ld a, CLS_INPUTS_PER_PART
     ld [wMvIn], a
-    ld hl, wXb
-    call SetXPtr
-    call Matvec_Run
 
-    ld a, BANK(cls_w_p1)            ; second bank continues the same accumulators
-    ld [wMvBank], a
-    ld a, LOW(cls_w_p1)
-    ld [wMvW + 0], a
-    ld a, HIGH(cls_w_p1)
-    ld [wMvW + 1], a
-    ld hl, wXb + CLS_INPUTS_PER_PART
+    ld a, [wClsPart]                ; x slice for this part
+    ld l, a
+    ld h, 0
+REPT 4
+    add hl, hl                      ; * CLS_INPUTS_PER_PART (16)
+ENDR
+    ld de, wXb
+    add hl, de
     call SetXPtr
-    call Matvec_RunAccum            ; same accumulators, second half of the inputs
 
-    ld a, DIM                       ; the bias covers every input, both banks
+    ld a, [wClsPart]
+    or a
+    jr nz, .accum
+    call Matvec_RunCls              ; first part clears the accumulators
+    jr .next
+.accum
+    call Matvec_RunClsAccum
+.next
+    ld a, [wClsPart]
+    inc a
+    ld [wClsPart], a
+    cp CLS_PARTS
+    jr c, .part
+
+    ld a, DIM                       ; the bias covers every input, every part
     ld [wMvIn], a
     call Requant_SetBias
 

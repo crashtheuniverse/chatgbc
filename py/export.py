@@ -111,13 +111,59 @@ def product_lut(codebook):
     return bytes(out)
 
 
+def quantize(model, sites):
+    """The one place that decides how this model is quantized.
+
+    8 bits on the classifier is worth 6.6 points of teacher-forced top-1
+    (74.6 -> 81.2) and it is the tensor that decides argmax. At 8 bits
+    quantize_model uses plain uniform int8 with a single exponent, which is
+    exactly what the nibble split below needs.
+
+    py/golden.py calls this too - if the golden were quantized differently from
+    the ROM, the bit-exactness test would be comparing two different models.
+    """
+    return Q.quantize_model(model, sites, weight_bits=WEIGHT_BITS,
+                            bits_override={"tok_emb": 8})
+
+
+def nibble_luts():
+    """The classifier's weights are 8-bit, which will not fit the 16-entry trick.
+
+    A 256-entry product table is 512 bytes against 127 of HRAM, so the weight is
+    split instead. Storing it unsigned as `u = w + 128`, with `hi = u >> 4` and
+    `lo = u & 15`:
+
+        x * w == x * (16*hi + lo - 128)
+              == (x * hi * 16) + (x * (lo - 128))
+
+    which is two lookups and one add, and is *exact* - the product is
+    reconstructed in full before the accumulator's rounding shift, so the twin
+    does not have to change to match it.
+
+    Returns (hi, lo) tables, each 256 activations x 16 entries x 2 bytes.
+    Both tables are pre-divided by four, like every other product table here, and
+    the split survives it exactly: `x * hi * 16` is always a multiple of four, and
+    adding a multiple of four before a rounding shift by two changes nothing. So
+    the kernel never rounds - it adds two ready-made numbers, which is the same
+    shape as the 4-bit loop, run twice.
+    """
+    hi = bytearray()
+    lo = bytearray()
+    for x in range(-128, 128):
+        for u in range(16):
+            hi += int(x * u * 4).to_bytes(2, "little", signed=True)
+            lo += int(Q.shr_round(x * (u - 128), Q.ACC_SHIFT)).to_bytes(
+                2, "little", signed=True)
+    return bytes(hi), bytes(lo)
+
+
 def main():
     BLOBS.mkdir(parents=True, exist_ok=True)
     model, tok = ref.Model(), ref.Tokenizer()
     c = model.cfg
     print("calibrating...", flush=True)
     sites = Q.calibrate(model, seq_len=SEQ)
-    q = Q.quantize_model(model, sites, weight_bits=WEIGHT_BITS)
+    q = quantize(model, sites)
 
     S = lambda n, l=0: q.site(n, l)
     lines, consts = [], []
@@ -185,13 +231,21 @@ def main():
     ))
 
     # --- classifier: input-major, plus the left shift that makes rows comparable ---
-    cls_off = q.indices["tok_emb"].T.astype(np.int32) * 2 + HLUT_BASE
-    nparts, per = blob_split("cls_w", cls_off.astype(np.uint8).tobytes(), c.dim)
+    # Two HRAM offsets per weight, ready to use: the kernel does no nibble
+    # arithmetic at all, it just reads two bytes and adds two lookups. ROM is
+    # the resource this project has spare.
+    cls_u = (q.w("tok_emb").T.astype(np.int32) + 128)        # (dim, vocab), 0..255
+    cls_pair = np.empty((c.dim, c.vocab_size, 2), dtype=np.uint8)
+    cls_pair[..., 0] = (cls_u >> 4) * 2 + HLUT_BASE          # hi table
+    cls_pair[..., 1] = (cls_u & 15) * 2 + HLUT_BASE + 32     # lo table, 32 bytes up
+    nparts, per = blob_split("cls_w", cls_pair.tobytes(), c.dim)
     const("CLS_PARTS", nparts)
     const("CLS_INPUTS_PER_PART", per)
     rex = q.rowexp["tok_emb"].astype(np.int32)
     blob("cls_lshift", sbytes(rex - rex.min()))
-    blob("lut_cls", product_lut(q.codebooks["tok_emb"]), rom0=False)
+    _hi, _lo = nibble_luts()
+    blob("lut_cls_hi", _hi, rom0=False)
+    blob("lut_cls_lo", _lo, rom0=False)
 
     # --- rmsnorm gains (kept int8; 320 bytes total and outside every hot loop) ---
     for name, shift_name in (("rms_att", "RMSATT"), ("rms_ffn", "RMSFFN")):
@@ -291,6 +345,11 @@ def main():
 
     # Manifest: bank + address per (tensor, layer), resolved by the linker.
     lines.append('SECTION "Model manifest", ROM0')
+    # The classifier spans however many banks its weights need. Two bytes per
+    # weight put it at four; emitting the table means forward.asm loops instead
+    # of naming each part, and stays right if the shape changes again.
+    lines.append("cls_banks:: db " + ", ".join(f"BANK(cls_w_p{i})" for i in range(nparts)))
+    lines.append("cls_addrs:: dw " + ", ".join(f"cls_w_p{i}" for i in range(nparts)))
     for name in MATS:
         lines.append(f"{name}_banks:: db " + ", ".join(f"BANK({name}_l{l})" for l in range(c.n_layers)))
         lines.append(f"{name}_addrs:: dw " + ", ".join(f"{name}_l{l}" for l in range(c.n_layers)))

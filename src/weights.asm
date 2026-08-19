@@ -34,11 +34,20 @@ cls_w_p0:: INCBIN "build/blobs/cls_w_p0.bin"   ; 16384 bytes
 SECTION "cls_w_p1", ROMX
 cls_w_p1:: INCBIN "build/blobs/cls_w_p1.bin"   ; 16384 bytes
 
+SECTION "cls_w_p2", ROMX
+cls_w_p2:: INCBIN "build/blobs/cls_w_p2.bin"   ; 16384 bytes
+
+SECTION "cls_w_p3", ROMX
+cls_w_p3:: INCBIN "build/blobs/cls_w_p3.bin"   ; 16384 bytes
+
 SECTION "cls_lshift", ROM0
 cls_lshift:: INCBIN "build/blobs/cls_lshift.bin"   ; 512 bytes
 
-SECTION "lut_cls", ROMX
-lut_cls:: INCBIN "build/blobs/lut_cls.bin"   ; 8192 bytes
+SECTION "lut_cls_hi", ROMX
+lut_cls_hi:: INCBIN "build/blobs/lut_cls_hi.bin"   ; 8192 bytes
+
+SECTION "lut_cls_lo", ROMX
+lut_cls_lo:: INCBIN "build/blobs/lut_cls_lo.bin"   ; 8192 bytes
 
 SECTION "rms_att", ROM0
 rms_att:: INCBIN "build/blobs/rms_att.bin"   ; 320 bytes
@@ -317,6 +326,8 @@ SECTION "prompt", ROM0
 prompt:: INCBIN "build/blobs/prompt.bin"   ; 10 bytes
 
 SECTION "Model manifest", ROM0
+cls_banks:: db BANK(cls_w_p0), BANK(cls_w_p1), BANK(cls_w_p2), BANK(cls_w_p3)
+cls_addrs:: dw cls_w_p0, cls_w_p1, cls_w_p2, cls_w_p3
 wq_banks:: db BANK(wq_l0), BANK(wq_l1), BANK(wq_l2), BANK(wq_l3), BANK(wq_l4)
 wq_addrs:: dw wq_l0, wq_l1, wq_l2, wq_l3, wq_l4
 wq_shifts:: dw wq_sh_l0, wq_sh_l1, wq_sh_l2, wq_sh_l3, wq_sh_l4

@@ -26,8 +26,11 @@ INCLUDE "chatgbc.inc"
 INCLUDE "model.inc"
 
 ; Pinned so exported weight bytes are complete HRAM offsets into this table.
+; 64 bytes, not 32: the 4-bit path uses the first half, the classifier uses
+; both. Everything else in HRAM sits above it.
 SECTION "Matvec HRAM", HRAM[$FF00 + HLUT_BASE]
-hLut:: ds CB_LEVELS * 2             ; unsigned 16-bit products, low byte first
+hLut:: ds CB_LEVELS * 2 * 2         ; signed 16-bit products, low byte first;
+                                    ; the second half is the classifier's only
 
 SECTION "Matvec state", WRAM0
 wMvW::      dw                      ; weight base, set once per matvec
@@ -203,4 +206,128 @@ Matvec_Body:
     pop hl
     dec b
     jr nz, .input
+    ret
+
+
+; --- the classifier's kernel ------------------------------------------------
+;
+; Its weights are 8-bit, which will not fit the 16-entry table trick: 256
+; entries is 512 bytes against 127 of HRAM. So each weight is split into nibbles
+; at export time and stored as two ready-made HRAM offsets - one into a table of
+; `x * hi * 4`, one into a table of `round(x * (lo - 128) / 4)`. Their sum is the
+; quarter-scaled product, exactly, because `x * hi * 16` is always a multiple of
+; four and adding a multiple of four before a rounding shift by two changes
+; nothing. So the kernel never rounds: it is Matvec_AddRow run twice.
+;
+; About 37 M-cycles per MAC against 19, which buys 6.6 points of top-1.
+;
+; Its own driver rather than a flag in the shared one, for the same reason
+; Matvec_Run and Matvec_RunAccum are separate entry points.
+Matvec_RunCls::
+    call Matvec_Zero
+    jr Matvec_BodyCls
+
+Matvec_RunClsAccum::
+    ; fall through
+
+Matvec_BodyCls:
+    ld a, [wMvBank]
+    ld [rROMB0], a
+    ld a, [wMvW + 0]
+    ld [wMvWCur + 0], a
+    ld a, [wMvW + 1]
+    ld [wMvWCur + 1], a
+
+    ld a, [wMvXPtr + 0]
+    ld l, a
+    ld a, [wMvXPtr + 1]
+    ld h, a
+    ld a, [wMvIn]
+    ld b, a
+.input
+    ld a, [hl+]
+    push hl
+    push bc
+    call Matvec_BuildLutCls
+    call Matvec_AddRowCls
+    pop bc
+    pop hl
+    dec b
+    jr nz, .input
+    ret
+
+Matvec_AddRowCls:
+    ld hl, wAcc
+    ld a, [wMvWCur + 0]
+    ld e, a
+    ld a, [wMvWCur + 1]
+    ld d, a
+    ld a, [wMvGroups]
+    ld b, a
+.group
+REPT 4
+    ld a, [de]                      ; high-nibble offset
+    inc de
+    ld c, a
+    ldh a, [c]
+    add a, [hl]
+    ld [hl+], a
+    inc c
+    ldh a, [c]
+    adc a, [hl]
+    ld [hl-], a                     ; back to the low byte for the second half
+
+    ld a, [de]                      ; low-nibble offset
+    inc de
+    ld c, a
+    ldh a, [c]
+    add a, [hl]
+    ld [hl+], a
+    inc c
+    ldh a, [c]
+    adc a, [hl]
+    ld [hl+], a
+ENDR
+    dec b
+    jr nz, .group
+
+    ld a, e
+    ld [wMvWCur + 0], a
+    ld a, d
+    ld [wMvWCur + 1], a
+    ret
+
+; Fills both tables for activation a: 32 bytes from lut_cls_hi at HLUT_BASE,
+; then 32 from lut_cls_lo directly above them.
+Matvec_BuildLutCls:
+    add a, 128
+    ld l, a
+    ld h, 0
+REPT 5
+    add hl, hl                      ; 32 bytes per activation in each table
+ENDR
+    push hl
+    ld a, BANK(lut_cls_hi)
+    ld [rROMB0], a
+    ld de, lut_cls_hi
+    add hl, de
+    ld c, HLUT_BASE
+    call Matvec_CopyLut
+    pop hl
+    ld a, BANK(lut_cls_lo)
+    ld [rROMB0], a
+    ld de, lut_cls_lo
+    add hl, de
+    ld c, HLUT_BASE + CB_LEVELS * 2
+    call Matvec_CopyLut
+    ld a, [wMvBank]                 ; back to the weights
+    ld [rROMB0], a
+    ret
+
+Matvec_CopyLut:
+REPT CB_LEVELS * 2
+    ld a, [hl+]
+    ldh [c], a
+    inc c
+ENDR
     ret

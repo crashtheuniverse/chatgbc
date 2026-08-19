@@ -23,7 +23,7 @@ OUT = ROOT / "build" / "golden.json"
 def build():
     model, tok = ref.Model(), ref.Tokenizer()
     sites = Q.calibrate(model, seq_len=E.SEQ)
-    q = Q.quantize_model(model, sites, weight_bits=E.WEIGHT_BITS)
+    q = E.quantize(model, sites)      # the exporter decides; see export.quantize
     return model, tok, q
 
 
