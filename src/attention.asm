@@ -17,6 +17,7 @@ wAtRecip: dw
 wAtBits:  db
 wAtMax:   ds 4
 wAtDst:   dw
+wWAcc:    ds HEAD_SIZE * 4      ; one accumulator per dimension
 
 SECTION "Attention code", ROM0
 
@@ -59,6 +60,24 @@ ENDR
     ret
 
 ; scores[t] = sum over d of q[d] * K[t][kvOff + d], as int24 in wScores.
+; wSave32 += hl, sign-extended. Three bytes is enough: a score is q.k over eight
+; terms and peaks at 129,032.
+Score_Add:
+    ld a, h
+    add a, a
+    sbc a, a
+    ld d, a
+    ldh a, [wSave32 + 0]
+    add a, l
+    ldh [wSave32 + 0], a
+    ldh a, [wSave32 + 1]
+    adc a, h
+    ldh [wSave32 + 1], a
+    ldh a, [wSave32 + 2]
+    adc a, d
+    ldh [wSave32 + 2], a
+    ret
+
 Attn_Scores:
     xor a
     ld [wAtT], a
@@ -89,12 +108,10 @@ Attn_Scores:
     push hl
     push de
     ld a, [de]                      ; q[d]
-    ld [wMulA8], a
+    ld b, a
     ld a, [hl]                      ; K[t][kvOff+d]
-    call SetMyFromS8
-    call MulS8xS16
-    ld hl, wSave32
-    call Tmp32_AddTo
+    call Mul_S8xS8                  ; hl = the exact product
+    call Score_Add
     pop de
     pop hl
     pop bc
@@ -342,33 +359,28 @@ ClampIndex255:
 
 ; xb2[h*HEAD_SIZE + d] = sat8(shr_round(sum over t of att[t] * V[t][kvOff+d]))
 Attn_Weighted:
-    ld b, HEAD_SIZE
-    ld c, 0                         ; d
-.dim
-    push bc
-
+    ; One accumulator per dimension, so the loops can be the right way round.
+    ;
+    ; This used to iterate d on the outside and t on the inside, which meant the
+    ; V row pointer and the attention weight were recomputed for every (d, t)
+    ; pair - eight times more often than they change. Now t is outermost: the
+    ; row and the weight are set up once per position and eight products are
+    ; taken against them.
+    ;
+    ; Summation order changes, which for integers changes nothing: the total is
+    ; the same and the result stays bit-exact.
+    ld hl, wWAcc
+    ld b, HEAD_SIZE * 4
     xor a
-    ld hl, wSave32
+.zero
     ld [hl+], a
-    ld [hl+], a
-    ld [hl+], a
-    ld [hl], a
+    dec b
+    jr nz, .zero
 
     xor a
     ld [wAtT], a
-.acc
-    ld a, [wAtT]
-    call Attn_RowV
-    ld b, 0
-    ld a, c
-    add a, l
-    ld l, a
-    jr nc, :+
-    inc h
-:   ld a, [hl]                      ; V[t][kvOff + d]
-    ld [wMulA8], a
-
-    ld a, [wAtT]
+.pos
+    ld a, [wAtT]                    ; wMy = wAtt[t], once per position
     ld l, a
     ld h, 0
     add hl, hl
@@ -379,11 +391,31 @@ Attn_Weighted:
     ld a, [hl]
     ld [wMy + 1], a
 
+    ld a, [wAtT]                    ; hl = &V[t][kvOff], once per position
+    call Attn_RowV
+
+    ld c, 0
+.dim
+    ld a, [hl]                      ; V[t][kvOff + d]
+    ld [wMulA8], a
+    push hl
     push bc
     call MulS8xS16
-    ld hl, wSave32
-    call Tmp32_AddTo
     pop bc
+    ld a, c                         ; hl = &wWAcc[d]
+    add a, a
+    add a, a
+    ld l, a
+    ld h, 0
+    ld de, wWAcc
+    add hl, de
+    call Tmp32_AddTo
+    pop hl
+    inc hl
+    inc c
+    ld a, c
+    cp HEAD_SIZE
+    jr c, .dim
 
     ld a, [wAtT]
     inc a
@@ -391,14 +423,22 @@ Attn_Weighted:
     ld d, a
     ld a, [wPos]
     cp d
-    jp nc, .acc
+    jp nc, .pos
 
-    ld hl, wSave32
+    ; Requantize each accumulator and write it out.
+    ld c, 0
+.out
+    ld a, c
+    add a, a
+    add a, a
+    ld l, a
+    ld h, 0
+    ld de, wWAcc
+    add hl, de
     ld de, wTmp32
     push bc
     ld bc, 4
     call CopyBytes
-    pop bc
     ld a, [wAttOutShift]
     call Requant_Shift
     call Requant_Sat8
@@ -414,11 +454,12 @@ Attn_Weighted:
     ld [wAtDst + 0], a
     ld a, h
     ld [wAtDst + 1], a
-
     pop bc
+
     inc c
-    dec b
-    jp nz, .dim
+    ld a, c
+    cp HEAD_SIZE
+    jr c, .out
     ret
 
 ; Runs every head for the current layer, filling wXb2.

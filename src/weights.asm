@@ -16,6 +16,9 @@ tbl_recip:: INCBIN "build/blobs/tbl_recip.bin"   ; 512 bytes
 SECTION "tbl_rope", ROMX
 tbl_rope:: INCBIN "build/blobs/tbl_rope.bin"   ; 4096 bytes
 
+SECTION "tbl_qsq", ROM0
+tbl_qsq:: INCBIN "build/blobs/tbl_qsq.bin"   ; 514 bytes
+
 SECTION "emb_rows_p0", ROMX
 emb_rows_p0:: INCBIN "build/blobs/emb_rows_p0.bin"   ; 16384 bytes
 

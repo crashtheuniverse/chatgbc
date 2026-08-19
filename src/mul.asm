@@ -210,3 +210,82 @@ BitLength32::
     ld a, b
     add a, c
     ret
+
+; --- quarter-square multiply ------------------------------------------------
+;
+; a = first operand, b = second, both signed 8-bit.
+; Returns the exact signed 16-bit product in hl. Clobbers a, bc, de, hl.
+;
+;   a*b == f(a+b) - f(a-b),  f(x) = floor(x*x / 4)
+;
+; Exact, not approximate: a+b and a-b always share parity, so either both floors
+; are exact or both discard the same quarter. f is even, so tbl_qsq stores only
+; |x| for x in 0..256 - 514 bytes, which is what lets it live in ROM0.
+;
+; This exists for attention, where both operands are runtime values and the
+; matvec's precomputed product tables cannot help.
+Mul_S8xS8::
+    ld e, a
+    add a, a
+    sbc a, a
+    ld d, a                         ; de = a, sign-extended
+
+    ld c, b
+    ld a, b
+    add a, a
+    sbc a, a
+    ld b, a                         ; bc = b, sign-extended
+
+    ld h, d
+    ld l, e
+    add hl, bc                      ; a + b
+    call QuarterSquare
+    push hl
+
+    ld a, c                         ; -b, so the second term is another add
+    cpl
+    ld l, a
+    ld a, b
+    cpl
+    ld h, a
+    inc hl
+    add hl, de                      ; a - b
+    call QuarterSquare
+
+    ld d, h
+    ld e, l
+    pop hl
+    ld a, l
+    sub e
+    ld l, a
+    ld a, h
+    sbc d
+    ld h, a
+    ret
+
+; hl = a signed value in [-256, 256]  ->  hl = tbl_qsq[|hl|].
+QuarterSquare:
+    bit 7, h
+    jr z, .abs
+    ld a, l
+    cpl
+    ld l, a
+    ld a, h
+    cpl
+    ld h, a
+    inc hl
+.abs
+    ; The base is folded in through a rather than `ld de` + `add hl, de`, so this
+    ; leaves de alone. Mul_S8xS8 keeps its first operand there across both
+    ; lookups, and clobbering it cost a whole afternoon.
+    add hl, hl                      ; two bytes per entry
+    ld a, l
+    add a, LOW(tbl_qsq)
+    ld l, a
+    ld a, h
+    adc a, HIGH(tbl_qsq)
+    ld h, a
+    ld a, [hl+]
+    ld h, [hl]
+    ld l, a
+    ret

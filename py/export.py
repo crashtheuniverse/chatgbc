@@ -158,6 +158,20 @@ def main():
     blob("tbl_recip", t["recip"].astype("<u2").tobytes())
     blob("tbl_rope", Q.rope_table(MAX_POS, c.head_size).astype("<i2").tobytes(), rom0=False)
 
+    # Quarter squares, so attention can multiply without multiplying.
+    #
+    #   a*b == f(a+b) - f(a-b),  where f(x) = floor(x*x / 4)
+    #
+    # Exact for every integer pair, not an approximation: a+b and a-b always
+    # share parity, so either both floors are exact or both drop the same 1/4.
+    # f is even, so only |x| needs storing - 257 entries instead of 512, which
+    # is what lets it sit in ROM0 alongside everything else.
+    #
+    # Attention's dot products are int8 by int8 with both operands only known at
+    # runtime, so the product tables the matvec uses cannot help there. This can.
+    qsq = (np.arange(257, dtype=np.int64) ** 2) // 4
+    blob("tbl_qsq", qsq.astype("<u2").tobytes())
+
     # --- token embedding: output-major rows for the lookup ---
     emb = q.weights["tok_emb"]                       # int8 codebook values, (vocab, dim)
     nparts, per = blob_split("emb_rows", emb.astype(np.int8).tobytes(), c.vocab_size)
