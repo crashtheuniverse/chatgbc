@@ -501,8 +501,10 @@ Attn_Weighted:
     ;
     ; One test per position skips eight MACs, so the test costs almost nothing
     ; even when the weight is non-zero.
+IF SKIP_ZERO_WEIGHTS
     or b
     jr z, .nextPos
+ENDC
 
     ld a, [wAtT]                    ; hl = &V[t][kvOff], once per position
     call Attn_RowV

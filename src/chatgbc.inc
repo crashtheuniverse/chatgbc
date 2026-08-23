@@ -54,6 +54,12 @@ DEF GEN_STEPS EQU 96
 ; loop latency and prove nothing extra.
 DEF APP_GEN_STEPS EQU 160
 
+; Skipping zero-weight positions is worth 1.13x, but it makes attention's cost
+; depend on its input data - which silently invalidates stub-and-measure
+; profiling, because stubbing an upstream kernel changes how peaked the weights
+; are. Build with this at 0 to get a data-independent breakdown.
+DEF SKIP_ZERO_WEIGHTS EQU 1
+
 ; The lab ROM's handshake. It parks in an idle loop advertising LAB_IDLE, the
 ; harness fills in the prompt and step count, then writes LAB_GO.
 DEF LAB_IDLE EQU $A5
