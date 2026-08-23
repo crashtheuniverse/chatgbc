@@ -120,17 +120,21 @@ machine.
 watch it happen — the cycle counter in the status bar climbs steadily as the
 passage gets longer, then flattens. It flattens because of the next part.
 
-**The ring.** The cache has 64 slots. Position 64 has nowhere to go — unless you
-let it overwrite slot 0. The slot for position `p` is `p mod 64`, while the
-positional rotation keeps using the *absolute* `p`.
+**The ring.** The cache has a fixed number of slots — 24 in this ROM. Position
+24 has nowhere to go — unless you let it overwrite slot 0. The slot for position
+`p` is `p mod 24`, while the positional rotation keeps using the *absolute* `p`.
 
 Those two had been the same number by accident. Separating them is the whole
 trick: rotation is where a token **is**, storage is where it **fits**. The model
-attends to the last 64 positions, forever, and never notices anything wrapped.
+attends to the last 24 positions, forever, and never notices anything wrapped.
 Generation stops having a length limit.
 
-64 slots also happens to be exactly one WRAM bank per layer, so the wrap costs
-nothing in addressing either — the slot index *is* the low bits of the pointer.
+A power-of-two window makes the wrap a single `and`, which is what the first
+version used. It also makes the window unchoosable: it can only ever be 16 or
+32, and the useful size turned out to sit between them. Repeated subtraction
+costs about seventy cycles five times a token, against twelve million — so the
+window became a free parameter, and picking it on evidence was worth far more
+than the mask saved.
 
 ## 6. The feed-forward block — `swiglu.asm`
 

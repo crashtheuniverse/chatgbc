@@ -153,6 +153,39 @@ The ROM clears WRAM at boot and not HRAM, so the cold-boot test had to start
 dirtying HRAM as well. Otherwise moving a variable there quietly escapes the test
 that exists to catch reading before writing.
 
+## Two more passes, and where they came from
+
+v0.1 shipped at 23,326,656 cycles a token in steady state — 11.1 seconds, which
+is a long time to watch a word appear. Two more rounds, both measured the same
+way:
+
+| | steady state | 96-token average |
+|---|---|---|
+| v0.1 | 23,326,656 | 18,951,201 |
+| v0.2 | 13,896,256 | 13,724,256 |
+| v0.3 | 12,973,824 | 12,794,099 |
+
+**1.80x in steady state**, on top of the 2.10x that got there — and the number
+that matters to a reader waiting for text, 2.4 seconds a character.
+
+Most of v0.2 is one idea applied where it had not been: the product table works
+for *any* loop with an invariant operand, not only matvec. Attention's score
+loop had the dimension innermost, so nothing was invariant; turning it inside
+out makes `q[d]` constant across positions and the multiply becomes a lookup
+again. The weighted sum got the same treatment in the other direction.
+
+v0.3 is smaller and less glamorous. The generic multiply was costing about 290
+cycles for a signed 8-by-16, of which only ~92 was the actual shift-add loop —
+the rest was negating operands into memory, writing them back, reading them
+straight out again through a second entry point, and then negating the 32-bit
+*result* in memory through another call. Operands in registers, sign on the
+stack, negate before storing: the arithmetic did not change at all. Then the
+window came down from 32 to 24, which is where the section below ends up.
+
+One thing deliberately *not* taken: an inlining pass. Calls were measured at
+about ten cycles each, roughly 28,000 a token — 2.0% if every call in the model
+were inlined. That is not worth what it would do to the code.
+
 ## The ring, and infinite context
 
 This one was mine, and it is the part I like best.
@@ -171,10 +204,12 @@ check.
 
 Position 64 overwrites slot 0. Nothing else changes. The model attends to the
 last 64 positions, forever, and never learns anything wrapped. 64 slots is
-exactly one WRAM bank per layer, so the wrap is free in addressing too: the slot
+exactly one WRAM bank per layer, so the wrap was free in addressing too: the slot
 index *is* the low bits of the pointer.
 
-Generation stopped being capped. The window became a knob instead of a wall.
+Generation stopped being capped. The window became a knob instead of a wall —
+and later, when there was a reason to turn it, the free mask turned out to be
+the thing holding it shut. More on that below.
 
 ## The twin is the reason any of it worked
 
@@ -235,9 +270,27 @@ the floor for post-training quantization here. The caveat matters: ternary works
 when a model is *trained* that way. This refutes it as a post-hoc transform, not
 as an architecture.
 
-**A shorter attention window.** Going from 64 positions to 8 saves 6% and costs
-4.6 points. 16, 32 and 64 sit inside the noise. Window size should be chosen for
-memory layout, not speed — which argues for 64, one WRAM bank per layer.
+**A shorter attention window — thrown away, then taken back.** The first
+measurement said 8 positions cost 4.6 points of top-1 while 16, 32 and 64 sat
+inside the noise, so the window looked like a memory-layout decision rather than
+a speed one. Two things were wrong with that. The evaluation was scoring a
+64-position window against 48 generated tokens, so it never truncated anything
+and was flattering the largest setting for free. And top-1 is teacher-forced:
+fp32's correct history is handed back at every position, so the model never
+lives with its own mistakes and cannot be seen to accumulate them.
+
+Cross-entropy on fp32's own continuations does see it, and it is monotonic:
+1.869 / 1.793 / 1.706 / 1.672 bits per token at 8 / 16 / 24 / 32. The steps are
+0.076, 0.087, **0.034** — a clear knee at 24, which is where the window now
+sits. It also prices the window against weight width for the first time: going
+24 to 32 buys 0.034 bits for ~7% of a token, while 4-bit to 8-bit buys 0.077 for
+~27%. **Context is worth about 1.7x more per cycle than precision here** — 4-bit
+at window 32 scores better than 8-bit at window 16.
+
+The awkward part is that 24 is not a power of two, so the ring wrap stops being
+one `and`. Repeated subtraction is at most ten iterations, about seventy cycles,
+five times a token, against twelve million. The mask was never worth the
+constraint it imposed; it just looked free because nothing had asked to move.
 
 **Running code from HRAM.** On a GBA, copying a hot routine into IWRAM is a real
 speedup: 32-bit bus, no wait states. On a Game Boy every region answers in one
@@ -292,5 +345,5 @@ test. All of them had a person looking at the thing.
 
 ---
 
-*ChatGBC v0.1 — 21,121,834 M-cycles per token over a 96-token run, measured by
+*ChatGBC v0.3 — 12,794,099 M-cycles per token over a 96-token run, measured by
 the cartridge itself.*

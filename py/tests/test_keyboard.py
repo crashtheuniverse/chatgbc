@@ -6,6 +6,8 @@ otherwise an inverted cell is stranded in VRAM and shows up as a black block
 over whatever the generation screen draws there.
 """
 
+import re
+
 import pytest
 
 from harness import Rom
@@ -25,7 +27,9 @@ def lines(rom):
 
 def test_entry_screen_drawn(entry):
     body = lines(entry)
-    assert "ChatGBC v0.1" in body[0], "the title carries the version"
+    # Matched as a pattern, not a literal: pinning the number here means
+    # every release bump fails a test about whether the title was drawn.
+    assert re.search(r"ChatGBC v\d+\.\d+", body[0]), "the title carries the version"
     assert any("a b c d" in l for l in body), "spaced grid missing"
     assert any("SELECT" in l for l in body), "case hint missing"
 

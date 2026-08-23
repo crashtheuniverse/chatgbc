@@ -6,10 +6,11 @@ forward pass per token in hand-written assembly. No C anywhere.
 
 ![ChatGBC generating text](docs/chatgbc.gif)
 
-*One frame per token, about 100x the speed of the hardware — 160 tokens, some
-twenty-six minutes on the handheld.*
+*The prompt is typed on the on-screen keyboard, then 160 tokens are generated.
+One frame per token, roughly 100x the speed of the hardware — the real run is
+sixteen and a half minutes on the handheld.*
 
-**Watch the bottom bar.** `TOK` walks past 64, which is the entire attention
+**Watch the bottom bar.** `TOK` walks past 24, which is the entire attention
 window, and nothing happens: the text just keeps going. And `CYC/TOK` climbs
 while the window is filling — attention is O(context) — then **goes flat** the
 moment every slot is live and old ones start being overwritten. That flattening
@@ -37,8 +38,10 @@ version spends 19.
 | Weights | 4-bit, Lloyd–Max codebooks, per-output-row scales; 8-bit classifier |
 | Arithmetic | int8 activations, 16-bit accumulators, no floating point, no division |
 | **Speed** | **6.1 s/token** averaged over a 96-token run (12,794,099 M-cycles) |
-| | 5.2 s for the first token, 6.2 s once the 24-token window fills |
-| Quality | 75.7% top-1 agreement with fp32 on held-out prompts (KL 0.43 bits) |
+| | 4.8 s for the first token, 6.2 s once the 24-token window fills |
+| | 2.4 s per character, at 2.54 characters a token |
+| Quality | 1.71 bits/token cross-entropy against fp32's own continuations |
+| | 75.7% top-1 agreement with fp32 on held-out prompts (KL 0.43 bits) |
 | Kernel | 19 M-cycles per multiply-accumulate |
 | ROM | 512 KB, MBC5 |
 
@@ -57,9 +60,10 @@ kernel copies 32 bytes into HRAM and from then on "multiply" is `ldh a, [c]` —
 whole design is trading the abundant thing for the scarce one.
 
 **Generation never stops, because the cache is a ring.** The slot for position
-`p` is `p mod 64`, while the rotary embedding keeps rotating by the *absolute*
+`p` is `p mod 24`, while the rotary embedding keeps rotating by the *absolute*
 `p`. Rotation is where a token is; storage is where it fits. Separating them
-costs one mask, and the model simply attends to the last 64 positions forever.
+costs a handful of subtractions, and the model simply attends to the last 24
+positions forever.
 
 ## Build it
 
