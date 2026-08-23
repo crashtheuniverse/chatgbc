@@ -47,16 +47,18 @@ WEIGHT_BITS = 4
 #       24   75.7%  0.4320      13,852,992    9.2%
 #       32   76.9%  0.4368      15,250,048      -
 #
-# 16 is chosen deliberately over 24. It costs 5.4 points of top-1 against 32 -
-# the largest quality concession in the project - and buys 18% of the token.
-# It is also the only nearby width that is a power of two, and the ring slot is
-# found with a mask: 24 built, ran, and quietly disagreed with the twin. Simple
-# and fast beat marginally-better-and-special-cased.
+# 24 is the knee: 1.2 points of top-1 against 32, with a KL that is actually
+# better, so no measurable quality cost for 9% of the token. 16 is where the
+# curve genuinely breaks - 5.4 points and a KL of 0.50, which shows in the text.
+#
+# 24 needs a real modulo rather than a mask to find the ring slot. That is five
+# subtract loops a token, roughly 70 cycles, and it was briefly mistaken for a
+# reason to avoid the width entirely.
 #
 # Why this is a first-class knob here and was not for the C implementation that
 # shipped 16: attention is 37% of a token for us, and costs more per layer than
 # all seven weight matrices combined. At 169 s/token it was a rounding error.
-SEQ = 16
+SEQ = 24
 # Absolute positions for RoPE. The cache rings at SEQ, but RoPE needs the true
 # position - an old key keeps the rotation it was written with, and q.k depends
 # on the difference, so positions must keep counting. 256 fits a byte and needs

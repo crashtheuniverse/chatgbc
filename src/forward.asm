@@ -22,11 +22,6 @@ wBestTok::  dw
 wBest:      ds 4
 wClsPart:   db
 
-; The ring slot below is found with a mask, which is a modulo only when the
-; window is a power of two. Nothing enforced that until a 24-slot window built,
-; ran, and quietly disagreed with the twin. Now it is a build error.
-ASSERT (SEQ_LEN & (SEQ_LEN - 1)) == 0, "SEQ_LEN must be a power of two - StoreKV masks to find the ring slot"
-
 SECTION "Forward code", ROM0
 
 ; --- matvec plumbing -------------------------------------------------------
@@ -415,9 +410,19 @@ AddSaturating::
 
 ; Copies wKvec/wVvec into this layer's cache slot for the current position.
 StoreKV:
-    ld a, [wAbsPos]                 ; ring: position p occupies slot p mod SEQ_LEN
-    and SEQ_LEN - 1                 ; a mask, so the window must be a power of
-                                    ; two - asserted at the top of this file
+    ; Ring: position p occupies slot p mod SEQ_LEN.
+    ;
+    ; A mask would be one instruction but only works for power-of-two windows,
+    ; and that constraint cost the best window on the quality curve. This runs
+    ; five times a token - once per layer - so even the naive form is free:
+    ; at most ten subtractions, about 70 cycles, against twelve million.
+    ld a, [wAbsPos]
+.slot
+    cp SEQ_LEN
+    jr c, .haveSlot
+    sub SEQ_LEN
+    jr .slot
+.haveSlot
     ld l, a
     ld h, 0
 REPT 5
