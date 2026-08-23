@@ -38,17 +38,25 @@ WEIGHT_BITS = 4
 #
 # It was widened from 16 to 64 before the ring buffer existed, purely to get
 # longer output. The ring provides that now, so the width is free to be chosen
-# on merit again. Measured at steady state, held-out top-1 and KL:
+# on merit again. Re-measured with each window calibrated at its own width and scored past
+# saturation, against an fp32 reference that keeps full context:
 #
-#   window   top-1    KL      cycles/token
-#       8    67.7%  0.6259    11,726,476
-#      16    69.8%  0.5164    13,383,756
-#      32    74.7%  0.4350    16,698,316     <- the knee
-#      64    76.4%  0.4278    23,327,436
+#   window   top-1     KL     token cycles   saved
+#        8   68.6%  0.6050      11,058,880   27.5%
+#       16   71.5%  0.4969      12,455,936   18.3%
+#       24   75.7%  0.4320      13,852,992    9.2%
+#       32   76.9%  0.4368      15,250,048      -
 #
-# 32 gives up 1.7 points of top-1 and almost nothing in KL for 28% of the
-# cycles. 16 costs 6.6 points for a further 15%, which is a much worse trade.
-SEQ = 32
+# 16 is chosen deliberately over 24. It costs 5.4 points of top-1 against 32 -
+# the largest quality concession in the project - and buys 18% of the token.
+# It is also the only nearby width that is a power of two, and the ring slot is
+# found with a mask: 24 built, ran, and quietly disagreed with the twin. Simple
+# and fast beat marginally-better-and-special-cased.
+#
+# Why this is a first-class knob here and was not for the C implementation that
+# shipped 16: attention is 37% of a token for us, and costs more per layer than
+# all seven weight matrices combined. At 169 s/token it was a rounding error.
+SEQ = 16
 # Absolute positions for RoPE. The cache rings at SEQ, but RoPE needs the true
 # position - an old key keeps the rotation it was written with, and q.k depends
 # on the difference, so positions must keep counting. 256 fits a byte and needs

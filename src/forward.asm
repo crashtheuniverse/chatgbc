@@ -22,6 +22,11 @@ wBestTok::  dw
 wBest:      ds 4
 wClsPart:   db
 
+; The ring slot below is found with a mask, which is a modulo only when the
+; window is a power of two. Nothing enforced that until a 24-slot window built,
+; ran, and quietly disagreed with the twin. Now it is a build error.
+ASSERT (SEQ_LEN & (SEQ_LEN - 1)) == 0, "SEQ_LEN must be a power of two - StoreKV masks to find the ring slot"
+
 SECTION "Forward code", ROM0
 
 ; --- matvec plumbing -------------------------------------------------------
@@ -410,8 +415,9 @@ AddSaturating::
 
 ; Copies wKvec/wVvec into this layer's cache slot for the current position.
 StoreKV:
-    ld a, [wAbsPos]
-    and SEQ_LEN - 1                 ; ring: position p occupies slot p mod SEQ_LEN
+    ld a, [wAbsPos]                 ; ring: position p occupies slot p mod SEQ_LEN
+    and SEQ_LEN - 1                 ; a mask, so the window must be a power of
+                                    ; two - asserted at the top of this file
     ld l, a
     ld h, 0
 REPT 5
