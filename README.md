@@ -37,9 +37,9 @@ version spends 19.
 | Weights | 4-bit, Lloyd–Max codebooks, per-output-row scales |
 | | 8-bit for the classifier and the two KV projections |
 | Arithmetic | int8 activations, 16-bit accumulators, no floating point, no division |
-| **Speed** | **6.35 s/token** averaged over a 96-token run (13,312,871 M-cycles) |
+| **Speed** | **6.36 s/token** averaged over a 96-token run (13,330,010 M-cycles) |
 | | 5.0 s for the first token, 6.6 s once the 24-token window fills |
-| | **2.33 s per character**, at 2.72 characters a token |
+| | **2.33 s per character**, at 2.73 characters a token |
 | Quality | 1.54 bits/token cross-entropy against fp32's own continuations |
 | | 78.1% top-1 agreement with fp32 on held-out prompts (KL 0.34 bits) |
 | Kernel | 19 M-cycles per multiply-accumulate |
@@ -49,6 +49,15 @@ Attention is O(context), so a token costs more the deeper into a passage you
 are — the bar at the bottom of the screen shows the figure climbing as it goes,
 then flattening once the window is full. Every number here is measured **by the
 cartridge itself** using the hardware timer, not by an emulator's clock.
+
+**Greedy decoding never loops, for 0.13%.** Argmax is a fixed point: once the
+state drifts back near one it has already visited, the model re-enters the same
+cycle and stays there. It is not a quantization artifact - fp32 at full context
+falls into it *sooner* than this cartridge does, at token 36 against 58. So the
+decoder refuses to complete a 4-gram it has already emitted and takes the
+next-best token. Deterministic, so bit-exactness is untouched, and it costs
+about six extra classifier scans across a 160-token run. Sampling was measured
+too and is worse: at this model size it breaks the grammar.
 
 **Eight bits where it compounds.** Every matrix is 4-bit except three. The
 classifier, because it decides the argmax — and `wk`/`wv`, because they are the

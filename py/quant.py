@@ -302,6 +302,33 @@ def row_exponents(mat, base_exp):
     return np.array([exp_for(r) - base_exp if r > 0 else 0 for r in rows], dtype=np.int8)
 
 
+def pick_token(logits, history, n=4, tries=8, cap=176):
+    """Greedy, but never complete an n-gram this run has already emitted.
+
+    Mirrors NoRepeat_Ok and the retry loop in src/forward.asm. Greedy decoding
+    is a fixed point - argmax is deterministic, so once the state drifts back
+    near one it has visited the model re-enters the same cycle and stays. That
+    is not a quantization artifact: fp32 at full context loops at token 36 on
+    average, sooner than the cartridge does.
+
+    Ties go to the lower token id, which is what argmax does and what
+    CompareBest does, so `kind="stable"` on the negated logits is required.
+    """
+    order = np.argsort(-logits, kind="stable")
+    hist = history[:cap]
+    if len(hist) < n:
+        return int(order[0])
+    seen = {tuple(hist[i:i + n]) for i in range(len(hist) - n + 1)}
+    tail = tuple(hist[-(n - 1):])
+    rejects = 0
+    for c in order:
+        if rejects < tries and tail + (int(c),) in seen:
+            rejects += 1
+            continue
+        return int(c)
+    return int(order[0])
+
+
 def quantize_model(model, sites, weight_bits=8, bits_override=None, uniform=False,
                    fixed_codebook=None, rowscale_8bit=()):
     """`bits_override` sets per-tensor widths. The classifier is the natural

@@ -197,6 +197,8 @@ class Tokenizer:
         return tokens + ([EOS] if eos else [])
 
     def decode(self, token, prev=None):
+        if token == BOS and prev is not None:
+            return "\n"          # a story separator, not literal "<s>"
         piece = self.vocab[token]
         if prev == BOS and piece.startswith(b" "):
             piece = piece[1:]  # llama2.c strips the space that follows BOS

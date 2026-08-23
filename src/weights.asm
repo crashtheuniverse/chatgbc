@@ -308,7 +308,7 @@ SECTION "silu_out_shift", ROM0
 silu_out_shift:: INCBIN "build/blobs/silu_out_shift.bin"   ; 5 bytes
 
 SECTION "vocab_data", ROMX
-vocab_data:: INCBIN "build/blobs/vocab_data.bin"   ; 1359 bytes
+vocab_data:: INCBIN "build/blobs/vocab_data.bin"   ; 1355 bytes
 
 SECTION "vocab_off", ROM0
 vocab_off:: INCBIN "build/blobs/vocab_off.bin"   ; 1024 bytes

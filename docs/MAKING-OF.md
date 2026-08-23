@@ -258,6 +258,52 @@ Held-out top-1 went 75.7% to 78.1%, KL 0.43 to 0.34 bits, and the tokens got
 longer — 2.72 characters against 2.54 — so despite costing 4.1% more per token
 it is **faster per character than the version before it**, 2.33 against 2.40.
 
+## The loop at the end of every story
+
+With the weights fixed the text held together for forty tokens and then went
+*"They are very happy. They are very happy."* until the run ended. That looked
+like damage we had done, so it was worth measuring rather than arguing about.
+
+Mean token at which a run first repeats a 5-gram, over eight prompts:
+
+| | first repeat |
+|---|---|
+| **fp32, full 256-position context** | **36.4** |
+| 4-bit, window 24 | 48.1 |
+| 8-bit KV, window 24 | 57.6 |
+
+**The float model loops soonest.** Its own text repeats a whole sentence word
+for word. Nothing had been broken - every optimization pushed the loop *later*,
+and the reason it became noticeable is that the first fifty tokens were finally
+good enough for the repetition to stand out against them.
+
+The cause is the decoder, not the model. Argmax is deterministic, so it is a
+fixed point: once the state drifts back near one it has already visited, the
+next token is the same one it was last time, and so is the one after that. No
+amount of quantization or context fixes a fixed point - loop onset does not
+track the window at all, and 4-bit at window 64 loops *earlier* than at 24.
+
+Sampling is the textbook answer and it is wrong here. Top-3 with rank weights
+moved the first repeat from 58 to 145 and destroyed the grammar: *"Are
+youthking, there was a big fisher."* A 260K model has no probability mass to
+spare.
+
+What works is refusing to repeat. The decoder walks the vocabulary in rank order
+and skips any token that would complete a 4-gram the run has already emitted,
+giving up after eight tries. It never loops, on any prompt. It is deterministic,
+so the golden-token contract needs no weakening. And it is nearly free: the
+classifier's accumulators are only *read* by the argmax scan, never consumed, so
+a rescan re-reads the same numbers rather than redoing the matvec. **0.13% of a
+token**, measured - about six extra scans across a 160-token run.
+
+All of 3, 4 and 5 stop the looping. Four costs half the rescans of three and
+reads better than either.
+
+One thing fell out of it: the model emits BOS mid-run, because it separates
+stories in this corpus, and the detokenizer was printing its vocabulary piece -
+the literal text `<s>` - onto the screen. It is a paragraph break, so that is
+what it renders as now.
+
 ## The twin is the reason any of it worked
 
 Not a technique. A contract.
@@ -392,5 +438,5 @@ test. All of them had a person looking at the thing.
 
 ---
 
-*ChatGBC v0.3 — 13,312,871 M-cycles per token over a 96-token run, measured by
+*ChatGBC v0.3 — 13,330,010 M-cycles per token over a 96-token run, measured by
 the cartridge itself.*

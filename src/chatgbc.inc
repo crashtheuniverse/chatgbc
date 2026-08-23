@@ -44,6 +44,24 @@ DEF TITLE_COL EQU 1                       ; against the corner; the title's
 ; --- Generation ------------------------------------------------------------
 ; Tokens the demo ROM generates per run. The lab ROM takes its count from the
 ; harness instead, so a test can ask for the shortest run that proves its point.
+; Greedy decoding is a fixed point: argmax is deterministic, so once the state
+; drifts back near one it has already visited, the model re-enters the same
+; cycle and stays there. It is not a quantization artifact - fp32 at full
+; context loops sooner than this cartridge does, at token 36 against 58.
+;
+; So the decoder refuses to complete a 4-gram it has already emitted, taking the
+; next-best token instead. Deterministic, which keeps the golden-token contract
+; intact, and it costs about six extra classifier scans across a 160-token run.
+; Sampling was measured too and is worse: it breaks the grammar outright at this
+; model size.
+; Long enough to cover APP_GEN_STEPS. The decoder searches this for repeated
+; 4-grams, so truncating it would quietly let loops back in near the end of a
+; run - the exact place they appear.
+DEF OUT_MAX EQU 176
+
+DEF NOREPEAT_N EQU 4
+DEF NOREPEAT_TRIES EQU 8
+
 DEF GEN_STEPS EQU 96
 
 ; What the demo generates. Deliberately well past SEQ_LEN: the cache is a ring,

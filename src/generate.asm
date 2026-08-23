@@ -19,7 +19,6 @@ wGenCount::  db                     ; tokens emitted so far
 ; Every token the model emits, so tests can check the model rather than the
 ; screen. Once the console scrolls, scraping the display stops being a faithful
 ; record of what was generated.
-DEF OUT_MAX EQU 128
 wOutTokens:: ds OUT_MAX * 2
 
 SECTION "Generate code", ROM0

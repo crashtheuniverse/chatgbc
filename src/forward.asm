@@ -21,6 +21,8 @@ wMatIdx:    db
 wBestTok::  dw
 wBest:      ds 4
 wClsPart:   db
+wBlocked:   ds NOREPEAT_TRIES * 2   ; tokens the no-repeat rule has turned down
+wBlockedN:  db                      ; how many of them, this step
 
 SECTION "Forward code", ROM0
 
@@ -537,6 +539,34 @@ ENDR
     ld [wMvIn], a
     call Requant_SetBias
 
+    ; Rank-walk the vocabulary until a token turns up that does not complete a
+    ; 4-gram this run has already emitted. The accumulators in wAcc are only
+    ; read by the scan, never consumed, so a rescan is a rescan of the same
+    ; numbers - no part of the classifier matvec is repeated. Measured at about
+    ; six extra scans across a 160-token run.
+    xor a
+    ld [wBlockedN], a
+.retry
+    call Cls_Scan
+    call NoRepeat_Ok
+    ret nz                          ; nothing repeated: take it
+    ld a, [wBlockedN]
+    cp NOREPEAT_TRIES
+    ret nc                          ; out of patience: keep the best on offer
+    ld l, a
+    ld h, 0
+    add hl, hl
+    ld de, wBlocked
+    add hl, de
+    ld a, [wBestTok + 0]
+    ld [hl+], a
+    ld a, [wBestTok + 1]
+    ld [hl], a
+    ld hl, wBlockedN
+    inc [hl]
+    jr .retry
+
+Cls_Scan:
     ld a, $80                       ; best = most negative int32
     ld [wBest + 3], a
     xor a
@@ -608,6 +638,25 @@ ENDR
 ; bits differ the positive value wins, otherwise an unsigned compare from the
 ; top byte down gives the right answer.
 CompareBest:
+    ld a, [wBlockedN]               ; usually zero, so usually four cycles
+    or a
+    jr z, .live
+    ld b, a
+    ld hl, wBlocked
+.blocked
+    ld a, [wRqCnt + 0]
+    cp [hl]
+    inc hl
+    jr nz, .nextBlocked
+    ld a, [wRqCnt + 1]
+    cp [hl]
+    ret z                           ; this one was turned down already
+.nextBlocked
+    inc hl
+    dec b
+    jr nz, .blocked
+
+.live
     ldh a, [wTmp32 + 3]
     ld b, a
     ld a, [wBest + 3]
@@ -649,6 +698,76 @@ CompareBest:
     ld [wBestTok + 0], a
     ld a, [wRqCnt + 1]
     ld [wBestTok + 1], a
+    ret
+
+; Z set when wBestTok would complete a 4-gram this run has already emitted,
+; Z clear when it is safe to take.
+;
+; Searches every earlier position rather than only the recent ones: the loops
+; worth breaking are the ones that come back to a phrase from a while ago.
+NoRepeat_Ok:
+    ld a, [wGenCount]
+    cp OUT_MAX                      ; the history buffer is the whole record
+    jr c, :+
+    ld a, OUT_MAX
+:   cp NOREPEAT_N
+    jr c, .fine                     ; nothing four long has been said yet
+    ld b, a                         ; b = tokens on record
+
+    sub NOREPEAT_N - 1              ; de -> the trailing three
+    ld l, a
+    ld h, 0
+    add hl, hl
+    ld de, wOutTokens
+    add hl, de
+    ld d, h
+    ld e, l
+
+    ld a, b
+    sub NOREPEAT_N - 1              ; start positions to try
+    ld c, a
+    ld hl, wOutTokens
+.at
+    push hl
+    push de
+    push bc
+    ld b, NOREPEAT_N - 1
+.three
+    ld a, [de]
+    cp [hl]
+    jr nz, .miss
+    inc de
+    inc hl
+    ld a, [de]
+    cp [hl]
+    jr nz, .miss
+    inc de
+    inc hl
+    dec b
+    jr nz, .three
+
+    ld a, [wBestTok + 0]            ; three matched; hl -> the token that followed
+    cp [hl]
+    jr nz, .miss
+    inc hl
+    ld a, [wBestTok + 1]
+    cp [hl]
+    jr nz, .miss
+    pop bc
+    pop de
+    pop hl
+    xor a                           ; Z: this would repeat
+    ret
+.miss
+    pop bc
+    pop de
+    pop hl
+    inc hl
+    inc hl
+    dec c
+    jr nz, .at
+.fine
+    or 1                            ; NZ: safe
     ret
 
 ; wX = requantized embedding row for wToken. The table is 32 KB, so it spans two

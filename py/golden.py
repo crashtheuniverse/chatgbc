@@ -57,7 +57,8 @@ def main():
                     q.e("tok_emb") + int(q.rex("tok_emb")[token]), q.site("x", 0))],
                 "argmax": int(logits.argmax()),
             }
-        nxt = prompt[pos + 1] if pos + 1 < len(prompt) else int(logits.argmax())
+        nxt = (prompt[pos + 1] if pos + 1 < len(prompt)
+               else Q.pick_token(logits, tokens))
         if nxt == ref.EOS:
             break
         tokens.append(nxt)

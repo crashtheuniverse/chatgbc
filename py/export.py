@@ -364,11 +364,16 @@ def main():
         S("hb", l) - (S("h1", l) - Q.SIG_BITS + S("h3", l)) for l in range(c.n_layers)))
 
     # --- detokenizer: vocabulary pieces, with byte-fallback tokens resolved ---
+    # BOS is a story separator in this corpus and the model emits it mid-run.
+    # Its vocabulary piece is the literal text "<s>", which is what used to
+    # appear on screen. A blank line is what it actually means.
     pieces, offsets = bytearray(), []
     for i, piece in enumerate(tok.vocab):
         m = ref._BYTE_PIECE.fullmatch(piece)
         if m:
             piece = bytes([int(m.group(1), 16)])
+        elif i == ref.BOS:
+            piece = b"\n"
         offsets.append(len(pieces))
         pieces += bytes([len(piece)]) + piece
     assert len(pieces) < 1 << 16
