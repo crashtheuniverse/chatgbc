@@ -6,7 +6,14 @@ forward pass per token in hand-written assembly. No C anywhere.
 
 ![ChatGBC generating text](docs/chatgbc.gif)
 
-*One frame per token, roughly 40x the speed of the hardware.*
+*One frame per token, about 100x the speed of the hardware — 160 tokens, some
+twenty-six minutes on the handheld.*
+
+**Watch the bottom bar.** `TOK` walks past 64, which is the entire attention
+window, and nothing happens: the text just keeps going. And `CYC/TOK` climbs
+while the window is filling — attention is O(context) — then **goes flat** the
+moment every slot is live and old ones start being overwritten. That flattening
+is the ring buffer, made visible.
 
 You type a prompt on an on-screen keyboard. It generates, and keeps generating —
 the text scrolls and it never hits a context limit. Tokenizer, weights and the

@@ -18,12 +18,14 @@ Run::
     call StatusWin_Show
     call Console_Flush
 
-    ld a, GEN_STEPS
+    ld a, APP_GEN_STEPS
     ld [wGenSteps], a
     call Generate
     call Console_Flush
-    call ReportTiming
-    call Console_Flush
+    ; No ReportTiming here: the status bar has been showing cycles per token
+    ; live for the whole run, so printing the same number into the text at the
+    ; end puts it on screen twice and reads as a glitch. The lab ROM still
+    ; prints it, because nothing there is watching a status bar.
 
     ; Last, so the forward pass cannot overwrite the buffer it checks.
     call MeasureSelftest

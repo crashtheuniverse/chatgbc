@@ -46,6 +46,14 @@ DEF TITLE_COL EQU 1                       ; against the corner; the title's
 ; harness instead, so a test can ask for the shortest run that proves its point.
 DEF GEN_STEPS EQU 96
 
+; What the demo generates. Deliberately well past SEQ_LEN: the cache is a ring,
+; so nothing special happens at the window edge - the token counter walks past
+; it, the text keeps scrolling, and the only sign anything wrapped is the cycle
+; count going flat once every slot is live. That flattening is the trick, made
+; visible. The test suite stays on GEN_STEPS, since a longer golden would cost
+; loop latency and prove nothing extra.
+DEF APP_GEN_STEPS EQU 160
+
 ; The lab ROM's handshake. It parks in an idle loop advertising LAB_IDLE, the
 ; harness fills in the prompt and step count, then writes LAB_GO.
 DEF LAB_IDLE EQU $A5

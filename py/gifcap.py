@@ -25,10 +25,10 @@ from harness import Rom, ROOT
 CAPTURES = ROOT / "captures"
 OUT = ROOT / "build" / "chatgbc.gif"
 
-CAP = 170               # frame cap; generation normally ends first
+CAP = 220               # frame cap; generation normally ends first
 OPEN_MS = 1500          # hold on the entry screen
-STEP_MS = 120           # per token, which works out around 40x the hardware
-CLOSE_MS = 2500         # and on the finished text, before the loop restarts
+STEP_MS = 90            # per token, which works out around 100x the hardware
+CLOSE_MS = 3000         # and on the finished text, before the loop restarts
 SCALE = 2
 
 
@@ -54,21 +54,25 @@ def capture():
     rom.pyboy.tick(4, False)
     rom.pyboy.button_release("start")
 
-    def printed():
-        buf = rom.read("wConsole", rom.defs["CON_SIZE"])
-        return sum(1 for b in buf if b != ord(" ") - rom.defs["FONT_FIRST"])
+    def screen():
+        """The whole shadow buffer, not a count of what is on it.
+
+        Counting non-blank cells stops changing the moment the screen fills and
+        starts scrolling - which is exactly the part of a long run worth
+        watching, and it would have dropped every frame of it."""
+        return bytes(rom.read("wConsole", rom.defs["CON_SIZE"]))
 
     # Stop on the ROM's own done-flag as well as the frame cap. Watching the
     # screen alone spins forever once generation ends, because nothing on it
     # changes again.
     ready, magic = rom.addr("wReady"), rom.defs["READY_MAGIC"]
-    seen = printed()
+    seen = screen()
     while n < CAP:
         rom.pyboy.tick(30, False)
         if rom.pyboy.memory[ready] == magic:
             print("  ROM finished generating", flush=True)
             break
-        now = printed()
+        now = screen()
         if now != seen:
             seen = now
             grab(rom).save(CAPTURES / f"frame_{n:04d}.png")
@@ -87,7 +91,18 @@ def build():
     if not paths:
         sys.exit(f"no frames in {CAPTURES} - run `gifcap.py capture` first")
 
-    frames = [Image.open(p) for p in paths]
+    frames = [Image.open(p).convert("RGB") for p in paths]
+
+    # Quantize every frame against one fixed palette, taken from the colours the
+    # ROM actually produces, with dithering off. Letting PIL pick a palette per
+    # frame is what speckles flat areas and makes text edges crawl - there are
+    # only ever four colours on this screen, so none of that is necessary.
+    seen = sorted({c for f in frames for _, c in f.getcolors(maxcolors=1 << 16)})
+    flat = [v for c in seen for v in c]
+    pal = Image.new("P", (1, 1))
+    pal.putpalette(flat + [0] * (768 - len(flat)))
+    frames = [f.quantize(palette=pal, dither=Image.Dither.NONE) for f in frames]
+    print(f"  {len(seen)} colours, fixed palette, no dithering")
     frames.append(frames[-1])                       # hold the last one
     durations = [OPEN_MS] + [STEP_MS] * (len(frames) - 2) + [CLOSE_MS]
     frames[0].save(
