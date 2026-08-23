@@ -16,12 +16,15 @@
 
 INCLUDE "hardware.inc"
 INCLUDE "chatgbc.inc"
+INCLUDE "model.inc"
 
 DEF FETCH_ITERS EQU 4000
 DEF FETCH_SLOT  EQU 32              ; HRAM reserved for the copied body
 
-SECTION "Fetch bench HRAM", HRAM
-hFetchBody: ds FETCH_SLOT
+; No HRAM of its own: this runs once at boot, long before any kernel builds a
+; product table, so it borrows the matvec's region rather than reserving 32
+; bytes that are dead for the rest of the cartridge's life.
+DEF hFetchBody EQU $FF00 + HLUT_BASE
 
 SECTION "Fetch bench state", WRAM0
 wRomCycles::  ds 4

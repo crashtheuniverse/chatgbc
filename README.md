@@ -33,11 +33,12 @@ version spends 19.
 | | |
 |---|---|
 | Model | TinyStories-260K — 5 layers, dim 64, 8 heads / 4 KV heads, vocab 512 |
+| Context | 32-position sliding window, ring buffer, unbounded output |
 | Weights | 4-bit, Lloyd–Max codebooks, per-output-row scales; 8-bit classifier |
 | Arithmetic | int8 activations, 16-bit accumulators, no floating point, no division |
-| **Speed** | **9.0 s/token** averaged over a 96-token run (18,951,201 M-cycles) |
-| | 4.6 s for the first token, 11.1 s once the 64-token window fills |
-| Quality | 76.4% top-1 agreement with fp32 on held-out prompts |
+| **Speed** | **6.5 s/token** averaged over a 96-token run (13,724,256 M-cycles) |
+| | 4.9 s for the first token, 6.7 s once the 32-token window fills |
+| Quality | 74.7% top-1 agreement with fp32 on held-out prompts |
 | Kernel | 19 M-cycles per multiply-accumulate |
 | ROM | 512 KB, MBC5 |
 
@@ -85,6 +86,8 @@ is a bisection with a definite answer.
 
 ## More
 
+- [The model](docs/THE-MODEL.md) — one page: what it runs, why MACs equal
+  parameters, and what depth costs that width does not
 - [How it works](docs/CONCEPTS.md) — a short tour of the model: tokens, heads,
   the KV cache, and why the multiply is a table lookup. No ML background needed
 - [Making of](docs/MAKING-OF.md) — how it was built, and what was thrown away

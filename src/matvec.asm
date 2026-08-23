@@ -26,11 +26,13 @@ INCLUDE "chatgbc.inc"
 INCLUDE "model.inc"
 
 ; Pinned so exported weight bytes are complete HRAM offsets into this table.
-; 64 bytes, not 32: the 4-bit path uses the first half, the classifier uses
-; both. Everything else in HRAM sits above it.
+;
+; 96 bytes: the widest any kernel needs. The 4-bit matvec uses 32, the
+; classifier and the score tables 64, and the weighted sum's three-byte entries
+; 96. No two of them are live at the same moment, so one region serves all four
+; - and the boot-only fetch bench borrows it rather than reserving its own.
 SECTION "Matvec HRAM", HRAM[$FF00 + HLUT_BASE]
-hLut:: ds CB_LEVELS * 2 * 2         ; signed 16-bit products, low byte first;
-                                    ; the second half is the classifier's only
+hLut:: ds CB_LEVELS * 3 * 2
 
 SECTION "Matvec state", WRAM0
 wMvW::      dw                      ; weight base, set once per matvec
