@@ -52,6 +52,7 @@ def main():
             ("matvecs (layers)", FWD, r"    call Matvec_Run\b"),
             ("classifier",       FWD, r"    call Matvec_RunCls(Accum)?"),
             ("residual adds",    FWD, r"    call AddSaturating"),
+            ("swiglu",           FWD, r"    call SiluMul"),
         ]
         for label, path, pat in cases:
             stub(path, pat)
