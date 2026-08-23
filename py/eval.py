@@ -234,8 +234,12 @@ def main():
     t0 = time.time()
     model, tok = ref.Model(), ref.Tokenizer()
     sites = Q.calibrate(model, seq_len=min(args.window, REF_SEQ))
+    # Mirrors export.quantize, so this scores the model that ships rather than
+    # a nearby one. E.WIDE names the tensors kept at 8 bits with row scales.
     q = Q.quantize_model(model, sites, weight_bits=args.bits,
-                         bits_override={"tok_emb": args.cls_bits})
+                         bits_override={"tok_emb": args.cls_bits,
+                                        **{n: 8 for n in E.WIDE}},
+                         rowscale_8bit=E.WIDE)
 
     out = {"bits": args.bits, "cls_bits": args.cls_bits, "window": args.window}
     for label, prompts in (("dev", DEV), ("held-out", HELD_OUT)):

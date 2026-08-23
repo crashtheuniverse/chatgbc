@@ -10,11 +10,9 @@ Splitting them means retiming, trimming or hand-picking frames costs nothing -
 the emulator run is the slow part and it only has to happen once. captures/ is
 gitignored.
 
-The capture types on the on-screen keyboard rather than accepting whatever the
-ROM offers. Two reasons. It shows the half of the ROM a screenshot of scrolling
-text cannot - a d-pad, a grid of letters, and B to delete. And the opening
-prompt is fixed at boot on purpose (see Kb_PickPrompt), so without typing there
-is exactly one prompt this can ever demonstrate.
+The capture can drive the on-screen keyboard before pressing START - see TYPE
+below. Kb_PickPrompt fixes the opening prompt at boot on purpose, so typing is
+the only way a capture can show any other prompt, or the keyboard at all.
 
 During generation one frame is captured per token rather than per emulated
 frame. The ROM prints a token every few seconds, which is honest on a handheld
@@ -32,7 +30,11 @@ from harness import Rom, ROOT
 CAPTURES = ROOT / "captures"
 OUT = ROOT / "build" / "chatgbc.gif"
 
-TYPE = " a little dog"       # appended to the prompt the ROM opens with
+# Appended to the prompt the ROM opens with, on the keyboard. Empty ships the
+# iconic opener as-is. The machinery stays because Kb_PickPrompt fixes the first
+# prompt at boot on purpose, so this is the only way a capture can demonstrate
+# any other one - or the keyboard itself.
+TYPE = ""
 CAP = 220                    # token cap; generation normally ends first
 SCALE = 2
 
@@ -116,12 +118,13 @@ def capture():
     rec = Recorder(rom)
     rec.frame("open")
 
-    type_text(rec, TYPE)
-    rec.frame("settle")
+    if TYPE:
+        type_text(rec, TYPE)
+        rec.frame("settle")
 
     prompt_len = rom.read("wPromptLen")[0]
     prompt = bytes(rom.read("wPromptText", prompt_len)).decode("ascii")
-    print(f"  typed, prompt is now {prompt!r}")
+    print(f"  prompt: {prompt!r}")
 
     rec.press("start", phase="settle")
 

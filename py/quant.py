@@ -303,10 +303,16 @@ def row_exponents(mat, base_exp):
 
 
 def quantize_model(model, sites, weight_bits=8, bits_override=None, uniform=False,
-                   fixed_codebook=None):
+                   fixed_codebook=None, rowscale_8bit=()):
     """`bits_override` sets per-tensor widths. The classifier is the natural
     exception: with 512 outputs it amortizes a 256-entry product table down to
-    ~8 cycles/MAC, so 8-bit costs little there and it is what decides argmax."""
+    ~8 cycles/MAC, so 8-bit costs little there and it is what decides argmax.
+
+    `rowscale_8bit` names tensors that keep per-output-row exponents at 8 bits.
+    Without it the two widths are not the same quantizer - 4 bits gets Lloyd-Max
+    plus a row scale, 8 bits a single tensor-wide exponent - and the
+    better-designed one at 4 bits can beat the naive one at 8. w2 measured
+    *worse* at 8 bits until this existed."""
     q = QuantModel(cfg=model.cfg, sites=sites)
     q.weight_bits = weight_bits
     override = bits_override or {}
@@ -323,8 +329,15 @@ def quantize_model(model, sites, weight_bits=8, bits_override=None, uniform=Fals
         bits = override.get(name, weight_bits)
         q.bits[name] = bits
         if bits >= 8 or name not in MATMULS:
-            q.weights[name] = quantize(arr, e)
-            q.rowexp[name] = np.zeros(arr.shape[:-1], dtype=np.int8)
+            if name in rowscale_8bit:
+                rex = (np.stack([row_exponents(arr[l], e) for l in range(arr.shape[0])])
+                       if arr.ndim == 3 else row_exponents(arr, e))
+                q.weights[name] = quantize(
+                    arr / 2.0 ** (e + rex[..., None].astype(np.float64)), 0)
+                q.rowexp[name] = rex
+            else:
+                q.weights[name] = quantize(arr, e)
+                q.rowexp[name] = np.zeros(arr.shape[:-1], dtype=np.int8)
             continue
 
         # Per-output-row scales, then one shared codebook over the normalized

@@ -103,68 +103,62 @@ wq_l4:: INCBIN "build/blobs/wq_l4.bin"   ; 4096 bytes
 SECTION "wq_sh_l4", ROM0
 wq_sh_l4:: INCBIN "build/blobs/wq_sh_l4.bin"   ; 64 bytes
 
-SECTION "lut_wk", ROMX
-lut_wk:: INCBIN "build/blobs/lut_wk.bin"   ; 8192 bytes
-
 SECTION "wk_l0", ROMX
-wk_l0:: INCBIN "build/blobs/wk_l0.bin"   ; 2048 bytes
+wk_l0:: INCBIN "build/blobs/wk_l0.bin"   ; 4096 bytes
 
 SECTION "wk_sh_l0", ROM0
 wk_sh_l0:: INCBIN "build/blobs/wk_sh_l0.bin"   ; 32 bytes
 
 SECTION "wk_l1", ROMX
-wk_l1:: INCBIN "build/blobs/wk_l1.bin"   ; 2048 bytes
+wk_l1:: INCBIN "build/blobs/wk_l1.bin"   ; 4096 bytes
 
 SECTION "wk_sh_l1", ROM0
 wk_sh_l1:: INCBIN "build/blobs/wk_sh_l1.bin"   ; 32 bytes
 
 SECTION "wk_l2", ROMX
-wk_l2:: INCBIN "build/blobs/wk_l2.bin"   ; 2048 bytes
+wk_l2:: INCBIN "build/blobs/wk_l2.bin"   ; 4096 bytes
 
 SECTION "wk_sh_l2", ROM0
 wk_sh_l2:: INCBIN "build/blobs/wk_sh_l2.bin"   ; 32 bytes
 
 SECTION "wk_l3", ROMX
-wk_l3:: INCBIN "build/blobs/wk_l3.bin"   ; 2048 bytes
+wk_l3:: INCBIN "build/blobs/wk_l3.bin"   ; 4096 bytes
 
 SECTION "wk_sh_l3", ROM0
 wk_sh_l3:: INCBIN "build/blobs/wk_sh_l3.bin"   ; 32 bytes
 
 SECTION "wk_l4", ROMX
-wk_l4:: INCBIN "build/blobs/wk_l4.bin"   ; 2048 bytes
+wk_l4:: INCBIN "build/blobs/wk_l4.bin"   ; 4096 bytes
 
 SECTION "wk_sh_l4", ROM0
 wk_sh_l4:: INCBIN "build/blobs/wk_sh_l4.bin"   ; 32 bytes
 
-SECTION "lut_wv", ROMX
-lut_wv:: INCBIN "build/blobs/lut_wv.bin"   ; 8192 bytes
-
 SECTION "wv_l0", ROMX
-wv_l0:: INCBIN "build/blobs/wv_l0.bin"   ; 2048 bytes
+wv_l0:: INCBIN "build/blobs/wv_l0.bin"   ; 4096 bytes
 
 SECTION "wv_sh_l0", ROM0
 wv_sh_l0:: INCBIN "build/blobs/wv_sh_l0.bin"   ; 32 bytes
 
 SECTION "wv_l1", ROMX
-wv_l1:: INCBIN "build/blobs/wv_l1.bin"   ; 2048 bytes
+wv_l1:: INCBIN "build/blobs/wv_l1.bin"   ; 4096 bytes
 
 SECTION "wv_sh_l1", ROM0
 wv_sh_l1:: INCBIN "build/blobs/wv_sh_l1.bin"   ; 32 bytes
 
 SECTION "wv_l2", ROMX
-wv_l2:: INCBIN "build/blobs/wv_l2.bin"   ; 2048 bytes
+wv_l2:: INCBIN "build/blobs/wv_l2.bin"   ; 4096 bytes
 
 SECTION "wv_sh_l2", ROM0
 wv_sh_l2:: INCBIN "build/blobs/wv_sh_l2.bin"   ; 32 bytes
 
 SECTION "wv_l3", ROMX
-wv_l3:: INCBIN "build/blobs/wv_l3.bin"   ; 2048 bytes
+wv_l3:: INCBIN "build/blobs/wv_l3.bin"   ; 4096 bytes
 
 SECTION "wv_sh_l3", ROM0
 wv_sh_l3:: INCBIN "build/blobs/wv_sh_l3.bin"   ; 32 bytes
 
 SECTION "wv_l4", ROMX
-wv_l4:: INCBIN "build/blobs/wv_l4.bin"   ; 2048 bytes
+wv_l4:: INCBIN "build/blobs/wv_l4.bin"   ; 4096 bytes
 
 SECTION "wv_sh_l4", ROM0
 wv_sh_l4:: INCBIN "build/blobs/wv_sh_l4.bin"   ; 32 bytes
@@ -344,14 +338,10 @@ wk_banks:: db BANK(wk_l0), BANK(wk_l1), BANK(wk_l2), BANK(wk_l3), BANK(wk_l4)
 wk_addrs:: dw wk_l0, wk_l1, wk_l2, wk_l3, wk_l4
 wk_shifts:: dw wk_sh_l0, wk_sh_l1, wk_sh_l2, wk_sh_l3, wk_sh_l4
 wk_shbanks:: db BANK(wk_sh_l0), BANK(wk_sh_l1), BANK(wk_sh_l2), BANK(wk_sh_l3), BANK(wk_sh_l4)
-wk_lutbank:: db BANK(lut_wk)
-wk_lutaddr:: dw lut_wk
 wv_banks:: db BANK(wv_l0), BANK(wv_l1), BANK(wv_l2), BANK(wv_l3), BANK(wv_l4)
 wv_addrs:: dw wv_l0, wv_l1, wv_l2, wv_l3, wv_l4
 wv_shifts:: dw wv_sh_l0, wv_sh_l1, wv_sh_l2, wv_sh_l3, wv_sh_l4
 wv_shbanks:: db BANK(wv_sh_l0), BANK(wv_sh_l1), BANK(wv_sh_l2), BANK(wv_sh_l3), BANK(wv_sh_l4)
-wv_lutbank:: db BANK(lut_wv)
-wv_lutaddr:: dw lut_wv
 wo_banks:: db BANK(wo_l0), BANK(wo_l1), BANK(wo_l2), BANK(wo_l3), BANK(wo_l4)
 wo_addrs:: dw wo_l0, wo_l1, wo_l2, wo_l3, wo_l4
 wo_shifts:: dw wo_sh_l0, wo_sh_l1, wo_sh_l2, wo_sh_l3, wo_sh_l4

@@ -126,16 +126,16 @@ ForwardLayer::
     ld bc, wQ
     call Requant_All
 
-    ld a, BANK(lut_wk)
-    ld hl, lut_wk
-    call SetLut
+    ; 8-bit, nibble-split. No SetLut: the hi/lo tables depend only on
+    ; the activation, not on the matrix, so Matvec_BuildLutCls names
+    ; them directly and wk has no product table of its own.
     ld hl, wk_banks
     ld de, wk_addrs
     ld a, [wLayer]
     call SetMatrix
     ld hl, KV_DIM
     call Matvec_SetOut
-    call Matvec_Run
+    call Matvec_RunCls
     ld hl, wk_shifts
     ld a, [wLayer]
     call ShiftTable
@@ -144,16 +144,16 @@ ForwardLayer::
     ld bc, wKvec
     call Requant_All
 
-    ld a, BANK(lut_wv)
-    ld hl, lut_wv
-    call SetLut
+    ; 8-bit, nibble-split. No SetLut: the hi/lo tables depend only on
+    ; the activation, not on the matrix, so Matvec_BuildLutCls names
+    ; them directly and wv has no product table of its own.
     ld hl, wv_banks
     ld de, wv_addrs
     ld a, [wLayer]
     call SetMatrix
     ld hl, KV_DIM
     call Matvec_SetOut
-    call Matvec_Run
+    call Matvec_RunCls
     ld hl, wv_shifts
     ld a, [wLayer]
     call ShiftTable

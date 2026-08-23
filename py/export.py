@@ -33,6 +33,22 @@ MODEL_INC = ROOT / "src" / "model.inc"
 BIAS = 1 << 14
 HLUT_BASE = 0x80          # product table pinned here so weight bytes are HRAM offsets
 WEIGHT_BITS = 4
+
+# Tensors kept at 8 bits, with per-output-row scales, and run through the
+# nibble-split kernel instead of the 4-bit table one.
+#
+# wk and wv are the only weights in the model whose error compounds along the
+# sequence: everything else affects the token being computed, while these two
+# write the KV cache and are re-read at every one of the next SEQ_LEN positions.
+# They are also the smallest matrices in the layer - DIM x KV_DIM against
+# DIM x DIM and DIM x HIDDEN - so the 37-cycle kernel costs 2.9% of a token and
+# buys more quality than putting *every* matrix at 8 bits, which costs 31.9%.
+# Measured: 1.706 -> 1.540 bits/token, against 1.487 for the whole model.
+#
+# ROM is roughly a wash: the weights double to two bytes each (+20 KB) and the
+# two 8 KB per-matrix product tables go away, since the nibble tables depend
+# only on the activation and are shared with the classifier.
+WIDE = ("wk", "wv")
 # Attention window. Everything is parameterized on this - the ring mask, the
 # score and weight buffers, the KV bank offsets - so it is genuinely a knob.
 #
@@ -112,6 +128,21 @@ def weight_blob(name, idx):
     return blob(name, offsets.astype(np.uint8).tobytes(), rom0=False)
 
 
+def nibble_pair_blob(name, w):
+    """An 8-bit weight matrix as ready-made HRAM offset pairs, input-major.
+
+    Same layout the classifier uses: for input j, each output contributes a
+    high-nibble offset then a low-nibble offset, and Matvec_AddRowCls adds both.
+    `w` arrives as (out, in) and is transposed, so the kernel streams it with
+    `ld a, [de]` / `inc de` exactly as the 4-bit one does.
+    """
+    u = w.T.astype(np.int32) + 128                       # (in, out), 0..255
+    pair = np.empty(u.shape + (2,), dtype=np.uint8)
+    pair[..., 0] = (u >> 4) * 2 + HLUT_BASE              # hi table
+    pair[..., 1] = (u & 15) * 2 + HLUT_BASE + 32         # lo table, 32 bytes up
+    return blob(name, pair.tobytes(), rom0=False)
+
+
 def sbytes(values):
     return bytes(int(v) & 0xFF for v in values)
 
@@ -148,7 +179,8 @@ def quantize(model, sites):
     the ROM, the bit-exactness test would be comparing two different models.
     """
     return Q.quantize_model(model, sites, weight_bits=WEIGHT_BITS,
-                            bits_override={"tok_emb": 8})
+                            bits_override={"tok_emb": 8, **{n: 8 for n in WIDE}},
+                            rowscale_8bit=WIDE)
 
 
 def nibble_luts():
@@ -312,9 +344,13 @@ def main():
     in_site = {"wq": "xb_att", "wk": "xb_att", "wv": "xb_att", "wo": "att_out",
                "w1": "xb_ffn", "w2": "hb", "w3": "xb_ffn"}
     for name in MATS:
-        blob(f"lut_{name}", product_lut(q.codebooks[name]), rom0=False)
+        if name not in WIDE:
+            blob(f"lut_{name}", product_lut(q.codebooks[name]), rom0=False)
         for l in range(c.n_layers):
-            weight_blob(f"{name}_l{l}", q.indices[name][l])
+            if name in WIDE:
+                nibble_pair_blob(f"{name}_l{l}", q.w(name, l))
+            else:
+                weight_blob(f"{name}_l{l}", q.indices[name][l])
             to_exp = S("x") if out_site[name] == "x" else S(out_site[name], l)
             base = to_exp - q.e(name) - S(in_site[name], l) - Q.ACC_SHIFT
             blob(f"{name}_sh_l{l}", sbytes(base - q.rowexp[name][l]))
@@ -403,8 +439,9 @@ def main():
         lines.append(f"{name}_addrs:: dw " + ", ".join(f"{name}_l{l}" for l in range(c.n_layers)))
         lines.append(f"{name}_shifts:: dw " + ", ".join(f"{name}_sh_l{l}" for l in range(c.n_layers)))
         lines.append(f"{name}_shbanks:: db " + ", ".join(f"BANK({name}_sh_l{l})" for l in range(c.n_layers)))
-        lines.append(f"{name}_lutbank:: db BANK(lut_{name})")
-        lines.append(f"{name}_lutaddr:: dw lut_{name}")
+        if name not in WIDE:
+            lines.append(f"{name}_lutbank:: db BANK(lut_{name})")
+            lines.append(f"{name}_lutaddr:: dw lut_{name}")
     lines.append("")
 
     WEIGHTS_ASM.write_text("\n".join(lines), encoding="utf-8")

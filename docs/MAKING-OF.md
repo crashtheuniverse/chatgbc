@@ -164,9 +164,14 @@ way:
 | v0.1 | 23,326,656 | 18,951,201 |
 | v0.2 | 13,896,256 | 13,724,256 |
 | v0.3 | 12,973,824 | 12,794,099 |
+| v0.3 final | 13,742,336 | 13,312,871 |
 
-**1.80x in steady state**, on top of the 2.10x that got there — and the number
-that matters to a reader waiting for text, 2.4 seconds a character.
+**1.70x in steady state**, on top of the 2.10x that got there — and the number
+that matters to a reader waiting for text, 2.33 seconds a character.
+
+The last row of that table is a purchase, not a saving. v0.3 finished at
+12,973,824 and then spent 4.1% of it on eight-bit KV projections, which is the
+section below.
 
 Most of v0.2 is one idea applied where it had not been: the product table works
 for *any* loop with an invariant operand, not only matvec. Attention's score
@@ -210,6 +215,48 @@ index *is* the low bits of the pointer.
 Generation stopped being capped. The window became a knob instead of a wall —
 and later, when there was a reason to turn it, the free mask turned out to be
 the thing holding it shut. More on that below.
+
+## Eight bits, but only where the error compounds
+
+At 4 bits the model writes *"a big box with a big box"*. The attention window
+was the obvious suspect and it is innocent: at 128 positions — five times what
+ships, against a model trained at 512 — the same sentence appears. fp32 at full
+context does not produce it. So it is the weights.
+
+Putting every matrix at 8 bits costs 32% of a token, which is a lot to spend.
+Pricing each tensor group separately turned up something better. **`wk` alone,
+at a twentieth of that cost, beat 8 bits everywhere.** And `w2` at 8 bits made
+the model *worse*.
+
+The `w2` result is not about width. The quantizer gave anything at 8 bits a
+single tensor-wide exponent and no row scales, while 4 bits got Lloyd–Max plus a
+per-output-row exponent — so the two widths were different quantizers, and the
+better-designed one at 4 bits could beat the naive one at 8. Giving 8 bits the
+same row scales fixes it.
+
+With that in place, at window 24, against a 4-bit baseline of 1.706 bits/token:
+
+| 8-bit on | bits/token | cost |
+|---|---|---|
+| **wk + wv** | **1.540** | **4.1%** |
+| wk + wv + w3 | 1.504 | ~11% |
+| everything | 1.487 | ~32% |
+
+**wk and wv capture three quarters of the whole gain for an eighth of the cost.**
+There is a reason it is those two. Every other matrix affects only the token
+being computed; `wk` and `wv` write the KV cache, so their error is stored and
+re-read at each of the next 24 positions. It is the only quantization error in
+the model that compounds along the sequence. They are also the smallest matrices
+in the layer — 64x32 against 64x64 and 64x172 — so the 37-cycle nibble-split
+kernel is charged on the fewest MACs in the model.
+
+ROM is close to a wash: the weights double to two bytes each, and the two 8 KB
+per-matrix product tables disappear, because the nibble tables depend only on
+the activation and are already there for the classifier.
+
+Held-out top-1 went 75.7% to 78.1%, KL 0.43 to 0.34 bits, and the tokens got
+longer — 2.72 characters against 2.54 — so despite costing 4.1% more per token
+it is **faster per character than the version before it**, 2.33 against 2.40.
 
 ## The twin is the reason any of it worked
 
@@ -345,5 +392,5 @@ test. All of them had a person looking at the thing.
 
 ---
 
-*ChatGBC v0.3 — 12,794,099 M-cycles per token over a 96-token run, measured by
+*ChatGBC v0.3 — 13,312,871 M-cycles per token over a 96-token run, measured by
 the cartridge itself.*
