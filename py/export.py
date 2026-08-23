@@ -258,6 +258,29 @@ def main():
     const("CLS_INPUTS_PER_PART", per)
     rex = q.rowexp["tok_emb"].astype(np.int32)
     blob("cls_lshift", sbytes(rex - rex.min()))
+    # The same split again, for attention's q.k - but unscaled. A score is an
+    # exact integer dot product in the twin (`keys @ qh`, no rounding), so these
+    # tables must reconstruct the exact product, where the classifier's are
+    # pre-divided by four to match its accumulator.
+    #
+    # It works there for the same reason it works here: for one head, q is fixed
+    # across every attended position. Iterate dimension on the outside and q[d]
+    # is constant for the whole inner sweep - which is the matvec's shape, and
+    # what a product table needs.
+    # Both halves are biased by 2^15 so every entry is unsigned, which is what
+    # lets the kernel accumulate with a plain `adc a, 0` into the third byte
+    # instead of sign-extending each lookup. The bias is constant per MAC, so
+    # eight dimensions add exactly 8 * 65536 = 0x080000 - removed afterwards by
+    # subtracting 8 from the score's top byte, once per position.
+    SBIAS = 1 << 15
+    shi, slo = bytearray(), bytearray()
+    for x in range(-128, 128):
+        for u in range(16):
+            shi += (x * u * 16 + SBIAS).to_bytes(2, "little")
+            slo += (x * (u - 128) + SBIAS).to_bytes(2, "little")
+    blob("lut_score_hi", bytes(shi), rom0=False)
+    blob("lut_score_lo", bytes(slo), rom0=False)
+
     _hi, _lo = nibble_luts()
     blob("lut_cls_hi", _hi, rom0=False)
     blob("lut_cls_lo", _lo, rom0=False)

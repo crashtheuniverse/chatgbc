@@ -43,6 +43,12 @@ cls_w_p3:: INCBIN "build/blobs/cls_w_p3.bin"   ; 16384 bytes
 SECTION "cls_lshift", ROM0
 cls_lshift:: INCBIN "build/blobs/cls_lshift.bin"   ; 512 bytes
 
+SECTION "lut_score_hi", ROMX
+lut_score_hi:: INCBIN "build/blobs/lut_score_hi.bin"   ; 8192 bytes
+
+SECTION "lut_score_lo", ROMX
+lut_score_lo:: INCBIN "build/blobs/lut_score_lo.bin"   ; 8192 bytes
+
 SECTION "lut_cls_hi", ROMX
 lut_cls_hi:: INCBIN "build/blobs/lut_cls_hi.bin"   ; 8192 bytes
 

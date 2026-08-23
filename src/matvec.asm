@@ -324,7 +324,7 @@ ENDR
     ld [rROMB0], a
     ret
 
-Matvec_CopyLut:
+Matvec_CopyLut::
 REPT CB_LEVELS * 2
     ld a, [hl+]
     ldh [c], a

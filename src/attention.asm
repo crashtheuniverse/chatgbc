@@ -79,70 +79,160 @@ Score_Add:
     ret
 
 Attn_Scores:
+    ; Dimension outermost, position innermost - the opposite of the obvious
+    ; order, and the reason a product table can be used at all.
+    ;
+    ; For one head, q is fixed across every attended position. So iterating d on
+    ; the outside makes q[d] constant for the whole inner sweep over t, which is
+    ; exactly the matvec's shape: one operand known for a run of multiplies. It
+    ; was the assumption that attention could not use the table trick - because
+    ; "both operands are runtime values" - that hid this. Both are runtime, but
+    ; one of them is *loop-invariant*, and that is all a table needs.
+    ;
+    ; k is int8, so the same nibble split the classifier uses applies: two
+    ; 16-entry tables in the 64 bytes of HRAM the classifier already reserved.
+    ; The tables here are unscaled, because a score is an exact dot product.
+    ;
+    ; The cost is that scores must accumulate across d rather than being
+    ; finished one at a time, so all SEQ_LEN of them are live at once - which
+    ; wScores already was.
+    ld a, [wPos]
+    inc a
+    ld b, a                         ; attended positions
+    ld hl, wScores
     xor a
-    ld [wAtT], a
-.pos
-    ld a, [wAtT]
-    call Attn_RowK
-    push hl
-
-    xor a                           ; accumulator
-    ldh [wTmp32 + 0], a
-    ldh [wTmp32 + 1], a
-    ldh [wTmp32 + 2], a
-    ldh [wTmp32 + 3], a
-    ld hl, wSave32
+.clear
     ld [hl+], a
     ld [hl+], a
     ld [hl+], a
-    ld [hl], a
-
-    pop hl
-    ld a, [wHeadQ + 0]
-    ld e, a
-    ld a, [wHeadQ + 1]
-    ld d, a
-    ld b, HEAD_SIZE
-.dot
-    push bc
-    push hl
-    push de
-    ld a, [de]                      ; q[d]
-    ld b, a
-    ld a, [hl]                      ; K[t][kvOff+d]
-    call Mul_S8xS8                  ; hl = the exact product
-    call Score_Add
-    pop de
-    pop hl
-    pop bc
-    inc hl
-    inc de
     dec b
-    jr nz, .dot
+    jr nz, .clear
 
-    ld a, [wAtT]                    ; store the score
+    ld c, 0                         ; d
+.dim
+    push bc
+
+    ld a, [wHeadQ + 0]              ; q[d]
     ld l, a
-    ld h, 0
+    ld a, [wHeadQ + 1]
+    ld h, a
+    ld b, 0
+    add hl, bc
+    ld a, [hl]
+    call Attn_BuildLutQ             ; both tables for this q[d]
+    pop bc                          ; it uses c for the HRAM destination, and c
+    push bc                         ; is the dimension index - restore it
+
+    ; de = &K[0][kvOff + d], stepping by KV_DIM per position
+    ld a, [wAtKvOff]
+    add a, c
+    ld e, a
+    ld d, 0
+    ld hl, KV_K_BASE
+    add hl, de
     ld d, h
     ld e, l
-    add hl, de
-    add hl, de                      ; t * 3
-    ld de, wScores
-    add hl, de
-    ldh a, [wSave32 + 0]
-    ld [hl+], a
-    ldh a, [wSave32 + 1]
-    ld [hl+], a
-    ldh a, [wSave32 + 2]
-    ld [hl], a
 
-    ld a, [wAtT]
-    inc a
-    ld [wAtT], a
-    ld b, a
+    ld hl, wScores
     ld a, [wPos]
-    cp b
-    jp nc, .pos
+    inc a
+    ld b, a
+.pos
+    ld a, [de]                      ; K[t][kvOff + d]
+    add a, 128                      ; the tables are indexed by u = k + 128, and
+                                    ; the bias flips bit 7 - which lands in the
+                                    ; high nibble, not the low one. Extracting
+                                    ; nibbles from the raw signed byte gets the
+                                    ; low half right and the high half wrong by
+                                    ; exactly 8, which is subtly wrong rather
+                                    ; than obviously broken.
+    push af
+    and $0F                         ; low nibble -> the lo table
+    add a, a
+    add a, HLUT_BASE + CB_LEVELS * 2
+    ld c, a
+    ldh a, [c]
+    add a, [hl]
+    ld [hl+], a
+    inc c
+    ldh a, [c]
+    adc a, [hl]
+    ld [hl+], a
+    ld a, 0                         ; sign-extend the 16-bit product; `ld a, 0`
+    adc a, [hl]                     ; leaves the carry alone where `xor a` would
+    ld [hl-], a
+    dec hl
+
+    pop af
+    swap a                          ; high nibble -> the hi table
+    and $0F
+    add a, a
+    add a, HLUT_BASE
+    ld c, a
+    ldh a, [c]
+    add a, [hl]
+    ld [hl+], a
+    inc c
+    ldh a, [c]
+    adc a, [hl]
+    ld [hl+], a
+    ld a, 0
+    adc a, [hl]
+    ld [hl+], a
+
+    ld a, e                         ; next position: += KV_DIM
+    add a, KV_DIM
+    ld e, a
+    jr nc, :+
+    inc d
+:   dec b
+    jp nz, .pos
+
+    pop bc
+    inc c
+    ld a, c
+    cp HEAD_SIZE
+    jp c, .dim
+
+    ; Remove the table bias. Every MAC added 2^15 twice, so HEAD_SIZE of them
+    ; added exactly HEAD_SIZE * 65536 - which for eight dimensions is 0x080000,
+    ; i.e. eight off the top byte. One subtraction per position, not per MAC.
+    ld a, [wPos]
+    inc a
+    ld b, a
+    ld hl, wScores + 2
+    ld de, SCORE_BYTES
+.debias
+    ld a, [hl]
+    sub HEAD_SIZE
+    ld [hl], a
+    add hl, de
+    dec b
+    jr nz, .debias
+    ret
+
+; a = q[d]. Fills both score tables into the HRAM the classifier reserved.
+Attn_BuildLutQ:
+    add a, 128
+    ld l, a
+    ld h, 0
+REPT 5
+    add hl, hl                      ; 32 bytes per q value in each table
+ENDR
+    push hl
+    ld a, BANK(lut_score_hi)
+    ld [rROMB0], a
+    ld de, lut_score_hi
+    add hl, de
+    ld c, HLUT_BASE
+    call Matvec_CopyLut
+    pop hl
+    ld a, BANK(lut_score_lo)
+    ld [rROMB0], a
+    ld de, lut_score_lo
+    add hl, de
+    ld c, HLUT_BASE + CB_LEVELS * 2
+    call Matvec_CopyLut
     ret
 
 ; Loads scores[t] into wTmp32, sign-extended.
