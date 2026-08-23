@@ -128,19 +128,97 @@ def score(q, paths):
     return 100.0 * same / total, kl / total
 
 
-def cross_entropy(q, tok, text):
-    """Bits per token on held-out text. The only one of the three that can
-    compare two different models, because it needs no reference to agree with."""
-    rtbl = Q.rope_table(256, q.cfg.head_size)
+def free_run(forward, state_new, tok, prompt, n=96):
+    """Generate freely and return the token sequence. No teacher forcing.
+
+    This is what is actually on the screen. Teacher-forced top-1 asks "given
+    fp32's own history, do you pick the same next token" - a model that has
+    stopped being able to finish a sentence still scores well on that, because
+    it is handed a good history at every step. Letting it run on its own output
+    is the only way to see a model fall into a loop.
+    """
+    ids = tok.encode(prompt)
+    st = state_new()
+    token, out = ids[0], []
+    for pos in range(n):
+        lg = forward(st, token, pos)
+        nxt = ids[pos + 1] if pos + 1 < len(ids) else int(lg.argmax())
+        if nxt == 3:                      # EOS
+            break
+        out.append(nxt)
+        token = nxt
+    return out
+
+
+def prefix_match(a, b, skip=0):
+    """Leading tokens that agree, counted from `skip` - past the forced prompt.
+
+    Measured from zero this mostly scores the prompt, which every configuration
+    reproduces because it is fed to them. The held-out prompts are ten tokens
+    long, so a 16-token window was 60% prompt and separated nothing.
+    """
+    n = 0
+    for x, y in zip(a[skip:], b[skip:]):
+        if x != y:
+            break
+        n += 1
+    return n
+
+
+def repetition(seq, n=96):
+    """Distinct bigrams over the run, which is what catches a loop.
+
+    Distinct *tokens* does not: "a big box with a big box" reuses tokens that
+    also appear in healthy text, and scores fine. Repeated pairs are the
+    signature - lower is more repetitive.
+    """
+    s = seq[:n]
+    pairs = list(zip(s, s[1:]))
+    return len(set(pairs)) / max(len(pairs), 1)
+
+
+def fp32_continuations(model, tok, prompts, n=STEPS):
+    """Let fp32 finish each prompt, and keep what it wrote.
+
+    This is the held-out set we never had. Asking "how surprised is the
+    quantized model by text the float model would produce" needs no corpus,
+    and unlike top-1 it reads the whole distribution rather than the argmax -
+    so a model that keeps the right winner while flattening everything behind
+    it is no longer scored as undamaged.
+    """
+    rtbl = None
+    seqs = []
+    for prompt in prompts:
+        ids = tok.encode(prompt)
+        st = ref.State(model.cfg, REF_SEQ)
+        token, seq = ids[0], [ids[0]]
+        for pos in range(n):
+            logits = ref.forward(model, st, token, pos)
+            nxt = ids[pos + 1] if pos + 1 < len(ids) else int(logits.argmax())
+            if nxt == ref.EOS:
+                break
+            seq.append(nxt)
+            token = nxt
+        seqs.append(seq)
+    return seqs
+
+
+def cross_entropy(q, seqs, seq_len=None):
+    """Bits per token over token sequences. The only metric here that can
+    compare two different models, because it needs no reference to agree with -
+    and the only one that ranks the attention window and the weight width on
+    the same scale."""
+    rtbl = Q.rope_table(REF_SEQ, q.cfg.head_size)
     scale = logit_scale(q)
-    toks = tok.encode(text)
-    state = Q.QState(q.cfg, SEQ)
-    bits = 0.0
-    for pos in range(len(toks) - 1):
-        logits = Q.forward_q(q, state, toks[pos], pos, rtbl)
-        p = softmax(logits.astype(np.float64) * scale)
-        bits -= np.log2(max(float(p[toks[pos + 1]]), 1e-12))
-    return bits / max(len(toks) - 1, 1)
+    bits, n = 0.0, 0
+    for seq in seqs:
+        state = Q.QState(q.cfg, seq_len or SEQ)
+        for pos in range(len(seq) - 1):
+            logits = Q.forward_q(q, state, seq[pos], pos, rtbl)
+            p = softmax(logits.astype(np.float64) * scale)
+            bits -= np.log2(max(float(p[seq[pos + 1]]), 1e-12))
+            n += 1
+    return bits / max(n, 1)
 
 
 def main():
@@ -148,37 +226,40 @@ def main():
     ap.add_argument("--bits", type=int, default=E.WEIGHT_BITS,
                     help="weight width for everything but the classifier")
     ap.add_argument("--cls-bits", type=int, default=8, help="classifier width")
-    ap.add_argument("--corpus", type=Path, help="held-out text for cross-entropy")
+    ap.add_argument("--window", type=int, default=SEQ,
+                    help="attention window to score (default: the ROM's)")
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args()
 
     t0 = time.time()
     model, tok = ref.Model(), ref.Tokenizer()
-    sites = Q.calibrate(model, seq_len=SEQ)
+    sites = Q.calibrate(model, seq_len=min(args.window, REF_SEQ))
     q = Q.quantize_model(model, sites, weight_bits=args.bits,
                          bits_override={"tok_emb": args.cls_bits})
 
-    out = {"bits": args.bits, "cls_bits": args.cls_bits}
+    out = {"bits": args.bits, "cls_bits": args.cls_bits, "window": args.window}
     for label, prompts in (("dev", DEV), ("held-out", HELD_OUT)):
         paths = reference_paths(model, tok, prompts)
         top1, kl = score(q, paths)
         out[label] = {"top1": round(top1, 1), "kl_bits": round(kl, 4),
                       "positions": sum(len(p) for _, p, _ in paths)}
-    if args.corpus:
-        out["cross_entropy_bits"] = round(
-            cross_entropy(q, tok, args.corpus.read_text(encoding="utf-8")), 4)
+    seqs = fp32_continuations(model, tok, HELD_OUT)
+    out["cross_entropy_bits"] = round(cross_entropy(q, seqs, args.window), 4)
+    out["cross_entropy_tokens"] = sum(len(s) - 1 for s in seqs)
     out["seconds"] = round(time.time() - t0, 1)
 
     if args.json:
         print(json.dumps(out, indent=1))
         return
-    print(f"\n  weights {args.bits}-bit, classifier {args.cls_bits}-bit\n")
+    print(f"\n  weights {args.bits}-bit, "
+          f"classifier {args.cls_bits}-bit, window {args.window}\n")
     print(f"  {'split':<10}{'top-1':>8}{'KL bits':>10}{'positions':>11}")
     for label in ("dev", "held-out"):
         r = out[label]
         print(f"  {label:<10}{r['top1']:>7.1f}%{r['kl_bits']:>10.4f}{r['positions']:>11}")
-    if "cross_entropy_bits" in out:
-        print(f"\n  held-out cross-entropy  {out['cross_entropy_bits']:.4f} bits/token")
+    print(f"\n  cross-entropy on fp32's own continuations  "
+          f"{out['cross_entropy_bits']:.4f} bits/token "
+          f"({out['cross_entropy_tokens']} tokens)")
     print(f"\n  {out['seconds']}s\n")
 
 
