@@ -33,7 +33,22 @@ MODEL_INC = ROOT / "src" / "model.inc"
 BIAS = 1 << 14
 HLUT_BASE = 0x80          # product table pinned here so weight bytes are HRAM offsets
 WEIGHT_BITS = 4
-SEQ = 64                  # KV cache: one WRAM bank per layer holds exactly 64 positions
+# Attention window. Everything is parameterized on this - the ring mask, the
+# score and weight buffers, the KV bank offsets - so it is genuinely a knob.
+#
+# It was widened from 16 to 64 before the ring buffer existed, purely to get
+# longer output. The ring provides that now, so the width is free to be chosen
+# on merit again. Measured at steady state, held-out top-1 and KL:
+#
+#   window   top-1    KL      cycles/token
+#       8    67.7%  0.6259    11,726,476
+#      16    69.8%  0.5164    13,383,756
+#      32    74.7%  0.4350    16,698,316     <- the knee
+#      64    76.4%  0.4278    23,327,436
+#
+# 32 gives up 1.7 points of top-1 and almost nothing in KL for 28% of the
+# cycles. 16 costs 6.6 points for a further 15%, which is a much worse trade.
+SEQ = 32
 # Absolute positions for RoPE. The cache rings at SEQ, but RoPE needs the true
 # position - an old key keeps the rotation it was written with, and q.k depends
 # on the difference, so positions must keep counting. 256 fits a byte and needs

@@ -59,14 +59,25 @@ HELD_OUT = [
     "Every morning the old man would",
     "The bird did not want to fly, because",
 ]
-STEPS, SEQ = 48, 64
+# Long enough that every window under test is genuinely saturated. At 48 steps
+# a 64-slot window never truncates anything, so it was being scored as if it had
+# unlimited context - which flattered it against every narrower setting.
+STEPS = 96
+# The window the exporter actually ships. Hardcoding it here once meant this
+# scored a 64-slot model while the ROM ran 32 - reporting a number for a
+# configuration that was not being built.
+SEQ = E.SEQ
+# fp32 is the ideal being tracked, so it gets the whole context. Scoring it at
+# the ROM's window would measure the quantized model against an equally
+# handicapped reference and hide exactly the cost we want to see.
+REF_SEQ = 256
 
 
 def reference_paths(model, tok, prompts):
     """fp32's own greedy sequence, its argmax, and its full distribution."""
     paths = []
     for prompt in prompts:
-        state = ref.State(model.cfg, SEQ)
+        state = ref.State(model.cfg, REF_SEQ)
         toks = tok.encode(prompt)
         token, seq, picks, dists = toks[0], [toks[0]], [], []
         for pos in range(STEPS):
@@ -101,7 +112,7 @@ def softmax(v):
 
 def score(q, paths):
     """Replay fp32's sequences through the quantized model. Returns (top-1, KL)."""
-    rtbl = Q.rope_table(SEQ, q.cfg.head_size)
+    rtbl = Q.rope_table(REF_SEQ, q.cfg.head_size)
     scale = logit_scale(q)
     same = total = 0
     kl = 0.0
