@@ -38,7 +38,7 @@ version spends 19.
 | Arithmetic | int8 activations, 16-bit accumulators, no floating point, no division |
 | **Speed** | **6.5 s/token** averaged over a 96-token run (13,724,256 M-cycles) |
 | | 4.9 s for the first token, 6.7 s once the 32-token window fills |
-| Quality | 74.7% top-1 agreement with fp32 on held-out prompts |
+| Quality | 76.9% top-1 agreement with fp32 on held-out prompts (KL 0.44 bits) |
 | Kernel | 19 M-cycles per multiply-accumulate |
 | ROM | 512 KB, MBC5 |
 
