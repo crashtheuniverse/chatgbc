@@ -26,10 +26,11 @@ version spends 19.
 | | |
 |---|---|
 | Model | TinyStories-260K — 5 layers, dim 64, 8 heads / 4 KV heads, vocab 512 |
-| Weights | 4-bit, Lloyd–Max codebooks, per-output-row scales |
+| Weights | 4-bit, Lloyd–Max codebooks, per-output-row scales; 8-bit classifier |
 | Arithmetic | int8 activations, 16-bit accumulators, no floating point, no division |
-| **Speed** | **10.1 s/token** averaged over a 96-token run (21,121,834 M-cycles) |
-| | 4.6 s for the first token, 12.8 s once the 64-token window fills |
+| **Speed** | **9.0 s/token** averaged over a 96-token run (18,951,201 M-cycles) |
+| | 4.6 s for the first token, 11.1 s once the 64-token window fills |
+| Quality | 76.4% top-1 agreement with fp32 on held-out prompts |
 | Kernel | 19 M-cycles per multiply-accumulate |
 | ROM | 512 KB, MBC5 |
 

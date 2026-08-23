@@ -93,6 +93,22 @@ caveat further down.
 
 **2.10x overall.**
 
+Those stop at the first token, which is where the measurement error below
+was hiding. Steady state - a full 64-position window, which is what a real
+passage costs - went **26,905,280 → 22,781,312** on top of that, by
+rewriting attention:
+
+| step | steady state | |
+|---|---|---|
+| after the shift and HRAM work | 26,905,280 | |
+| quarter squares in the dot product | 24,478,592 | 9.0% |
+| the weighted sum's loops the right way round | 23,304,384 | 4.8% |
+| the softmax maximum staged once | 22,781,312 | 2.2% |
+| 8-bit classifier (spent, not saved) | 23,326,656 | −2.4% |
+
+The last row is a purchase rather than a saving: **+6.6 points of top-1
+agreement for 2.4% more cycles**, which is what the headroom was for.
+
 **Unrolling.** Four outputs per iteration drops the loop counter from 4 cycles
 per MAC to 1. Every output count in the model — 32, 64, 172, 512 — is a multiple
 of four, which also let the block chunking go entirely. The kernel got shorter as
