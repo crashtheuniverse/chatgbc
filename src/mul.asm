@@ -75,41 +75,87 @@ Tmp32_Negate::
 
 ; wMulA8 (signed 8-bit) * wMy (signed 16-bit)  ->  wTmp32 (signed)
 MulS8xS16::
-    ld c, 0                         ; counts negative operands
-    ld a, [wMulA8]
+    ; The multiply itself is the eight-iteration loop below - about 92 cycles.
+    ; The version this replaces spent another ~117 on top of it: it negated the
+    ; 16-bit operand into registers, wrote it back to wMy, and then read it
+    ; straight out again because the loop lived behind a separate entry point
+    ; that took its operand from memory. Then it negated the 32-bit *result*, in
+    ; memory, through another call.
+    ;
+    ; Now the operand stays in bc, the sign rides on the stack, and a negative
+    ; result is negated in registers before it is ever stored.
+
+    ld a, [wMulA8]                  ; sign of the product = signA xor signB
+    ld b, a
+    ld a, [wMy + 1]
+    xor b
+    push af
+
+    ld a, b                         ; |A| -> d, the multiplier
     bit 7, a
-    jr z, .aPos
+    jr z, :+
     cpl
     inc a
-    inc c
-.aPos
-    ld b, a                         ; |A|
+:   ld d, a
 
+    ld a, [wMy + 0]                 ; |B| -> bc, the multiplicand
+    ld c, a
     ld a, [wMy + 1]
+    ld b, a
+    bit 7, b
+    jr z, :+
+    ld a, c
+    cpl
+    ld c, a
+    ld a, b
+    cpl
+    ld b, a
+    inc bc
+:
+    ld hl, 0                        ; hl = product low 16, e = bits 16..23
+    ld e, 0
+REPT 8
+    add hl, hl
+    rl e
+    sla d
+    jr nc, :+
+    add hl, bc
+    ld a, e
+    adc a, 0
+    ld e, a
+:
+ENDR
+
+    pop af
     bit 7, a
-    jr z, .bPos
-    ld a, [wMy + 0]                 ; negate the 16-bit operand
+    jr z, .store
+
+    ld a, l                         ; negate the 24-bit result in place
+    cpl
+    ld l, a
+    ld a, h
+    cpl
+    ld h, a
+    ld a, e
     cpl
     ld e, a
-    ld a, [wMy + 1]
-    cpl
-    ld d, a
+    inc hl
+    ld a, h
+    or l
+    jr nz, .store
     inc e
-    jr nz, :+
-    inc d
-:   ld a, e
-    ld [wMy + 0], a
-    ld a, d
-    ld [wMy + 1], a
-    inc c
-.bPos
-    push bc
-    ld a, b
-    call MulU8xU16
-    pop bc
-    bit 0, c                        ; exactly one negative operand
-    ret z
-    jp Tmp32_Negate
+
+.store
+    ld a, l
+    ldh [wTmp32 + 0], a
+    ld a, h
+    ldh [wTmp32 + 1], a
+    ld a, e
+    ldh [wTmp32 + 2], a
+    add a, a                        ; |A*B| <= 2^22, so bit 23 is the sign
+    sbc a, a
+    ldh [wTmp32 + 3], a
+    ret
 
 ; Sets wMy to the sign-extension of a.
 SetMyFromS8::
