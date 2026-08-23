@@ -37,16 +37,44 @@ RmsNorm::
     ld a, [wRnSrc + 1]
     ld h, a
     ld b, DIM
+; A square is one table read, not a multiply. The quarter-square table already
+; in ROM holds f(x) = floor(x*x / 4), so f(2x) = x*x exactly - and |2x| tops out
+; at 256, which is precisely the range the table covers. f is even, so the sign
+; of x does not matter and only |x| is needed.
+;
+; This replaces a generic shift-add multiply and a 32-bit add per element with
+; an absolute value, a shift and a lookup.
 .sumsq
     ld a, [hl+]
     push hl
-    push bc
-    ld [wMulA8], a
-    call SetMyFromS8
-    call MulS8xS16
+    bit 7, a
+    jr z, :+
+    cpl
+    inc a                           ; |x|, and |-128| = 128 unsigned
+:   ld l, a
+    ld h, 0
+    add hl, hl                      ; index = 2|x|
+    add hl, hl                      ; two bytes per entry
+    ld de, tbl_qsq
+    add hl, de
+    ld a, [hl+]
+    ld e, a
+    ld d, [hl]                      ; de = x * x
+
     ld hl, wSS
-    call Tmp32_AddTo
-    pop bc
+    ld a, [hl]
+    add a, e
+    ld [hl+], a
+    ld a, [hl]
+    adc a, d
+    ld [hl+], a
+    ld a, [hl]
+    adc a, 0
+    ld [hl+], a
+    ld a, [hl]
+    adc a, 0
+    ld [hl], a
+
     pop hl
     dec b
     jr nz, .sumsq
