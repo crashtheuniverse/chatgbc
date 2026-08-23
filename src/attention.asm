@@ -524,7 +524,22 @@ ENDC
     ld h, 0
     ld de, wWAcc
     add hl, de
-    call Tmp32_AddTo
+
+    ; Inlined Tmp32_AddTo. This is the hottest call site in the ROM - roughly
+    ; 6,400 times a token - so it is the one worth measuring the cost of a
+    ; `call`/`ret` pair on.
+    ldh a, [wTmp32 + 0]
+    add a, [hl]
+    ld [hl+], a
+    ldh a, [wTmp32 + 1]
+    adc a, [hl]
+    ld [hl+], a
+    ldh a, [wTmp32 + 2]
+    adc a, [hl]
+    ld [hl+], a
+    ldh a, [wTmp32 + 3]
+    adc a, [hl]
+    ld [hl], a
     pop hl
     inc hl
     inc c
