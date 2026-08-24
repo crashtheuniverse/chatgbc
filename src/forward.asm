@@ -19,10 +19,9 @@ wToken::    dw
 wStep::     db
 wMatIdx:    db
 wBestTok::  dw
-wBest:      ds 4
-wClsPart:   db
-wBlocked:   ds NOREPEAT_TRIES * 2   ; tokens the no-repeat rule has turned down
-wBlockedN:  db                      ; how many of them, this step
+wClsPart::  db
+wBlocked::  ds NOREPEAT_TRIES * 2   ; tokens the no-repeat rule has turned down
+wBlockedN:: db                      ; how many of them, this step
 
 SECTION "Forward code", ROM0
 
@@ -477,77 +476,23 @@ Forward::
     call RmsNorm
     ; fall through
 
-; Streams the classifier and keeps only the running best, so 512 logits never
-; have to be stored. Each vocabulary row carries its own scale, so the raw
-; accumulators are not comparable until the row shift is applied.
+; Greedy decode needs argmax and nothing else - no softmax, no stored logits,
+; and now no stored accumulators either. src/classifier.asm builds every
+; input's product table into a WRAM bank once, then walks the vocabulary
+; output-major: each logit is summed in a register pair, compared against the
+; best so far, and forgotten.
 Classify::
-    ld hl, VOCAB
-    call Matvec_SetOut
-
-    ; Stream the classifier one bank at a time, accumulating into the same
-    ; outputs. Four parts now that each weight carries two HRAM offsets.
-    xor a
-    ld [wClsPart], a
-.part
-    ld a, [wClsPart]
-    ld l, a
-    ld h, 0
-    ld de, cls_banks
-    add hl, de
-    ld a, [hl]
-    ld [wMvBank], a
-
-    ld a, [wClsPart]
-    add a, a
-    ld l, a
-    ld h, 0
-    ld de, cls_addrs
-    add hl, de
-    ld a, [hl+]
-    ld [wMvW + 0], a
-    ld a, [hl]
-    ld [wMvW + 1], a
-
-    ld a, CLS_INPUTS_PER_PART
-    ld [wMvIn], a
-
-    ld a, [wClsPart]                ; x slice for this part
-    ld l, a
-    ld h, 0
-REPT 4
-    add hl, hl                      ; * CLS_INPUTS_PER_PART (16)
-ENDR
-    ld de, wXb
-    add hl, de
-    call SetXPtr
-
-    ld a, [wClsPart]
-    or a
-    jr nz, .accum
-    call Matvec_RunCls              ; first part clears the accumulators
-    jr .next
-.accum
-    call Matvec_RunClsAccum
-.next
-    ld a, [wClsPart]
-    inc a
-    ld [wClsPart], a
-    cp CLS_PARTS
-    jr c, .part
-
-    ld a, DIM                       ; the bias covers every input, every part
-    ld [wMvIn], a
-    call Requant_SetBias
+    call Cls_BuildTables
 
     ; Rank-walk the vocabulary until a token turns up that does not complete a
-    ; 4-gram this run has already emitted. The accumulators in wAcc are only
-    ; read by the scan, never consumed, so a rescan is a rescan of the same
-    ; numbers - no part of the classifier matvec is repeated. Measured at about
-    ; six extra scans across a 160-token run.
+    ; 4-gram this run has already emitted. A retry re-runs the argmax with the
+    ; turned-down token on the blocked list - the stored sums the old design
+    ; re-scanned are exactly the storage this kernel deleted, and retries are
+    ; rare: about six across a 160-token run.
     xor a
     ld [wBlockedN], a
 .retry
-    call Cls_Scan
+    call Cls_Argmax
     call NoRepeat_Ok
     ret nz                          ; nothing repeated: take it
     ld a, [wBlockedN]
@@ -565,140 +510,6 @@ ENDR
     ld hl, wBlockedN
     inc [hl]
     jr .retry
-
-Cls_Scan:
-    ld a, $80                       ; best = most negative int32
-    ld [wBest + 3], a
-    xor a
-    ld [wBest + 0], a
-    ld [wBest + 1], a
-    ld [wBest + 2], a
-    ld [wBestTok + 0], a
-    ld [wBestTok + 1], a
-
-    ld a, LOW(wAcc)
-    ld [wRqAcc + 0], a
-    ld a, HIGH(wAcc)
-    ld [wRqAcc + 1], a
-    ld a, LOW(cls_lshift)
-    ld [wRqSh + 0], a
-    ld a, HIGH(cls_lshift)
-    ld [wRqSh + 1], a
-    xor a
-    ld [wRqCnt + 0], a
-    ld [wRqCnt + 1], a
-
-.scan
-    ld a, [wRqAcc + 0]
-    ld l, a
-    ld a, [wRqAcc + 1]
-    ld h, a
-    call Requant_LoadUnbiased
-    ld a, l
-    ld [wRqAcc + 0], a
-    ld a, h
-    ld [wRqAcc + 1], a
-
-    ld a, [wRqSh + 0]
-    ld l, a
-    ld a, [wRqSh + 1]
-    ld h, a
-    ld a, [hl+]
-    ld c, a
-    ld a, l
-    ld [wRqSh + 0], a
-    ld a, h
-    ld [wRqSh + 1], a
-
-    ld a, c                         ; the table holds a left shift
-    cpl
-    inc a
-    call Requant_Shift
-
-    call CompareBest
-
-    ld hl, wRqCnt                   ; advance the token index
-    ld a, [hl]
-    add a, 1
-    ld [hl+], a
-    ld a, [hl]
-    adc a, 0
-    ld [hl], a
-    ld a, [wRqCnt + 0]
-    cp LOW(VOCAB)
-    jp nz, .scan
-    ld a, [wRqCnt + 1]
-    cp HIGH(VOCAB)
-    jp nz, .scan
-    ret
-
-; Keeps wTmp32 if it beats wBest, recording the current index as the winner.
-;
-; The SM83 has no sign flag, so a signed compare is done by hand: if the sign
-; bits differ the positive value wins, otherwise an unsigned compare from the
-; top byte down gives the right answer.
-CompareBest:
-    ld a, [wBlockedN]               ; usually zero, so usually four cycles
-    or a
-    jr z, .live
-    ld b, a
-    ld hl, wBlocked
-.blocked
-    ld a, [wRqCnt + 0]
-    cp [hl]
-    inc hl
-    jr nz, .nextBlocked
-    ld a, [wRqCnt + 1]
-    cp [hl]
-    ret z                           ; this one was turned down already
-.nextBlocked
-    inc hl
-    dec b
-    jr nz, .blocked
-
-.live
-    ldh a, [wTmp32 + 3]
-    ld b, a
-    ld a, [wBest + 3]
-    ld c, a
-    xor b
-    bit 7, a
-    jr z, .sameSign
-    bit 7, b
-    ret nz                          ; candidate is negative, best is not
-    jr .take
-
-.sameSign
-    ld a, b
-    cp c
-    ret c
-    jr nz, .take
-    ld hl, wBest + 2
-    ldh a, [wTmp32 + 2]
-    cp [hl]
-    ret c
-    jr nz, .take
-    ld hl, wBest + 1
-    ldh a, [wTmp32 + 1]
-    cp [hl]
-    ret c
-    jr nz, .take
-    ld hl, wBest + 0
-    ldh a, [wTmp32 + 0]
-    cp [hl]
-    ret c
-    ret z                           ; ties keep the earlier token, as argmax does
-
-.take
-    ld hl, wTmp32
-    ld de, wBest
-    ld bc, 4
-    call CopyBytes
-    ld a, [wRqCnt + 0]
-    ld [wBestTok + 0], a
-    ld a, [wRqCnt + 1]
-    ld [wBestTok + 1], a
-    ret
 
 ; Z set when wBestTok would complete a 4-gram this run has already emitted,
 ; Z clear when it is safe to take.

@@ -287,19 +287,30 @@ def main():
         S("x") - q.e("tok_emb") - q.rowexp["tok_emb"]
     ))
 
-    # --- classifier: input-major, plus the left shift that makes rows comparable ---
-    # Two HRAM offsets per weight, ready to use: the kernel does no nibble
-    # arithmetic at all, it just reads two bytes and adds two lookups. ROM is
-    # the resource this project has spare.
-    cls_u = (q.w("tok_emb").T.astype(np.int32) + 128)        # (dim, vocab), 0..255
-    cls_pair = np.empty((c.dim, c.vocab_size, 2), dtype=np.uint8)
-    cls_pair[..., 0] = (cls_u >> 4) * 2 + HLUT_BASE          # hi table
-    cls_pair[..., 1] = (cls_u & 15) * 2 + HLUT_BASE + 32     # lo table, 32 bytes up
-    nparts, per = blob_split("cls_w", cls_pair.tobytes(), c.dim)
+    # --- classifier: output-major, for the register argmax ---
+    # Greedy decode needs argmax and nothing else. Output-major lets each
+    # logit live its whole life in a register pair - summed, compared against
+    # the best so far, forgotten - so the 512 running sums the input-major
+    # kernel kept in WRAM, the pass that zeroed them and the pass that
+    # re-scanned them all disappear.
+    #
+    # Each weight is two address-low bytes: entry offset plus the input's
+    # table base (j * 64), folded in here so the kernel does no arithmetic at
+    # all. The page - the address high byte - advances every four inputs, and
+    # the kernel carries it in a register.
+    #
+    # The raw sums are only comparable because every row shares one scale:
+    # the 8-bit classifier is uniform int8 with a single exponent. If it ever
+    # grows per-row scales, the compare needs the shift back - so assert it.
+    assert int(np.abs(q.rowexp["tok_emb"]).max()) == 0,         "register argmax compares raw sums; per-row classifier scales need the shift back"
+    cls_u = q.w("tok_emb").astype(np.int32) + 128            # (vocab, dim), 0..255
+    jbase = ((np.arange(c.dim, dtype=np.int32) * 64) & 0xFF)[None, :]
+    cls_pair = np.empty((c.vocab_size, c.dim, 2), dtype=np.uint8)
+    cls_pair[..., 0] = (jbase + (cls_u >> 4) * 2) & 0xFF     # hi half of the table
+    cls_pair[..., 1] = (jbase + 32 + (cls_u & 15) * 2) & 0xFF
+    nparts, per = blob_split("cls_w", cls_pair.tobytes(), c.vocab_size)
     const("CLS_PARTS", nparts)
-    const("CLS_INPUTS_PER_PART", per)
-    rex = q.rowexp["tok_emb"].astype(np.int32)
-    blob("cls_lshift", sbytes(rex - rex.min()))
+    const("CLS_OUTPUTS_PER_PART", per)
     # The same split again, for attention's q.k - but unscaled. A score is an
     # exact integer dot product in the twin (`keys @ qh`, no rounding), so these
     # tables must reconstruct the exact product, where the classifier's are
