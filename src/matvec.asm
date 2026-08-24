@@ -211,9 +211,14 @@ Matvec_Body:
     ret
 
 
-; --- the classifier's kernel ------------------------------------------------
+; --- the 8-bit kernel: the KV projections -----------------------------------
 ;
-; Its weights are 8-bit, which will not fit the 16-entry table trick: 256
+; Once the classifier's, now serving wk and wv, whose error compounds through
+; the cache and earns them 8 bits. (The classifier itself moved to
+; src/classifier.asm, output-major, when greedy argmax made storing its outputs
+; pointless.)
+;
+; 8-bit weights will not fit the 16-entry table trick: 256
 ; entries is 512 bytes against 127 of HRAM. So each weight is split into nibbles
 ; at export time and stored as two ready-made HRAM offsets - one into a table of
 ; `x * hi * 4`, one into a table of `round(x * (lo - 128) / 4)`. Their sum is the
@@ -227,9 +232,6 @@ Matvec_Body:
 ; Matvec_Run and Matvec_RunAccum are separate entry points.
 Matvec_RunCls::
     call Matvec_Zero
-    jr Matvec_BodyCls
-
-Matvec_RunClsAccum::
     ; fall through
 
 Matvec_BodyCls:

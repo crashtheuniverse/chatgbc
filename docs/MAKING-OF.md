@@ -163,15 +163,17 @@ way:
 |---|---|---|
 | v0.1 | 23,326,656 | 18,951,201 |
 | v0.2 | 13,896,256 | 13,724,256 |
-| v0.3 | 12,973,824 | 12,794,099 |
-| v0.3 final | 13,742,336 | 13,312,871 |
+| v0.3, window 24 | 12,973,824 | 12,794,099 |
+| + 8-bit KV projections | 13,742,336 | 13,312,871 |
+| **v0.3 shipped** | **13,403,840** | **12,918,757** |
 
-**1.70x in steady state**, on top of the 2.10x that got there — and the number
-that matters to a reader waiting for text, 2.33 seconds a character.
+**1.74x in steady state**, on top of the 2.10x that got there — and the number
+that matters to a reader waiting for text, **2.26 seconds a character**.
 
-The last row of that table is a purchase, not a saving. v0.3 finished at
-12,973,824 and then spent 4.1% of it on eight-bit KV projections, which is the
-section below.
+The middle rows tell the honest shape of it: the 8-bit KV projections are a
+purchase, not a saving — 4.1% of a token spent on the largest quality win in
+the project — and the register-argmax classifier below then paid most of it
+back.
 
 Most of v0.2 is one idea applied where it had not been: the product table works
 for *any* loop with an invariant operand, not only matvec. Attention's score
@@ -304,6 +306,39 @@ stories in this corpus, and the detokenizer was printing its vocabulary piece -
 the literal text `<s>` - onto the screen. It is a paragraph break, so that is
 what it renders as now.
 
+## The classifier stopped storing what argmax ignores
+
+This one was V's, from reading the decode path: under greedy argmax there is no
+softmax to take, and no reason to store 512 logits just to scan them again —
+best score and best token are two variables, maintainable while the final
+matrix is still being processed.
+
+Half of it the ROM already did. Generation has never computed a softmax over
+the vocabulary — that only exists inside attention, where the weighted sum
+needs real probabilities — and logits were consumed one at a time by a running
+best. But the other half found real waste with a bonus on top: 512 sixteen-bit
+accumulators were zeroed, read-modify-written on every one of 32,768 MACs, and
+then re-scanned through a per-row shift whose table is **512 zeros** in the
+shipped model. The comment beside it still claimed each row carried its own
+scale. It had stopped being true a version earlier, and nobody had told the
+scan.
+
+The accumulators existed because the kernel was input-major — the order that
+amortizes one product-table build over every output. Output-major inverts the
+trade: build all 64 input tables first, into a WRAM bank, and each logit then
+lives its whole life in a register pair — summed at 24 cycles a MAC against the
+old 37, compared, forgotten. Timed alone, the classifier went **1,346,816
+cycles to 923,008: 3.2% of a token**.
+
+Two mistakes on the way are worth their lessons. The table bank was first
+declared on the belief that the KV cache owned banks 1–5; it owns 2–6, so every
+build overwrote layer 4's keys — and the bug announced itself as *step one
+decodes correctly, everything later drifts*, because layer 4 had already been
+read by the time the classifier ran. And the first reported saving was 5.4%,
+measured against a stale baseline; rebuilding from scratch reproduced the
+sealed number exactly and the honest figure is 3.2%. A baseline is only a
+baseline if it is rebuilt from scratch.
+
 ## The twin is the reason any of it worked
 
 Not a technique. A contract.
@@ -426,7 +461,9 @@ small model and an emulator so the loop would be fast. Insisting on the bit-exac
 twin as a contract. The ring buffer, and with it unbounded context. Asking
 whether a 16-bit accumulator could be made to work, which it could, though not
 the way I first suggested. Asking why a shift was a loop, and how HRAM was being
-used — both of which turned into real cycles. Deciding to ship before touching
+used — both of which turned into real cycles. Observing that greedy argmax
+needs no softmax and no stored logits, which deleted the classifier's
+accumulator array and 3.2% of every token. Deciding to ship before touching
 the model.
 
 And several bugs came from sitting down and reading it: a black block from a
@@ -438,5 +475,5 @@ test. All of them had a person looking at the thing.
 
 ---
 
-*ChatGBC v0.3 — 13,330,010 M-cycles per token over a 96-token run, measured by
+*ChatGBC v0.3 — 12,918,757 M-cycles per token over a 96-token run, measured by
 the cartridge itself.*

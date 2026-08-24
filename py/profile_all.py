@@ -6,7 +6,7 @@ saturation for the 32-slot window.
 import re, subprocess, sys
 from pathlib import Path
 
-ROOT = Path(r"C:\crashcode\chatgbc_x")
+ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "py"))
 FWD, ATT = ROOT / "src" / "forward.asm", ROOT / "src" / "attention.asm"
 ORIG = {p: p.read_text(encoding="utf-8") for p in (FWD, ATT)}

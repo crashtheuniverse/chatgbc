@@ -13,7 +13,7 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(r"C:\crashcode\chatgbc_x") / "py"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import quant as Q
 import reference as ref
 from eval import DEV, HELD_OUT, SEQ

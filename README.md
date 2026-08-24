@@ -37,9 +37,9 @@ version spends 19.
 | Weights | 4-bit, Lloyd–Max codebooks, per-output-row scales |
 | | 8-bit for the classifier and the two KV projections |
 | Arithmetic | int8 activations, 16-bit accumulators, no floating point, no division |
-| **Speed** | **6.36 s/token** averaged over a 96-token run (13,330,010 M-cycles) |
-| | 5.0 s for the first token, 6.6 s once the 24-token window fills |
-| | **2.33 s per character**, at 2.73 characters a token |
+| **Speed** | **6.16 s/token** averaged over a 96-token run (12,918,757 M-cycles) |
+| | 4.8 s for the first token, 6.4 s once the 24-token window fills |
+| | **2.26 s per character**, at 2.73 characters a token |
 | Quality | 1.54 bits/token cross-entropy against fp32's own continuations |
 | | 78.1% top-1 agreement with fp32 on held-out prompts (KL 0.34 bits) |
 | Kernel | 19 M-cycles per multiply-accumulate |
