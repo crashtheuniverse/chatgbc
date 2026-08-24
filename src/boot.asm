@@ -86,6 +86,7 @@ Boot::
     call RecordStatus
     call Measure
     call MeasureFetch           ; ROM vs HRAM execution; see src/fetchtest.asm
+    call MeasureClassify        ; the classifier, timed alone; see src/clsbench.asm
     jp Run                      ; whichever entry point was linked
 
 

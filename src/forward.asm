@@ -20,6 +20,7 @@ wStep::     db
 wMatIdx:    db
 wBestTok::  dw
 wClsPart::  db
+wRetries::  ds 2                    ; no-repeat retries this run, for telemetry
 wBlocked::  ds NOREPEAT_TRIES * 2   ; tokens the no-repeat rule has turned down
 wBlockedN:: db                      ; how many of them, this step
 
@@ -509,7 +510,12 @@ Classify::
     ld [hl], a
     ld hl, wBlockedN
     inc [hl]
-    jr .retry
+    ld hl, wRetries                 ; count them: a retry re-runs the whole
+    inc [hl]                        ; argmax now, so the rate matters
+    jr nz, :+
+    ld hl, wRetries + 1
+    inc [hl]
+:   jr .retry
 
 ; Z set when wBestTok would complete a 4-gram this run has already emitted,
 ; Z clear when it is safe to take.
