@@ -106,3 +106,5 @@ bisection with a definite answer.
 [gbdev hardware.inc](https://github.com/gbdev/hardware.inc) ·
 [PyBoy](https://github.com/Baekalfen/PyBoy) ·
 [SameBoy](https://sameboy.github.io)
+
+MIT licensed.
