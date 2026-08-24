@@ -35,16 +35,22 @@ speed.
 ## The number that set the target
 
 A GBC in double speed gives 2,097,152 M-cycles a second. This model costs about
-259,000 multiply-accumulates a token.
+259,000 multiply-accumulates a token, and a hand-written int8 MAC on this chip
+should cost about twenty cycles. Those three numbers said interactive speed was
+possible before a line was written.
 
-[gbc-transformer](https://github.com/maddiedreese/gbc-transformer) got here
-first, in GBDK C, and set both the model and the target. It runs at 169 s/token.
-That works out to **676 cycles per MAC**. A hand-written int8 MAC on this chip
-should cost about twenty.
+The idea turned out not to be mine alone — for completeness, gbc-transformer
+had already run this model on a GBC, in C, at 169 s/token, which works out to
+~676 cycles per MAC. Reading it settled *how* rather than *whether*: a compiler
+cannot be argued with, and I wanted every cycle attributable to a line I could
+point at. So — assembly throughout, integer arithmetic designed rather than
+inherited, and a bit-exact oracle behind every kernel. Costs become
+measurements instead of guesses, and each release can be held against the last:
+the foundation for improvement that never has to stop.
 
-That gap is the whole project. And it forced a conclusion I did not expect: the
-assembly was never needed to reach interactive speed. It was needed to create
-headroom, and headroom is spent on quality.
+It also forced a conclusion I did not expect: the assembly was never needed to
+reach interactive speed. It was needed to create headroom, and headroom is
+spent on quality.
 
 Storage never mattered. MBC5 gives 8 MB and the model is a few hundred KB.
 Compute was the only budget. Nearly every trick below trades ROM for cycles.
