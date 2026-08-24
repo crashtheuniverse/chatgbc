@@ -26,8 +26,8 @@ The constraints are the instrument, not the price of it:
 - The bit-exact twin makes every answer definite. Identical, or not.
 - The ROM times itself, so the number survives leaving the emulator.
 
-Seventeen experiments are in `LOG.md`. Five are failures I kept. You only keep
-failures when being wrong is cheap.
+Seventeen experiments went into the log behind this document. Five are
+failures I kept. You only keep failures when being wrong is cheap.
 
 The Game Boy is not the point. It is a lab small enough to run the loop at full
 speed.
@@ -308,8 +308,8 @@ what it renders as now.
 
 ## The classifier stopped storing what argmax ignores
 
-This one was V's, from reading the decode path: under greedy argmax there is no
-softmax to take, and no reason to store 512 logits just to scan them again —
+This one was mine, from reading the decode path: under greedy argmax there is
+no softmax to take, and no reason to store 512 logits just to scan them again —
 best score and best token are two variables, maintainable while the final
 matrix is still being processed.
 
@@ -471,7 +471,7 @@ stranded palette attribute, a keyboard with no space key, a headline cycle count
 that turned out to be the cheapest token in the run. None of those had a failing
 test. All of them had a person looking at the thing.
 
-`DECISIONS.md` has the rest.
+
 
 ---
 

@@ -4,7 +4,7 @@ Training a model to find out it does not fit is the expensive way to learn that.
 This predicts cycles per token from a shape, using coefficients measured on the
 real ROM by stubbing kernels, so a candidate can be rejected in milliseconds.
 
-The coefficients are fitted, not derived. Each is a measurement from docs/LOG.md
+The coefficients are fitted, not derived. Each is a measurement from the experiment log
 divided by the work it covers at the current shape, so the model reproduces the
 current shape exactly by construction. Its value is in the *ratios* between
 shapes, and it is only trustworthy near the shape it was fitted at - a wildly

@@ -1,7 +1,7 @@
 """Operation census: what happens per token, how often, and what drives it.
 
 Counts are structural - derived from the model shape, not measured. Cycle
-figures come from docs/LOG.md's stub profile at window 32. The point is the
+figures come from the stub profile at window 32. The point is the
 cycles-per-operation column: it separates "this happens a lot" from "this is
 expensive each time", which need completely different fixes.
 """

@@ -124,5 +124,4 @@ cycle of dim 64 with 5.
 
 `py/census.py` counts operations from the shape. `py/profile_all.py` measures
 them on the ROM by stubbing kernels one at a time. `py/arch.py` predicts what a
-different shape would cost. Every figure here is one of those three, and
-[LOG.md](LOG.md) records which.
+different shape would cost. Every figure here is one of those three.

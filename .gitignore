@@ -8,6 +8,11 @@ __pycache__/
 *.pyc
 .pytest_cache/
 
+# Internal working documents - the lab notebook, not the publication
+AGENTS.md
+docs/LOG.md
+docs/DECISIONS.md
+
 # Personal release + media checklists, not part of the project
 RELEASE.md
 MEDIA.md
