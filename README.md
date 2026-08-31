@@ -87,6 +87,16 @@ headlessly and assert it emits an identical token sequence, not a similar one.
 Every bug becomes "at which layer do the two stop agreeing", which is a
 bisection with a definite answer.
 
+## Proof, on the real thing
+
+![ChatGBC running on a real Game Boy Color](docs/chatgbc.jpg)
+
+Days after the first build went out, the #gbdev community on Discord was kind
+enough to flash it to a cartridge and photograph it running on original
+hardware. That status bar is the cartridge timing itself on real silicon —
+within 64 cycles of the emulator's figure for the same token, five parts per
+million. The numbers in this README hold wherever the ROM runs.
+
 ## More
 
 - [The model](docs/THE-MODEL.md) — one page: what it runs, why MACs equal
