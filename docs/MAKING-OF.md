@@ -1,45 +1,38 @@
 # Making ChatGBC
 
-The first draft of this document was eight times longer. Nobody finished it,
-me included. Here is the espresso.
-
 ## Why a Game Boy
 
-Not nostalgia. **Loop latency.** Train a real model, wait hours. Here a
+**Loop latency.** Train a real model, wait hours. Here a
 question costs twenty-five seconds: assemble, boot headless, generate, check
 29 assertions. When being wrong costs half a minute, you can afford to be
-wrong all day — and that is called research.
+wrong all day and keep researching.
 
 The Game Boy is not the point. It is a lab small enough that I can look at
-every bit with my own eyes. Like Neo, except the Matrix is 32KB, and I can
-actually read it.
+every bit with my own eyes. I feel like a mini Neo, just my Matrix is 32KB. 
 
 ## The number that started it
 
 Somebody had already run this model on a GBC, in C: 169 seconds per token,
 which is ~676 cycles per multiply-accumulate. A hand-written MAC on this chip
-should cost about 20. That factor of 30 was the entire project. No faith
-required — just arithmetic.
+should cost about 20. 
 
 ## The tricks
 
 **There is no multiplier.** The SM83 cannot multiply. But weights are 4-bit:
 sixteen possible values, 256 possible activations, so every product the model
 will *ever* need fits in 8KB of ROM per matrix. Precompute all of them, and
-"multiply" becomes one load instruction: 3,200 cycles become 200. Try
-explaining that to a C compiler. There is no spoon.
+"multiply" becomes one load instruction: 3,200 cycles become 200. 
 
 **Everything else is a shift.** No division, no floats. Scales are powers of
 two, so every rescale is a shift; rsqrt, exp and sigmoid are tables. ROM is
-abundant (8MB!), cycles are misery (2MHz real). You always trade the fat
-thing for the starving one.
+abundant (8MB!), cycles are misery (2MHz real).
 
-**The ring.** My favourite, and mine. The cache slot for position `p` is
+**The ring.** My favourite original thinking. The cache slot for position `p` is
 `p mod 24`, while RoPE keeps rotating by the *absolute* `p`. Where a token
 **is** and where it **fits** had been the same number only by accident.
 Separate them and generation never stops: the model attends to the last 24
-positions forever, like a nonna who remembers only the last thing you said —
-but with total conviction.
+positions forever. 
+This is what reading assembly mentally simplifies for you.
 
 **Eight bits only where the error compounds.** `wk` and `wv` write the cache,
 so their error is stored and re-read for 24 positions — the only error in the
@@ -48,7 +41,7 @@ quality gain for an eighth of the cost. Top-1 went 75.7% → 78.1%.
 
 **Refusing to repeat.** Greedy argmax is a fixed point, so every story ended
 in *"They are very happy. They are very happy."* Sampling ruins the grammar —
-a 260K model has no probability to waste. Instead the decoder skips any token
+a 260K model has no probability to waste. _trick!!!_ : Instead the decoder skips any token
 that would complete a 4-gram it already said: never loops, still
 deterministic, 0.13% of a token. And since greedy needs no softmax and no
 stored logits, the best token lives in a register pair — deleting the logit
@@ -64,7 +57,9 @@ array bought back 3.2% of every token.
 
 Every step bit-exact against a Python twin of the assembly — same rounding,
 same widths, identical tokens or the test fails. Every bug becomes "at which
-layer do the twins disagree", which is a bisection, not a séance.
+layer do the twins disagree", which is a bisection.
+
+The **twin IS** the secret weapon.
 
 ## Thrown away
 
@@ -72,30 +67,29 @@ layer do the twins disagree", which is a bisection, not a séance.
   *"a boat named Tediaby"*. Four bits is the floor — unless you *train*
   ternary, which is another story, for another version.
 - **Code in HRAM.** On a Game Boy every memory region answers in one cycle.
-  HRAM buys shorter instructions, not faster memory. Measured, not believed.
-- **My first headline number.** Measured on the first token — the cheapest of
-  all 96, before the attention window fills. The honest average was more than
-  twice as slow. The instrument was fine; it was pointed at the wrong token.
+  HRAM buys shorter instructions, not faster memory.
 
-## Two bugs worth a candle
+## Notable Bugs
 
 The stack was in banked WRAM, and attention switches banks per layer — it
 yanked the stack out from under every `call`. And the emulator powers RAM up
-zeroed where real hardware does not: everything passed in the emulator and
-spoke rubbish on silicon. Now the ROM scribbles over everything at boot, on
-purpose.
+zeroed where **real hardware does not**: everything passed in the emulator and
+nonsense on HW. Now the ROM zeroes out at boot.
 
 ## How this was made
 
-I did not type this assembly. I directed it — AI wrote most of the lines, and
+I did not type probably 98% of the assembly. 
+I did just direction. AI wrote most of the lines, and
 I read all of them, which is exactly why it is assembly: I can look at a loop
-and know its price. Mine were the decisions that shaped it: the small model
-so the loop stays fast, the bit-exact twin as a contract, the ring, the
-16-bit accumulators, the observation that argmax needs no softmax. The
-machine typed; a guy from Palermo asked *cui prodest?* at every line, and
-ate an arancina every time the cycle count went down.
+and know its price. 
+_funny note:_ a column/row inverted loop. Fix it and code became even cleaner.
 
-It went down a lot.
+I treated it as I had a junior and decided on high level stuff: 
+the small model so the loop stays fast, the bit-exact twin as a contract, the ring, the
+16-bit accumulators, the observation that argmax needs no softmax. 
+
+Experience gives you patterns. I wanted cycles to go down. 
+They went down a lot.
 
 ---
 

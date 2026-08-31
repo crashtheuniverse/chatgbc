@@ -1,13 +1,10 @@
 # How the model works
 
-A short tour of the model, following one token through it. Each section names
-the file that implements it, so you can read the assembly next to the idea.
-
 No machine-learning background assumed. If you know what a dot product is, you
 have enough.
 
 **The shape of this model.** 512-word vocabulary, 5 layers, working vectors of
-64 numbers, 8 attention heads of 8 numbers each, 4 key/value heads, a 64-position
+64 numbers, 8 attention heads of 8 numbers each, 4 key/value heads, a 24-position
 memory. About 260,000 parameters. Everything below is that size.
 
 ---
@@ -46,8 +43,7 @@ this is transforming those 64 numbers, five times over, and then asking which
 token should come next.
 
 The vector is often called the *residual stream*, because each layer **adds** to
-it rather than replacing it. That is worth holding onto: a layer is a
-contribution, not a substitution.
+it rather than replacing it. So each layer "enriches" this stream that is nothing but your "temp" vector. 
 
 ## 3. Normalise — `rmsnorm.asm`
 
@@ -59,11 +55,9 @@ The point is stability. Without it some layers get numbers ten times bigger than
 others and the arithmetic — especially in fixed point — falls apart.
 
 This needs one over a square root, which the SM83 cannot compute. It is a table
-lookup. Most of the "hard maths" in this model is a table lookup.
+lookup. Most of the "hard maths" in this implementation is a table lookup.
 
 ## 4. Attention, and what a head actually is — `attention.asm`
-
-This is the part worth slowing down for.
 
 **Three projections.** From the 64-number vector, three more are made by matrix
 multiplication:
@@ -72,7 +66,7 @@ multiplication:
 - **K**, the *key* — what this token offers to anyone looking
 - **V**, the *value* — what this token passes on if chosen
 
-**Scoring.** The current token's Q is dotted with the K of every token so far.
+**Scoring.** The current token's Q is dotted (you do a dot product) with the K of every token so far.
 A big dot product means "these two are relevant to each other". Those scores go
 through a softmax, which turns them into weights that sum to one.
 
@@ -92,8 +86,8 @@ numbers, just scored in eight separate groups.
 
 **Grouped queries.** There are 8 query heads but only **4 key/value heads** —
 each K/V head is shared by two Q heads. This is grouped-query attention, and it
-halves the amount of K and V that has to be stored. On a machine with 32 KB of
-RAM that is not a subtlety, it is the difference between fitting and not.
+halves the amount of K and V that has to be stored. 
+There are various possible permutations here. But grouping is necessary for 32KB of RAM.
 
 **Position, by rotation** — `rope.asm`. Nothing so far knows word order; a dot
 product does not care which token came first. So before scoring, Q and K are
@@ -107,14 +101,14 @@ at a time.
 
 Here is the problem. To generate token 100, attention needs the K and V of all
 99 tokens before it. Recomputing them every step would mean the whole passage is
-re-processed for every new word — quadratic work, and hopeless on this hardware.
+re-processed for every new word 😭 — quadratic work, and hopeless on this hardware.
 
 So they are computed once and kept. That is the **KV cache**: for every position,
 the K and V that position produced. Generating a token is then one new K and V,
 plus a scan over the stored ones.
 
 This is the single reason interactive generation is possible at all, on any
-machine.
+machine. **not just the GBC**
 
 **The cost that remains.** The scan still grows with context. In this ROM you can
 watch it happen — the cycle counter in the status bar climbs steadily as the
@@ -124,17 +118,17 @@ passage gets longer, then flattens. It flattens because of the next part.
 24 has nowhere to go — unless you let it overwrite slot 0. The slot for position
 `p` is `p mod 24`, while the positional rotation keeps using the *absolute* `p`.
 
-Those two had been the same number by accident. Separating them is the whole
-trick: rotation is where a token **is**, storage is where it **fits**. The model
-attends to the last 24 positions, forever, and never notices anything wrapped.
+Those two had been the same number by accident. 
+**Separating them is the whole trick**: 
+I only needed to notice that storage can be completely independent since we are really 
+generating a new KV pair per token! 
+The model attends to the last 24 positions, forever, and never notices anything wrapped.
 Generation stops having a length limit.
 
-A power-of-two window makes the wrap a single `and`, which is what the first
-version used. It also makes the window unchoosable: it can only ever be 16 or
-32, and the useful size turned out to sit between them. Repeated subtraction
-costs about seventy cycles five times a token, against twelve million — so the
-window became a free parameter, and picking it on evidence was worth far more
-than the mask saved.
+**why 24?** Tests and tests. Ended up being ok paying for a mod instead of a 32 context window. 
+It's more expensive than a power of two, but below 24 the loss climbs fast. 
+I will try to make it back to 16 at some point, but likely with a freshly trained set of weights.
+ 
 
 ## 6. The feed-forward block — `swiglu.asm`
 
@@ -158,15 +152,14 @@ of those.
 
 Then one final matrix turns the 64 numbers into **512 scores**, one per token in
 the vocabulary. The highest score wins and becomes the next token. That is greedy
-decoding — no sampling, no temperature, which is also why this ROM produces the
-same story from the same prompt every time. Handy when your test asserts exact
-equality.
+decoding — **no sampling, no temperature, which is also why this ROM produces the
+same story from the same prompt every time**. 
 
 The new token is appended and the whole thing runs again.
 
 ## 8. Numbers, on a machine with no multiplier — `matvec.asm`, `state.asm`
 
-The model was trained in floating point. None of that survives the trip.
+The model was trained in floating point.
 
 **Activations are int8** — the 64 numbers are single signed bytes.
 
@@ -177,7 +170,7 @@ get represented because the codebook can place a level out there.
 
 **Scales are powers of two.** Every quantised tensor has a scale that says what
 "1" means. Constraining those to powers of two means converting between tensors
-is an arithmetic shift, never a division — and the SM83 has no divide either.
+is an arithmetic shift instead of a division — and the SM83 has no divide either.
 
 **And so the multiply disappears.** Sixteen possible weight values, 256 possible
 activation bytes: every product the model could ever need is 4,096 numbers, small

@@ -1,14 +1,13 @@
-# The model, in one page
+# The model
 
-What ChatGBC actually runs, and why it costs what it costs. If you want the
-implementation instead, that is [CONCEPTS.md](CONCEPTS.md).
+What ChatGBC actually runs. 
+If you want the implementation instead, that is [CONCEPTS.md](CONCEPTS.md).
 
 ```
 Config(dim=64, hidden_dim=172, n_layers=5, n_heads=8, n_kv_heads=4, vocab=512)
 ```
 
-That line comes out of the checkpoint's file header. Nothing in the cartridge
-chooses it — `stories260K` was trained with those numbers and the ROM obeys them.
+This is exactly from `stories260K` as it was trained with those numbers.
 
 ## The shape
 
@@ -53,12 +52,11 @@ updated 10 times, then discarded. It exists for one token only.
 
 **Sideways, across tokens:** the **KV cache**. Each layer stores the key and
 value it computed for this position so the *next* token can attend to it. That
-is what persists, and that is what the ring buffer manages — 32 slots per layer,
+is what persists, and that is what the ring buffer manages — 24 slots per layer,
 overwritten in place once full.
 
 The residual stream is vertical and temporary. The KV cache is horizontal and
-persistent. Only the second one has a length limit, and only the second one
-wraps.
+persistent. Only the KV cache has a length limit and wraps.
 
 ## What one layer costs
 
@@ -73,11 +71,6 @@ wraps.
 | **w2** | 172 → 64 | **11,008** | feed-forward down |
 | | | **45,312** | per layer |
 
-**The feed-forward block is 73% of every layer.** Attention gets all the
-attention, and it is the smaller half of the arithmetic.
-
-## The identity that decides everything
-
 Multiply that by five layers and add the classifier:
 
 ```
@@ -89,22 +82,22 @@ embedding        32,768   (reused as the classifier)
 MACs per token: 259,328
 ```
 
-**Identical, and not by coincidence.** A dense transformer generating one token
-is exactly one pass over its weights — every parameter is multiplied once. So
-`MACs = parameters`, always, and **fewer multiplies means fewer parameters. There
-is no third option.**
+One token is one pass over the model weights — every parameter is multiplied once. So
+`MACs = parameters`. 
+This means in a basic transformer you are mostly bound by the amount of weights you have.
 
-At the 19 cycles per multiply-accumulate this ROM achieves, that is 4.93M cycles
-— **2.35 seconds per token before anything else exists**: no normalisation, no
-attention, no softmax, no rounding.
+After trickeries it got down to 19 cycles per multiply-accumulate: that is 4.93M cycles.
+Means that **2.35 seconds per token** are just this part. 
 
-The one loophole would be weights that quantise to exactly zero, which could be
-skipped for free. There are none: a Lloyd–Max codebook straddles zero with two
-symmetric levels rather than spending one on it, so **0.0%** of layer weights are
-zero. (The attention *weights* are a different matter — those come from a
+**loophole** 
+At lower bit precisions, some weights quantize to 0.
+However the codebook chosen thanks to the AI assisting here (didn't even remotely think of it), 
+is the Lloyd-Max where 0 is still meaningful. Means we can't skip them. 
+
+(The attention *weights* are a different story — those come from a
 softmax, and 46% of them are exactly zero. The ROM skips those.)
 
-## What depth costs, and what width costs
+## Depth vs Width
 
 Sharing weights between layers — some architectures do — would cut the ROM by
 five. **It would not save a single cycle**, because you still run five passes.
@@ -120,8 +113,6 @@ Which is why the measured rule for anything trained later is *wide beats deep*:
 at a constant parameter count, dim 96 with 2 layers is 1.44× the parameters per
 cycle of dim 64 with 5.
 
-## Where the numbers in this document come from
-
-`py/census.py` counts operations from the shape. `py/profile_all.py` measures
-them on the ROM by stubbing kernels one at a time. `py/arch.py` predicts what a
-different shape would cost. Every figure here is one of those three.
+## Where the numbers come from
+Look at `py/census.py`, `py/profile_all.py` and `py/arch.py`.
+This last one is particularly interesting to predict what a different shape would cost before even attempting it.
