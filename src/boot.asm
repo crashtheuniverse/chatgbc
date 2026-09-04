@@ -23,7 +23,7 @@ INCLUDE "model.inc"
 DEF CAL_ITERS EQU 10000
 
 SECTION "VBlank IRQ", ROM0[$40]
-    reti
+    jp Type_ISR                 ; the teletype; a few cycles when it is off
 
 SECTION "Entry", ROM0[$100]
     nop

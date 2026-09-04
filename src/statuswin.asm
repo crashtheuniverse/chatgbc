@@ -78,7 +78,18 @@ StatusWin_Update::
 ; Pushes the two lines to the window tilemap. Small enough to write directly in
 ; VBlank without a DMA.
 StatusWin_Flush::
+    ld a, [wTypeOn]                 ; the teletype's handler pushes it, in VBlank
+    or a
+    jr z, .now
+    ld a, 1
+    ld [wWinDirty], a
+    ret
+.now
     call Console_WaitVBlank
+    ; fall through
+
+; The push itself. Only inside VBlank.
+StatusWin_FlushNow::
     ld hl, wWinBuf
     ld de, TILEMAP1
     ld c, WIN_ROWS
@@ -119,10 +130,11 @@ StatusWin_Set::
     ld hl, sWinTok
     ld b, CON_VIS_W * 2
     call Win_PutStr
-    ld a, [wGenCount]
+    ld a, [wGenTok + 0]
     ld [wNum + 0], a
-    xor a
+    ld a, [wGenTok + 1]
     ld [wNum + 1], a
+    xor a
     ld [wNum + 2], a
     ld [wNum + 3], a
     ld b, CON_VIS_W * 2 + 4

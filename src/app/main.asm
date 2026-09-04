@@ -35,6 +35,7 @@ IF CHAT_MODE
 
     ld a, CHAT_REPLY_MAX
     ld [wGenSteps], a
+    call Type_Enable            ; the reply arrives a character at a time
     ld a, [wChatStarted]
     or a
     jr nz, .cont
@@ -48,7 +49,7 @@ IF CHAT_MODE
     call Generate_Cont
 
 .after
-    call Console_Flush
+    call Type_Drain             ; the tail of the reply, and the screen
     call MeasureSelftest        ; last, so the pass cannot overwrite the buffer
 
     ld a, READY_MAGIC           ; a stable window for the harness to read
@@ -152,10 +153,11 @@ ELSE
     call StatusWin_Show
     call Console_Flush
 
-    ld a, APP_GEN_STEPS
-    ld [wGenSteps], a
+    xor a                       ; no step limit: the story runs until SELECT.
+    ld [wGenSteps], a           ; The state has no window to fall off.
+    call Type_Enable            ; characters go out one at a time meanwhile
     call Generate
-    call Console_Flush
+    call Type_Drain             ; whatever is still queued, and the screen
     ; No ReportTiming here: the status bar has been showing cycles per token
     ; live for the whole run, so printing the same number into the text at the
     ; end puts it on screen twice and reads as a glitch. The lab ROM still
@@ -170,7 +172,7 @@ ELSE
     call Console_WaitVBlank
     call Joy_Read
     ld a, [wJoyNew]
-    and KB_START
+    and KB_START | KB_SELECT    ; either button: back to the keyboard
     jr z, .waitStart
     xor a
     ld [wReady], a

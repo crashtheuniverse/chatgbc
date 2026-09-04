@@ -44,7 +44,7 @@ Prof_Start::
     ld [wProfHi + 0], a
     ld [wProfHi + 1], a
     ldh [rIF], a                ; drop anything already pending
-    ld a, IE_TIMER
+    ld a, IE_TIMER | IE_VBLANK  ; the teletype rides VBlank while the model runs
     ldh [rIE], a
     ld a, TAC_START | TAC_16KHZ
     ldh [rTAC], a

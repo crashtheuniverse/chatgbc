@@ -15,6 +15,9 @@ wCursorY:: db
 ; Last row the console may use. The status window covers the rows below it, so
 ; text scrolled down there would be written and never seen.
 wConBottom:: db
+; Set by Console_Scroll, cleared by whoever wants to know whether the last
+; character moved the whole screen or only its own cell (src/teletype.asm).
+wConScrolled:: db
 
 SECTION "Console code", ROM0
 
@@ -133,6 +136,8 @@ Console_NewLine::
 ; contiguous in the shadow (stride CON_W), so this is one forward copy, and the
 ; next flush pushes the result out with the usual single GDMA.
 Console_Scroll::
+    ld a, 1
+    ld [wConScrolled], a
     ld a, [wConBottom]
     ld l, a
     ld h, 0

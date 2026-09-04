@@ -35,7 +35,7 @@ OUT = ROOT / "build" / "chatgbc.gif"
 # prompt at boot on purpose, so this is the only way a capture can demonstrate
 # any other one - or the keyboard itself.
 TYPE = ""
-CAP = 220                    # token cap; generation normally ends first
+CAP = 160                    # tokens to record before pressing SELECT
 SCALE = 2
 
 OPEN_MS = 1800               # hold on the entry screen before anything happens
@@ -140,9 +140,10 @@ def capture():
     # screen alone spins forever once generation ends, because nothing on it
     # changes again.
     ready, magic = rom.addr("wReady"), rom.defs["READY_MAGIC"]
-    seen, tokens = screen(), 0
-    while tokens < CAP:
-        rom.pyboy.tick(30, False)
+    gentok = rom.addr("wGenTok")
+    seen, last = screen(), 0
+    while True:
+        rom.pyboy.tick(45, False)             # the teletype changes the screen per character
         if rom.pyboy.memory[ready] == magic:
             print("  ROM finished generating", flush=True)
             break
@@ -150,9 +151,16 @@ def capture():
         if now != seen:
             seen = now
             rec.frame("tok")
-            tokens += 1
-            if tokens % 40 == 0:
-                print(f"  {tokens} tokens", flush=True)
+        tokens = rom.pyboy.memory[gentok] + 256 * rom.pyboy.memory[gentok + 1]
+        if tokens // 40 != last // 40:
+            print(f"  {tokens} tokens", flush=True)
+        last = tokens
+        if tokens >= CAP:
+            rec.press("select")                # the story runs until told to stop
+            rom.pyboy.tick(45, False)
+            rec.frame("tok")
+            print(f"  SELECT at {tokens} tokens", flush=True)
+            break
     rom.close()
     print(f"captured {rec.n} frames into {CAPTURES}")
 

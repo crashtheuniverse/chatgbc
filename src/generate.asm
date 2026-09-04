@@ -20,7 +20,8 @@ wTokCycles:: ds 4                   ; cycles for the most recent forward pass
 ; one: the first token attends a single position and the last attends the whole
 ; window. The honest per-token figure is this total over wGenCount.
 wGenTotal::  ds 4
-wGenCount::  db                     ; tokens emitted so far
+wGenCount::  db                     ; tokens on record, saturating at OUT_MAX
+wGenTok::    dw                     ; tokens emitted this run, for the bar
 ; Every token the model emits, so tests can check the model rather than the
 ; screen. Once the console scrolls, scraping the display stops being a faithful
 ; record of what was generated.
@@ -66,7 +67,7 @@ PrintToken::
     ld a, [hl+]
     push hl
     push bc
-    call Console_PutChar
+    call Type_PutChar               ; queued while the teletype runs
     pop bc
     pop hl
     dec b
@@ -90,6 +91,8 @@ Generate::
     jr nz, .zeroState
     xor a
     ld [wGenCount], a
+    ld [wGenTok + 0], a
+    ld [wGenTok + 1], a
     ld [wGenTotal + 0], a
     ld [wGenTotal + 1], a
     ld [wGenTotal + 2], a
@@ -167,7 +170,16 @@ Generate::
 
     ld a, [wGenCount]               ; record it before printing
     cp OUT_MAX
-    jr nc, .noRecord
+    jr c, .record
+    ; The record is full: drop the oldest token and append. NoRepeat_Ok then
+    ; always sees the last OUT_MAX tokens, and a run has no length limit.
+    ; 350 bytes a token, against two million cycles of forward pass.
+    ld hl, wOutTokens + 2
+    ld de, wOutTokens
+    ld bc, (OUT_MAX - 1) * 2
+    call CopyBytes
+    ld a, OUT_MAX - 1
+.record
     ld l, a
     ld h, 0
     add hl, hl
@@ -177,10 +189,9 @@ Generate::
     ld [hl+], a
     ld a, [wToken + 1]
     ld [hl], a
-.noRecord
 
     call PrintToken
-    call Console_Flush
+    call Type_Flush                 ; Console_Flush, unless the teletype owns the screen
 
     ld hl, wTokCycles               ; running total, for a truthful average
     ld de, wGenTotal
@@ -195,10 +206,17 @@ Generate::
     dec c
     jr nz, .total
 
-    ld a, [wGenCount]
+    ld hl, wGenTok                  ; every token, for the bar
+    inc [hl]
+    jr nz, :+
+    inc hl
+    inc [hl]
+:   ld a, [wGenCount]               ; the record's length, saturating
+    cp OUT_MAX
+    jr nc, :+
     inc a
     ld [wGenCount], a
-
+:
     call StatusWin_Update           ; cycles and count, both current
     call Joy_Read
     ld a, [wJoyNew]
@@ -206,11 +224,14 @@ Generate::
     ret nz                          ; the player asked to go back - SELECT is
                                     ; "back" everywhere now, START only sends
 
-    ld a, [wGenCount]
-    ld b, a
     ld a, [wGenSteps]
+    or a                            ; zero means no limit: SELECT ends the run
+    jr z, .unlimited
+    ld b, a
+    ld a, [wGenCount]
     cp b
     ret z
+.unlimited
 
 IF TOK_NL >= 0
     ; Any model-chosen id at or below TOK_NL ends the turn. In the compact
@@ -259,6 +280,8 @@ Generate_Cont::
 
     xor a                           ; per-exchange stats and no-repeat history
     ld [wGenCount], a
+    ld [wGenTok + 0], a
+    ld [wGenTok + 1], a
     ld [wGenTotal + 0], a
     ld [wGenTotal + 1], a
     ld [wGenTotal + 2], a
