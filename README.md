@@ -5,25 +5,28 @@ A language model that runs on a Game Boy Color written in Assembly.
 v0.4 is a model trained *for* this machine, not borrowed: ternary weights,
 a recurrent core instead of attention, four small experts per layer, and
 an integer twin that decided every rounding before the assembly did.
+v0.4.1 adds the teletype - characters arrive one at a time while the next
+token computes - and stories that run until you stop them.
 
 **some stats:**
-- 1.08 s/token, ~0.31 s per character — measured by DIV/TIMA (v0.3 was 6.16 s and 2.26 s)
-- 1.15 bits per character on held-out TinyStories — better than v0.3's ROM (1.41) and better than the fp32 checkpoint v0.3 was quantized from (1.26)
+- 1.08 s/token, ~0.31 s per character — measured by DIV/TIMA (v0.3: 6.16 s, 2.94 s per character on the same text)
+- 1.15 bits per character on held-out TinyStories — level with v0.3's ROM (1.15), from a checkpoint that loses 2% to quantization where v0.3's lost 31%
 - Weights are −1, 0 or +1. Three of them pick one of 27 precomputed sums: no multiplier, no product tables
-- No attention, no KV cache, no window. The state is 192 bytes and the story never has to end
+- No attention, no KV cache, no window. The state is 192 bytes and a story runs until you press SELECT
 - Four experts per layer, one runs per token: half the work of a dense layer, twice the weights
+- The screen is a teletype: one character every 0.3 s, fed from a queue on the VBlank interrupt
 - 374K parameters in a 256 KB ROM
 
 _Trained on TinyStories, compared per character against v0.3_
 
 ![ChatGBC generating text](docs/chatgbc.gif)
 
-*One frame per token, roughly 100x the speed of the hardware. 160 tokens, and
-the real run is under three minutes on the handheld (v0.3 took seventeen).*
+*Roughly 100x the speed of the hardware; 160 tokens, then SELECT. The real
+run is under three minutes on the handheld (v0.3 took seventeen).*
 
 You type a prompt on an on-screen keyboard (`A` types, `B` deletes, `SELECT`
-flips case, `START` generates). Tokenizer, weights and the whole inference
-stack are on the cartridge.
+flips case, `START` generates, `SELECT` again stops the story). Tokenizer,
+weights and the whole inference stack are on the cartridge.
 
 ## Numbers
 
@@ -34,12 +37,13 @@ stack are on the cartridge.
 | Context | a recurrent state: 3 × 64 bytes, unbounded output, no window |
 | Weights | ternary with one power-of-two scale per row; classifier and router ternary at one scale |
 | Arithmetic | int8 activations and state, exact 16-bit block sums, no floating point, no division, no multiply |
-| **Speed** | **1.08 s/token** (2,259,829 M-cycles), **0.31 s per character** at 3.46 characters a token |
-| **Quality** | **1.146 bits/char** on 200 held-out stories, teacher-forced. v0.3: 1.412 as shipped, 1.261 in fp32 |
+| **Speed** | **1.08 s/token** (2,259,829 M-cycles; 2,271,104 with the teletype running), **0.31 s per character** at 3.46 characters a token |
+| **Quality** | **1.146 bits/char** on 200 held-out stories, teacher-forced. v0.3 as shipped: 1.149; v0.3's fp32 checkpoint: 0.876 |
 | Kernel | ~10.5 M-cycles per multiply-accumulate, three MACs per table lookup |
 
 Numbers measured against HW timers; quality measured on the bit-exact twin
-of the ROM, on stories the training never saw.
+of each ROM, on stories no version trained on. [VERSIONS.md](VERSIONS.md)
+has every release measured the same way.
 
 ## Why this exists
 
@@ -65,10 +69,11 @@ cartridge computes with, and judged by the same twin that judges the assembly.
 
 ## What changed since v0.3
 
-v0.3 took a float transformer and squeezed it into 4-bit tables; the squeeze
-cost 12% in bits per character and the attention window cost the rest. v0.4
-turns it around: decide what the hardware does well, train a model that lives
-there from step one.
+v0.3 took a float transformer and squeezed it into 4-bit tables and a
+24-token window. Measured on held-out stories, the squeeze cost 31% in bits
+per character: the checkpoint scores 0.88, the cartridge 1.15. v0.4 turns it
+around: decide what the hardware does well, train a model that lives there
+from step one, and ship what was trained.
 
 **The multiply is a table of sums.** A ternary weight is −1, 0 or +1, so three
 of them applied to three activations is one of 27 signed sums. The kernel
@@ -79,7 +84,8 @@ switch per input, and a matrix in ROM is one byte per three weights.
 **The core is a minGRU, not attention.** `h = h + z ⊙ (h̃ − h)`, gates from the
 input only. Three 64×64 matvecs per layer and a 64-byte state; nothing grows
 with the length of the story. v0.3 needed a ring of 24 cached positions and
-lost the thread when the ring wrapped. This never wraps.
+lost the thread when the ring wrapped. This never wraps, so the story never
+has to end.
 
 **Four experts, one runs.** Each layer's MLP is four experts of 176; a
 ternary router picks one per token. Half the multiply-accumulates of the dense
@@ -92,6 +98,18 @@ to int8, the classifier and router to ternary at a single scale — and a
 full-precision residual (the Arenas trick from
 [Sherry](https://arxiv.org/abs/2601.07892)) is annealed to zero so ternary
 converges at all. The exported integers score within 2% of the float model.
+In float, stories260K is still the better model (0.88 bits per character
+against 1.12); what v0.4 buys is that nothing is lost between the training
+run and the cartridge, and a sevenfold cycle budget for the next model to
+spend.
+
+**The teletype.** A token is three or four characters, and they used to land
+in one burst followed by a second of nothing. Now they go into a queue and
+the VBlank handler releases one every 18 frames while the forward pass is
+busy with the next token. The handler is the only thing that touches VRAM
+during a story: a character is one tile write, a scroll moves the shadow
+buffer and asks for its DMA on the next frame. The model never waits for the
+screen.
 
 _Note_: the GBC is technically 8MHz but those are T-Cycles. A full instruction usually is 4 of those.
 This means you really have 2MHz worth of `M` cycles, about 1 instruction each — so consider it a 2MHz HW
@@ -140,6 +158,7 @@ capture a pic on original hardware.
 
 ## More
 
+- [Versions](VERSIONS.md) — every release measured the same way, with its capture
 - [The model](docs/THE-MODEL.md) — one page: what it runs, why MACs equal
   parameters, and what depth costs that width does not
 - [How it works](docs/CONCEPTS.md) — a short tour: tokens, heads, the KV cache,
