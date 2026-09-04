@@ -25,8 +25,17 @@ emb_rows_p0:: INCBIN "build/blobs/emb_rows_p0.bin"   ; 16384 bytes
 SECTION "emb_rows_p1", ROMX
 emb_rows_p1:: INCBIN "build/blobs/emb_rows_p1.bin"   ; 16384 bytes
 
+SECTION "emb_rows_p2", ROMX
+emb_rows_p2:: INCBIN "build/blobs/emb_rows_p2.bin"   ; 16384 bytes
+
+SECTION "emb_rows_p3", ROMX
+emb_rows_p3:: INCBIN "build/blobs/emb_rows_p3.bin"   ; 16384 bytes
+
 SECTION "cls_w_p0", ROMX
 cls_w_p0:: INCBIN "build/blobs/cls_w_p0.bin"   ; 11264 bytes
+
+SECTION "cls_w_p1", ROMX
+cls_w_p1:: INCBIN "build/blobs/cls_w_p1.bin"   ; 11264 bytes
 
 SECTION "lut_cls_hi", ROMX
 lut_cls_hi:: INCBIN "build/blobs/lut_cls_hi.bin"   ; 1 bytes
@@ -257,16 +266,13 @@ SECTION "w2_sh_l2_e3", ROM0
 w2_sh_l2_e3:: INCBIN "build/blobs/w2_sh_l2_e3.bin"   ; 64 bytes
 
 SECTION "vocab_data", ROMX
-vocab_data:: INCBIN "build/blobs/vocab_data.bin"   ; 2162 bytes
-
-SECTION "vocab_off", ROM0
-vocab_off:: INCBIN "build/blobs/vocab_off.bin"   ; 1024 bytes
+vocab_data:: INCBIN "build/blobs/vocab_data.bin"   ; 7051 bytes
 
 SECTION "enc_all", ROMX
-enc_all:: INCBIN "build/blobs/enc_all.bin"   ; 4212 bytes
+enc_all:: INCBIN "build/blobs/enc_all.bin"   ; 9101 bytes
 
 SECTION "prompt", ROM0
-prompt:: INCBIN "build/blobs/prompt.bin"   ; 14 bytes
+prompt:: INCBIN "build/blobs/prompt.bin"   ; 12 bytes
 
 SECTION "test_x", ROM0
 test_x:: INCBIN "build/blobs/test_x.bin"   ; 64 bytes
@@ -287,10 +293,10 @@ SECTION "test_gate_out", ROM0
 test_gate_out:: INCBIN "build/blobs/test_gate_out.bin"   ; 64 bytes
 
 SECTION "Model manifest", ROM0
-emb_banks:: db BANK(emb_rows_p0), BANK(emb_rows_p1)
-emb_addrs:: dw emb_rows_p0, emb_rows_p1
-cls_banks:: db BANK(cls_w_p0)
-cls_addrs:: dw cls_w_p0
+emb_banks:: db BANK(emb_rows_p0), BANK(emb_rows_p1), BANK(emb_rows_p2), BANK(emb_rows_p3)
+emb_addrs:: dw emb_rows_p0, emb_rows_p1, emb_rows_p2, emb_rows_p3
+cls_banks:: db BANK(cls_w_p0), BANK(cls_w_p1)
+cls_addrs:: dw cls_w_p0, cls_w_p1
 wz_banks:: db BANK(wz_l0), BANK(wz_l1), BANK(wz_l2)
 wz_addrs:: dw wz_l0, wz_l1, wz_l2
 wz_shifts:: dw wz_sh_l0, wz_sh_l1, wz_sh_l2

@@ -324,7 +324,10 @@ class MinGRU(nn.Module):
         return F.linear(qa(y, self.act_bits), qw(self.wo.weight, self.levels))
 
 
-SCAN = {"fused": False}
+# Fused by default: identical loss, gradients equal to fp32 reassociation
+# noise (4e-8 on a 35-loss batch), 1.3-1.6x on the training step. The loop
+# stays as the reference the fused path is checked against.
+SCAN = {"fused": True}
 
 
 class QuantScan(torch.autograd.Function):
@@ -346,25 +349,30 @@ class QuantScan(torch.autograd.Function):
         n = (1 << (bits - 1)) - 1
         T = ht.shape[1]
         h = torch.zeros_like(ht[:, 0])
-        hq = []                             # quantized states, h_0 .. h_T-1
+        hq, masks = [], []                  # quantized states h_0..h_T-1
         for t in range(T):
             h = (1 - z[:, t]) * h + z[:, t] * ht[:, t]
             scale = h.abs().amax(dim=-1, keepdim=True).clamp(min=1e-8) / n
+            # FakeQuantAct's clip mask, computed the way it computes it:
+            # (amax / n) * n can round below amax, and then the row's
+            # largest element gets no gradient. Reproduced rather than
+            # fixed, so the fused path is the loop path bit for bit.
+            masks.append(h.abs() <= scale * n)
             h = torch.round(h / scale).clamp(-n - 1, n) * scale
             hq.append(h)
         y = torch.stack(hq, dim=1)
-        ctx.save_for_backward(z, ht, y)
+        ctx.save_for_backward(z, ht, y, torch.stack(masks, dim=1))
         return y
 
     @staticmethod
     def backward(ctx, gy):
-        z, ht, y = ctx.saved_tensors
+        z, ht, y, masks = ctx.saved_tensors
         T = ht.shape[1]
         gz = torch.empty_like(z)
         ght = torch.empty_like(ht)
         carry = torch.zeros_like(gy[:, 0])   # d loss / d h_t through h_t+1..
         for t in range(T - 1, -1, -1):
-            g = gy[:, t] + carry             # straight-through the quantizer
+            g = (gy[:, t] + carry) * masks[:, t]   # straight-through, clipped
             prev = y[:, t - 1] if t > 0 else torch.zeros_like(g)
             gz[:, t] = g * (ht[:, t] - prev)
             ght[:, t] = g * z[:, t]

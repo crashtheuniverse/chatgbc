@@ -962,17 +962,24 @@ NoRepeat_Ok:
 ; wX = requantized embedding row for wToken. The table is 32 KB, so it spans two
 ; banks of 256 tokens each.
 EmbedToken:
+    ; A part holds 256 rows (the exporter asserts it), so the token's high
+    ; byte is the part and its low byte the row. Two parts were once wired
+    ; by hand here; a 1024-piece vocabulary has four, and the manifest
+    ; already listed them.
     ld a, [wToken + 1]
-    or a
-    jr z, .part0
-    ld de, emb_rows_p1
-    ld a, BANK(emb_rows_p1)
-    jr .haveBank
-.part0
-    ld de, emb_rows_p0
-    ld a, BANK(emb_rows_p0)
-.haveBank
+    ld c, a
+    ld b, 0
+    ld hl, emb_banks
+    add hl, bc
+    ld a, [hl]
     ld [rROMB0], a
+    ld hl, emb_addrs
+    add hl, bc
+    add hl, bc                      ; word entries
+    ld a, [hl+]
+    ld e, a
+    ld a, [hl]
+    ld d, a                         ; de = the part's base
 
     ld a, [wToken + 0]
     ld l, a

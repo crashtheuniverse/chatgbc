@@ -30,20 +30,19 @@ SECTION "Generate code", ROM0
 
 ; Prints one token's text. llama2.c strips the space that follows BOS.
 PrintToken::
+    ld a, BANK(vocab_data)          ; offsets and pieces share the bank
+    ld [rROMB0], a
     ld a, [wToken + 0]              ; offset table is indexed by token * 2
     ld l, a
     ld a, [wToken + 1]
     ld h, a
     add hl, hl
-    ld de, vocab_off
+    ld de, vocab_data
     add hl, de
     ld a, [hl+]
     ld e, a
     ld a, [hl]
-    ld d, a
-
-    ld a, BANK(vocab_data)
-    ld [rROMB0], a
+    ld d, a                         ; de = offset from vocab_data
     ld hl, vocab_data
     add hl, de
     ld a, [hl+]

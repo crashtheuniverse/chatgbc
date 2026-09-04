@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 # default here makes the app self-consistent with no environment required;
 # PIP5 / CHATGBC_TOKENIZER still override for experiments.
 os.environ.setdefault("CHATGBC_TOKENIZER",
-                      str(ROOT / "models" / "tok_ts512.bin"))
+                      str(ROOT / "models" / "tok_ts1024.bin"))
 import quant as Q                # noqa: E402
 import twin5                     # noqa: E402
 from model5 import Model5, Tokenizer, UNK, BOS, EOS   # noqa: E402
@@ -35,7 +35,7 @@ BLOBS = APP / "build" / "blobs"
 WEIGHTS_ASM = APP / "src" / "weights.asm"
 MODEL_INC = APP / "src" / "model.inc"
 
-CKPT = Path(os.environ.get("PIP5", ROOT / "models" / "ts3L_v512.bin"))
+CKPT = Path(os.environ.get("PIP5", ROOT / "models" / "ts3L_v1024.bin"))
 
 # The story generator. A chat build (Rei, the conversation partner) sets
 # CHAT: the newline piece then ends a turn and the keyboard becomes a
@@ -193,11 +193,15 @@ def main():
     blob("r2_shift", sbytes(r2))
 
     # --- token embedding ---
-    nparts, per = blob_split("emb_rows",
-                             q.weights["tok_emb"].astype(np.int8).tobytes(),
-                             c.vocab)
-    const("EMB_PARTS", nparts)
-    const("EMB_PER_PART", per)
+    emb_parts, emb_per = blob_split("emb_rows",
+                                    q.weights["tok_emb"].astype(np.int8).tobytes(),
+                                    c.vocab)
+    # EmbedToken picks the part by the token's high byte and the row by its
+    # low byte, so a part must hold exactly 256 rows: true for 64-dim rows
+    # in a 16 KB bank, and asserted rather than assumed.
+    assert emb_per == 256, f"EmbedToken expects 256 rows a part, got {emb_per}"
+    const("EMB_PARTS", emb_parts)
+    const("EMB_PER_PART", emb_per)
     # The embedding has one exponent, so its shift is one constant - not a
     # 512-byte table of the same byte, which is what used to live in ROM0.
     const("EMB_SHIFT", S("x") - q.wexp["tok_emb"])
@@ -206,11 +210,19 @@ def main():
     assert int(np.abs(q.rowexp["tok_emb"]).max()) == 0
     const("CLS_TERNARY", int(q.ternary_cls))
     if q.ternary_cls:
-        # The block kernel over all 512 outputs: one part, 22 blocks x 512
-        # codes = 11,264 bytes, one bank. Argmax runs over the stored block
-        # sums, and a no-repeat retry is a rescan, not a recompute.
-        block_weight_blob("cls_w_p0", q.weights["tok_emb"].astype(np.int8))
-        nparts, per = 1, c.vocab
+        # The block kernel over the outputs, in parts of 512: 22 blocks x 512
+        # codes = 11,264 bytes a part, one bank, and 128 groups of four -
+        # the byte wMvGroups counts in. A 1024-piece vocabulary is two parts
+        # accumulated into consecutive halves of the same sum table; the
+        # sums are exact, so the split changes nothing the twin can see.
+        # Argmax runs over the stored sums, and a no-repeat retry is a
+        # rescan, not a recompute.
+        per = min(c.vocab, 512)
+        assert c.vocab % per == 0 and -(-c.dim // twin5.TERNARY_BLOCK) * per <= 0x4000
+        nparts = c.vocab // per
+        t_cls = q.weights["tok_emb"].astype(np.int8)
+        for i in range(nparts):
+            block_weight_blob(f"cls_w_p{i}", t_cls[i * per:(i + 1) * per])
         blob("lut_cls_hi", bytes(1), rom0=False)   # unused; the manifest names them
         blob("lut_cls_lo", bytes(1), rom0=False)
     else:
@@ -353,8 +365,13 @@ def main():
             piece = b"\n"
         offsets.append(len(pieces))
         pieces += bytes([len(piece)]) + piece
-    blob("vocab_data", bytes(pieces), rom0=False)
-    blob("vocab_off", np.array(offsets, dtype="<u2").tobytes())
+    # One banked blob: the offset table first (VOCAB words), the pieces
+    # behind it, offsets already counted from the blob's start - so the
+    # printer switches to the bank once and reads both. The offset table used
+    # to live in ROM0, where 1024 tokens cost the 2 KB ROM0 did not have.
+    blob("vocab_data",
+         np.array([o + 2 * c.vocab for o in offsets], dtype="<u2").tobytes()
+         + bytes(pieces), rom0=False)
 
     # --- encoder ---
     enc, enc_off = bytearray(), []
@@ -418,9 +435,9 @@ def main():
 
     lines.append('SECTION "Model manifest", ROM0')
     lines.append("emb_banks:: db " + ", ".join(
-        f"BANK(emb_rows_p{i})" for i in range(2)))
+        f"BANK(emb_rows_p{i})" for i in range(emb_parts)))
     lines.append("emb_addrs:: dw " + ", ".join(
-        f"emb_rows_p{i}" for i in range(2)))
+        f"emb_rows_p{i}" for i in range(emb_parts)))
     lines.append("cls_banks:: db " + ", ".join(
         f"BANK(cls_w_p{i})" for i in range(nparts)))
     lines.append("cls_addrs:: dw " + ", ".join(

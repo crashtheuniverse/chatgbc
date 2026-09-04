@@ -113,8 +113,8 @@ I expressly chose tools that can work this way.
 ```powershell
 # TinyStories from HF roneneldan/TinyStories into models\tinystories\, then:
 .venv\Scripts\python.exe py\tinystories.py                       # fold to the keyboard's alphabet
-.venv\Scripts\python.exe py\tokenizer.py --corpus models\tinystories\ts_train.txt --out models\tok_ts512.bin
-.venv\Scripts\python.exe py\fit.py --tokenizer models\tok_ts512.bin --name ts3L_v512
+.venv\Scripts\python.exe py\tokenizer.py --corpus models\tinystories\ts_train.txt --out models\tok_ts1024.bin --vocab 1024
+.venv\Scripts\python.exe py\fit.py --tokenizer models\tok_ts1024.bin --name ts3L_v1024
 .venv\Scripts\python.exe py\export5.py                           # checkpoint -> blobs + model.inc
 .venv\Scripts\python.exe py\score5.py                            # bits/char of what ships
 .\test.ps1

@@ -38,6 +38,7 @@ wClsIdx:   dw                       ; token index of the output being summed
 
 SECTION "Cls HRAM", HRAM
 hClsOut:   db                       ; outputs left in the part
+hClsPart:  db                       ; the part being accumulated (ternary)
 hClsGrp:   db                       ; 8-input groups left in the output
 
 SECTION "Cls code", ROM0
@@ -66,22 +67,52 @@ Cls_BuildTables::
     or c
     jr nz, .zero
 
-    ld a, [cls_banks]
-    ld [wMvBank], a
-    ld a, [cls_addrs + 0]
-    ld [wMvW + 0], a
-    ld a, [cls_addrs + 1]
-    ld [wMvW + 1], a
     ld a, LOW(wXb)
     ld [wMvXPtr + 0], a
     ld a, HIGH(wXb)
     ld [wMvXPtr + 1], a
     ld a, BLOCKS_DIM
     ld [wMvIn], a
-    ld hl, VOCAB
+    xor a
+    ldh [hClsPart], a
+    ; One part of CLS_OUTPUTS_PER_PART outputs at a time - a part is what
+    ; fits a bank, and what wMvGroups can count - each accumulating into its
+    ; own stretch of the sum table. The manifest sits in ROM0, so it can be
+    ; read whatever bank the previous part left mapped.
+.part
+    ldh a, [hClsPart]
+    ld c, a
+    ld b, 0
+    ld hl, cls_banks
+    add hl, bc
+    ld a, [hl]
+    ld [wMvBank], a
+    ld hl, cls_addrs
+    add hl, bc
+    add hl, bc                      ; word entries
+    ld a, [hl+]
+    ld [wMvW + 0], a
+    ld a, [hl]
+    ld [wMvW + 1], a
+    ld hl, CLS_OUTPUTS_PER_PART
     call Matvec_SetOut
     ld hl, wClsTbl
-    jp Matvec3_RunAccumHL
+    ldh a, [hClsPart]
+    or a
+    jr z, .go
+    ld de, CLS_OUTPUTS_PER_PART * 2
+.advance
+    add hl, de
+    dec a
+    jr nz, .advance
+.go
+    call Matvec3_RunAccumHL
+    ldh a, [hClsPart]
+    inc a
+    ldh [hClsPart], a
+    cp CLS_PARTS
+    jr nz, .part
+    ret
 
 Cls_Argmax::
     ld a, CLS_TBL_BANK
