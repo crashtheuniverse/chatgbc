@@ -14,6 +14,7 @@ Matrices are stored output-major, matching run.c's matmul(xout, x, w, n, d).
 """
 
 import re
+import os
 import struct
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,10 +22,16 @@ from pathlib import Path
 import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent
-CKPT = ROOT / "models" / "stories260K.bin"
-TOKENIZER = ROOT / "models" / "tok512.bin"
+# Every tool here reaches the model and the tokenizer through these two names,
+# so overriding them once switches the whole pipeline - exporter, twin, golden,
+# eval and the ROM build - onto a different model. That is what makes trying a
+# candidate a one-line change rather than an edit to fourteen call sites:
+#
+#   CHATGBC_MODEL=models/pip.bin CHATGBC_TOKENIZER=models/tok_pip.bin ./build.ps1
+CKPT = Path(os.environ.get("CHATGBC_MODEL") or ROOT / "models" / "stories260K.bin")
+TOKENIZER = Path(os.environ.get("CHATGBC_TOKENIZER") or ROOT / "models" / "tok512.bin")
 
-BOS, EOS = 1, 2
+UNK, BOS, EOS = 0, 1, 2
 
 
 @dataclass
@@ -174,13 +181,18 @@ class Tokenizer:
             off += length
         self.lookup = {piece: i for i, piece in enumerate(self.vocab)}
 
-    def encode(self, text, bos=True, eos=False):
+    def encode(self, text, bos=True, eos=False, prefix=True):
         tokens = [BOS] if bos else []
-        if text:
+        if text and prefix:
             tokens.append(self.lookup[b" "])  # llama2.c's dummy prefix
         for byte in text.encode("utf-8"):
-            piece = bytes([byte])
-            tokens.append(self.lookup.get(piece, byte + 3))  # byte fallback
+            # A character is looked up as its own piece. The old byte-block
+            # fallback (`byte + 3`) only means anything under llama2.c's layout,
+            # where ids 3..258 are the bytes; under a compact vocabulary it
+            # lands on an arbitrary merge. UNK is the honest answer either way,
+            # and both tokenizers here give every reachable character a piece,
+            # so it is unreachable in practice - see py/tokenizer.py KEYBOARD.
+            tokens.append(self.lookup.get(bytes([byte]), UNK))
 
         while True:
             best = (-1e10, -1)

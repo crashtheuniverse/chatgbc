@@ -12,17 +12,26 @@ INCLUDE "hardware.inc"
 INCLUDE "chatgbc.inc"
 INCLUDE "model.inc"
 
+; The largest matvec any forward pass runs is an FFN half - the register
+; argmax classifier never touches wAcc, so sizing it by VOCAB was a v0.4
+; relic that cost 672 bytes. At hidden 352 those bytes are the difference
+; between the stack fitting and not.
+DEF ACC_SLOTS EQU FFN_SPLIT
+IF DIM > ACC_SLOTS
+REDEF ACC_SLOTS EQU DIM
+ENDC
+IF EXPERTS
+IF HID_EXP > ACC_SLOTS               ; an expert's w1 runs whole: HID_EXP outputs
+REDEF ACC_SLOTS EQU HID_EXP
+ENDC
+ENDC
+
 SECTION "Model state", WRAM0, ALIGN[4]
-wAcc::   ds VOCAB * ACC_BYTES       ; reused by every matvec; the classifier is largest
+wAcc::   ds ACC_SLOTS * ACC_BYTES   ; reused by every matvec
 wX::     ds DIM                     ; residual stream
 wXb::    ds DIM                     ; post-rmsnorm activations
-wXb2::   ds DIM                     ; attention output
-wQ::     ds DIM
 wH1::    ds HIDDEN
-wH3::    ds HIDDEN
 wHb::    ds HIDDEN
-wScores:: ds SEQ_LEN * SCORE_BYTES  ; raw attention scores, int24
-wAtt::   ds SEQ_LEN * 2             ; softmax weights, Q0.12
 wCbBuf:: ds CB_LEVELS               ; working copy of the active codebook
 wBias::  ds 3                       ; nIn * MV_BIAS, removed once per matvec
 
@@ -144,34 +153,43 @@ ENDR
     ld a, b
     sub 4
     ld b, a
+    ; The remaining bits, in registers. Shifting the scratch in place cost
+    ; four loads and four stores a bit - 28 cycles for what `sra`/`rr` do in
+    ; eight. The value comes into d:e:h:l once, shifts there, and goes back
+    ; once with the rounding carry folded in on the way. de and hl are
+    ; preserved for callers that keep pointers in them.
 .right
+    push de
+    push hl
     ldh a, [wTmp32 + 3]
-    sra a                           ; arithmetic: preserves sign
-    ldh [wTmp32 + 3], a
+    ld d, a
     ldh a, [wTmp32 + 2]
-    rra
-    ldh [wTmp32 + 2], a
+    ld e, a
     ldh a, [wTmp32 + 1]
-    rra
-    ldh [wTmp32 + 1], a
+    ld h, a
     ldh a, [wTmp32 + 0]
-    rra
-    ldh [wTmp32 + 0], a
-    dec b
-    jr nz, .right
-
-    ldh a, [wTmp32 + 0]              ; carry still holds the last bit shifted out
+    ld l, a
+.bit
+    sra d                           ; arithmetic: preserves sign
+    rr e
+    rr h
+    rr l
+    dec b                           ; dec leaves the carry alone
+    jr nz, .bit
+    ld a, l                         ; carry still holds the last bit shifted out
     adc a, 0
     ldh [wTmp32 + 0], a
-    ldh a, [wTmp32 + 1]
+    ld a, h
     adc a, 0
     ldh [wTmp32 + 1], a
-    ldh a, [wTmp32 + 2]
+    ld a, e
     adc a, 0
     ldh [wTmp32 + 2], a
-    ldh a, [wTmp32 + 3]
+    ld a, d
     adc a, 0
     ldh [wTmp32 + 3], a
+    pop hl
+    pop de
     ret
 
 .leftShift
@@ -297,4 +315,96 @@ Requant_All::
     ld a, [wRqCnt + 0]
     or b
     jr nz, .next
+    ret
+
+; The same numbers as Requant_All, at a third of the cycles.
+;
+; The census put a requant row at ~400 cycles: a 16-bit accumulator was being
+; sign-extended into the 32-bit scratch, shifted through it a bit at a time
+; via HRAM, then rounded and saturated back out. Two facts make that
+; unnecessary. Every exported shift is small (5 to 10 in pip6; the exporter
+; asserts s >= 2), and round-half-up by s is exactly: arithmetic shift by
+; s-1, add one, shift by one - which cannot overflow int16 once s >= 2. So a
+; row lives in hl from load to store, with no scratch at all.
+;   de = per-output shift table, bc = destination, wMvOut = count
+Requant_All16::
+    ld a, e
+    ld [wRqSh + 0], a
+    ld a, d
+    ld [wRqSh + 1], a
+    ld a, [wMvOut + 0]
+    ld [wRqCnt + 0], a
+    ld a, [wMvOut + 1]
+    ld [wRqCnt + 1], a
+    ld de, wAcc
+.row
+    push bc                         ; destination, back at the store
+    push de                         ; accumulator pointer
+    ld a, [wRqSh + 0]
+    ld e, a
+    ld a, [wRqSh + 1]
+    ld d, a
+    ld a, [de]                      ; this row's shift, s
+    inc de
+    ld b, a
+    ld a, e
+    ld [wRqSh + 0], a
+    ld a, d
+    ld [wRqSh + 1], a
+    pop de
+    ld a, [de]                      ; the accumulator, int16
+    ld l, a
+    inc de
+    ld a, [de]
+    ld h, a
+    inc de
+    dec b                           ; s - 1 arithmetic shifts
+    jr nz, .shift
+    ; s == 1: nothing to pre-shift, and the +1 below would wrap the one
+    ; accumulator equal to 32767. Its true result saturates to 127 anyway.
+    ld a, h
+    cp $7F
+    jr nz, .rounded
+    ld a, l
+    cp $FF
+    jr nz, .rounded
+    ld a, 127
+    jr .store
+.shift
+    sra h
+    rr l
+    dec b
+    jr nz, .shift
+.rounded
+    inc hl                          ; + 1, then one more: round-half-up
+    sra h
+    rr l
+    ld a, l                         ; saturate to [-127, 127]: h must be the
+    add a, a                        ; sign extension of l
+    sbc a, a
+    cp h
+    jr nz, .sat
+    ld a, l
+    cp $80
+    jr nz, .store
+    ld a, -127                      ; -128 is outside the symmetric range
+    jr .store
+.sat
+    bit 7, h
+    ld a, 127
+    jr z, .store
+    ld a, -127
+.store
+    pop bc
+    ld [bc], a
+    inc bc
+    ld hl, wRqCnt
+    ld a, [hl]
+    sub 1
+    ld [hl+], a
+    ld a, [hl]
+    sbc a, 0
+    ld [hl-], a
+    or [hl]                         ; zero only when both bytes are
+    jr nz, .row
     ret

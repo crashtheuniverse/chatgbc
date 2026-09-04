@@ -134,6 +134,28 @@ def matvec(w, x, acc_check=True):
     return acc
 
 
+def matvec_blocks(t, x, block=3, shift=1, acc_check=True):
+    """Ternary matrix (out, in) in {-1, 0, +1} times int8 vector, the way the
+    block kernel does it: the inputs are walked in blocks, each block's signed
+    sum is exact, and it is that block sum - not each product - that is
+    rounded down by `shift` before accumulating. Half scale keeps a 352-input
+    row inside int16 (118 blocks of at most 191). Inputs not a multiple of the
+    block are padded with zero coefficients; the kernel reads whatever bytes
+    follow the vector and the zero coefficient makes them irrelevant."""
+    t = np.asarray(t, dtype=np.int64)
+    x = np.asarray(x, dtype=np.int64)
+    n_in = t.shape[1]
+    pad = (-n_in) % block
+    if pad:
+        t = np.concatenate([t, np.zeros((t.shape[0], pad), dtype=np.int64)], axis=1)
+        x = np.concatenate([x, np.zeros(pad, dtype=np.int64)])
+    sums = (t * x[None, :]).reshape(t.shape[0], -1, block).sum(axis=2)
+    acc = shr_round(sums, shift).sum(axis=1)
+    if acc_check and np.abs(acc).max() > ACC_MAX:
+        raise OverflowError(f"accumulator {np.abs(acc).max()} exceeds int16")
+    return acc
+
+
 def requant(acc, from_exp, to_exp):
     """int32 accumulator -> int8 at a calibrated constant shift, saturating."""
     return sat8(rescale(acc, from_exp, to_exp))

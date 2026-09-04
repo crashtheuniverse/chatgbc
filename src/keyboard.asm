@@ -43,7 +43,7 @@ SECTION "Keyboard state", WRAM0
 wKbCursor:: db
 wKbPrev::   db                      ; the one cell currently holding attribute 1
 wKbCase::   db                      ; 0 = lower, 1 = upper
-wJoyHeld:   db
+wJoyHeld::  db
 wJoyNew::   db
 wKbSeen::   db                      ; nonzero once the opening prompt has been shown
 wRng::      db
@@ -270,6 +270,11 @@ Keyboard_Run::
     ld b, a
     and KB_START
     jr z, :+
+IF CHAT_MODE
+    ld a, [wPromptLen]              ; an empty turn is not a turn: refuse to
+    or a                            ; send nothing rather than make the model
+    jp z, .loop                     ; answer silence
+ENDC
     call Kb_ClearCursor             ; never leave an inverted cell behind
     ret
 :
@@ -332,7 +337,11 @@ Keyboard_Run::
     jr .redraw
 .add
     ld a, [wPromptLen]
+IF CHAT_MODE
+    cp PROMPT_MAX - 3           ; room for the turn marker Chat_Stage prepends
+ELSE
     cp PROMPT_MAX
+ENDC
     jp nc, .loop
     ld c, a
     ld b, 0
@@ -372,6 +381,12 @@ Keyboard_Run::
 ; unpredictable, unlike rDIV at boot, which reads the same on every run. There
 ; is no save RAM and no clock, so that is as much entropy as this cartridge has.
 Kb_PickPrompt:
+IF CHAT_MODE
+    ; A conversation opens with whatever the player wants to say, not with a
+    ; canned story opener.
+    ld hl, sKbEmpty
+    ret
+ENDC
     ld a, [wKbSeen]
     or a
     jr nz, .roll
@@ -409,6 +424,7 @@ Kb_Rand:
 
 KbPrompts:
     dw sP0, sP1, sP2, sP3, sP4, sP5, sP6, sP7
+sKbEmpty: db 0
 sP0: db "Once upon a time", 0
 sP1: db "The little dog", 0
 sP2: db "Lily and Tom went", 0

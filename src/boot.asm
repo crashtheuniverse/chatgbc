@@ -85,8 +85,13 @@ Boot::
 
     call RecordStatus
     call Measure
-    call MeasureFetch           ; ROM vs HRAM execution; see src/fetchtest.asm
-    call MeasureClassify        ; the classifier, timed alone; see src/clsbench.asm
+    call Prof_Start             ; time the gate row while checking it: one
+    call GateSelftest           ; Sigmoid_Row + one Gate_Update over 64 dims
+    call Prof_Stop
+    ld hl, wProfCycles
+    ld de, wGateCycles
+    ld b, 4
+    call CopyN
     jp Run                      ; whichever entry point was linked
 
 
@@ -258,3 +263,35 @@ sMv:       db "CYC/TOK ", 0
 
 INCLUDE "font.inc"
 
+; Runs Sigmoid_Row + Gate_Update on the exporter's known-answer vectors, so
+; the recurrent kernel is judged in isolation before the forward pass ever
+; runs. The harness compares wGateOut against test_gate_out.
+GateSelftest::
+    ld hl, test_gate_zl
+    ld de, wZl
+    ld bc, DIM
+    call CopyBytes
+    ld hl, test_gate_ht
+    ld de, wHt
+    ld bc, DIM
+    call CopyBytes
+    ld hl, test_gate_h
+    ld de, wGateOut
+    ld bc, DIM
+    call CopyBytes
+
+    ld a, LOW(sig_l0)
+    ld [wGruSig + 0], a
+    ld a, HIGH(sig_l0)
+    ld [wGruSig + 1], a
+    call Sigmoid_Row
+
+    ld a, LOW(wGateOut)
+    ld [wGruH + 0], a
+    ld a, HIGH(wGateOut)
+    ld [wGruH + 1], a
+    jp Gate_Update
+
+SECTION "Gate selftest state", WRAM0
+wGateOut:: ds DIM
+wGateCycles:: ds 4

@@ -20,6 +20,7 @@ hour is spent on it. Quality is judged with py/eval.py.
 
 import argparse
 import math
+import re
 import struct
 import sys
 import time
@@ -35,6 +36,7 @@ import arch  # noqa: E402
 import reference as ref  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
+_WORD = re.compile(r" *[^ ]+")      # py/tokenizer.py's word type, spaces in front
 
 
 # --- quantization-aware weights ---------------------------------------------
@@ -53,6 +55,13 @@ class FakeQuant(torch.autograd.Function):
     def forward(ctx, w, levels):
         if levels <= 0:
             return w
+        if levels == TERNARY_ONE:
+            # Ternary with ONE power-of-two scale for the whole tensor: the
+            # classifier's regime, so argmax over block sums needs no per-row
+            # rescale on the cartridge. The tied embedding shares it.
+            scale = w.abs().mean().clamp(min=1e-8)
+            scale = torch.exp2(torch.round(torch.log2(scale)))
+            return torch.round(w / scale).clamp(-1, 1) * scale
         if levels == SHERRY:
             # Sherry (Huang et al., arXiv 2601.07892): ternary with exactly one
             # zero per block of four - the smallest-magnitude weight - and the
@@ -75,6 +84,12 @@ class FakeQuant(torch.autograd.Function):
             # three levels a single outlier would otherwise set the scale for
             # the whole row and collapse everything else onto zero.
             scale = w.abs().mean(dim=-1, keepdim=True).clamp(min=1e-8)
+            if POW2_SCALE["on"]:
+                # The cartridge rescales by shifting, so a per-row scale it
+                # can apply for free is a power of two. Constrain it here and
+                # the model learns to live on that grid, instead of paying a
+                # multiply per output row at inference.
+                scale = torch.exp2(torch.round(torch.log2(scale)))
             q = torch.round(w / scale).clamp(-1, 1) if levels == 3 else torch.sign(w)
             return q * scale
         # Per-output-row scale, matching what quant.py does.
@@ -148,6 +163,8 @@ def qs(x, on=True):
 
 
 SHERRY = 34               # the `levels` value meaning Sherry's 3:4 ternary
+TERNARY_ONE = 35          # ternary, one power-of-two scale for the whole tensor
+POW2_SCALE = {"on": False}   # ternary row scales snapped to powers of two
 
 # Arenas (same paper): during training the quantized weight is augmented with
 # a decaying full-precision residual, W_eff = Q(W) + lambda_t * W, lambda
@@ -242,9 +259,14 @@ class MinGRU(nn.Module):
     comparison is of shape, not of size.
     """
 
-    def __init__(self, c, levels, act_bits=0, state_bits=None):
+    def __init__(self, c, levels, act_bits=0, state_bits=None,
+                 gate_levels=None):
         super().__init__()
         self.levels, self.act_bits = levels, act_bits
+        # wz and wh decide what the state holds. Sherry's forced zero in every
+        # block of four killed recall there while costing nothing in loss, so
+        # the gates may keep a different precision from the bulk.
+        self.gate_levels = levels if gate_levels is None else gate_levels
         # The state is not a matvec input. The bit kernel's price depends only
         # on the width of what walks into a matvec; the recurrence updates in
         # whatever width the gate arithmetic keeps - int8 on the cartridge.
@@ -258,8 +280,8 @@ class MinGRU(nn.Module):
 
     def forward(self, x, cos, sin, mask=None):
         x = qa(x, self.act_bits)
-        z = torch.sigmoid(F.linear(x, qw(self.wz.weight, self.levels)))
-        ht = F.linear(x, qw(self.wh.weight, self.levels))
+        z = torch.sigmoid(F.linear(x, qw(self.wz.weight, self.gate_levels)))
+        ht = F.linear(x, qw(self.wh.weight, self.gate_levels))
         if self.act_bits == 0:
             # Hillis-Steele scan over the whole sequence: seven doubling steps
             # for T=96 instead of ninety-six sequential ones. The combine is
@@ -322,7 +344,13 @@ class MoEMLP(nn.Module):
         self.last_aux = 0.0
 
     def forward(self, h):
-        r = torch.softmax(self.router(h), dim=-1)          # (B,T,E)
+        # The router is quantized like the classifier - ternary at one scale
+        # per tensor - whenever the experts are ternary, so the cartridge's
+        # exact block sums reproduce the argmax the model trained with. A
+        # fp32 router quantized after the fact would route differently.
+        rw = (qw(self.router.weight, TERNARY_ONE) if self.levels <= 3
+              else self.router.weight)
+        r = torch.softmax(F.linear(h, rw), dim=-1)          # (B,T,E)
         idx = r.argmax(-1)
         w1 = qw(self.w1, self.levels)
         w2 = qw(self.w2, self.levels)
@@ -338,13 +366,13 @@ class MoEMLP(nn.Module):
 
 class Block(nn.Module):
     def __init__(self, c, levels, act_bits=0, core="attn", mlp="swiglu",
-                 state_bits=None):
+                 state_bits=None, gate_levels=None):
         super().__init__()
         self.levels, self.act_bits, self.mlp = levels, act_bits, mlp
         self.stream_q = True
         self.rms_att = nn.Parameter(torch.ones(c.dim))
         self.attn = (Attention(c, levels, act_bits) if core == "attn"
-                     else MinGRU(c, levels, act_bits, state_bits))
+                     else MinGRU(c, levels, act_bits, state_bits, gate_levels))
         self.rms_ffn = nn.Parameter(torch.ones(c.dim))
         if mlp != "moe4":
             self.w1 = nn.Linear(c.dim, c.hidden, bias=False)
@@ -379,14 +407,16 @@ def rmsnorm(x, w, eps=1e-5):
 
 class Tiny(nn.Module):
     def __init__(self, shape: arch.Shape, levels=16, seq=256, window=None,
-                 act_bits=0, core="attn", mlp="swiglu", state_bits=None):
+                 act_bits=0, core="attn", mlp="swiglu", state_bits=None,
+                 gate_levels=None, emb_levels=256):
         super().__init__()
         self.c, self.seq, self.window = shape, seq, window
         self.core_mlp = (core, mlp)
         self.levels, self.act_bits = levels, act_bits
+        self.emb_levels = emb_levels          # the tied embedding / classifier
         self.tok_emb = nn.Embedding(shape.vocab, shape.dim)
         self.blocks = nn.ModuleList(Block(shape, levels, act_bits, core, mlp,
-                                          state_bits)
+                                          state_bits, gate_levels)
                                     for _ in range(shape.layers))
         self.rms_final = nn.Parameter(torch.ones(shape.dim))
         cos, sin = rope_tables(seq, shape.head_size)
@@ -394,14 +424,16 @@ class Tiny(nn.Module):
         self.register_buffer("sin", sin, persistent=False)
 
     def forward(self, idx, targets=None):
-        x = qs(self.tok_emb(idx))
+        emb = qw(self.tok_emb.weight, self.emb_levels)
+        x = qs(F.embedding(idx, emb))
         mask = (sliding_mask(idx.shape[1], self.window, idx.device)
                 if self.window else None)
         for b in self.blocks:
             x = b(x, self.cos, self.sin, mask)
         x = rmsnorm(x, self.rms_final)
-        # Tied classifier, as the checkpoint format expects.
-        logits = F.linear(x, qw(self.tok_emb.weight, 256))
+        # Tied classifier, as the checkpoint format expects: the same
+        # quantized image serves the lookup and the logits.
+        logits = F.linear(x, emb)
         if targets is None:
             return logits
         loss = F.cross_entropy(
@@ -435,12 +467,24 @@ def save_pip5(model: Tiny, path: Path):
     """
     c = model.c
     core, mlp = model.core_mlp
-    assert core == "mingru" and mlp == "relu2", "PIP5 holds the v0.5 shape only"
-    blob = b"PIP5" + struct.pack("<5H", 1, c.dim, c.hidden, c.layers, c.vocab)
+    assert core == "mingru" and mlp in ("relu2", "moe4"), "PIP5 holds minGRU shapes"
     parts = [model.tok_emb.weight]
-    for b in model.blocks:
-        parts += [b.rms_att, b.attn.wz.weight, b.attn.wh.weight,
-                  b.attn.wo.weight, b.rms_ffn, b.w1.weight, b.w2.weight]
+    if mlp == "relu2":
+        blob = b"PIP5" + struct.pack("<5H", 1, c.dim, c.hidden, c.layers, c.vocab)
+        for b in model.blocks:
+            parts += [b.rms_att, b.attn.wz.weight, b.attn.wh.weight,
+                      b.attn.wo.weight, b.rms_ffn, b.w1.weight, b.w2.weight]
+    else:
+        # Version 2: experts. `hidden` is the per-expert hidden, and each
+        # layer carries the router (experts, dim), then w1 (experts, hidden,
+        # dim) and w2 (experts, dim, hidden), expert-major.
+        moe = model.blocks[0].moe
+        blob = b"PIP5" + struct.pack("<6H", 2, c.dim, moe.w1.shape[1], c.layers,
+                                     c.vocab, moe.n_exp)
+        for b in model.blocks:
+            parts += [b.rms_att, b.attn.wz.weight, b.attn.wh.weight,
+                      b.attn.wo.weight, b.rms_ffn, b.moe.router.weight,
+                      b.moe.w1, b.moe.w2]
     parts.append(model.rms_final)
     blob += b"".join(p.detach().float().cpu().numpy().astype("<f4").tobytes()
                      for p in parts)
@@ -501,27 +545,44 @@ def load_tokens(corpus: Path, tok):
     text = corpus.read_text(encoding="utf-8")
     stories = [s for s in text.split("\n\n") if s.strip()]
     out, t0 = [], time.time()
-    # Line-level memoization, exact by construction: the newline is its own
-    # token and no merge crosses a leading-space boundary, so a story's
-    # encoding is BOS + its lines' encodings joined by the newline token -
-    # verified identical to whole-story encoding on 500 stories. A grammar
-    # corpus repeats its lines constantly, which turns sixteen minutes of
-    # quadratic BPE into seconds.
+    # Word-level memoization, exact by construction: every piece the
+    # tokenizer learned carries its spaces in front (py/tokenizer.py learns
+    # merges inside " *[^ ]+" word types), so no merge can cross from one
+    # word into the next, and a line's encoding is its words' encodings in
+    # order. The dummy prefix llama2.c puts before a text is one space, so a
+    # first word is encoded as if it had one. The newline is its own token,
+    # so a story is BOS + its lines joined by it. Checked against whole-line
+    # encoding on the first 300 stories every run, because "exact by
+    # construction" is a claim about the tokenizer's training, not a law.
+    # On 200 MB of TinyStories this is minutes instead of hours.
     nl_id = tok.lookup["\n".encode()]
     memo = {}
+
+    def encode_line(line, first):
+        ws = _WORD.findall(line)
+        if first and ws:
+            ws[0] = " " + ws[0]
+        ids = []
+        for w in ws:
+            got = memo.get(w)
+            if got is None:
+                got = memo[w] = tok.encode(w, bos=False, prefix=False)
+            ids.extend(got)
+        return ids
+
     for n, s in enumerate(stories, 1):
         out.append(ref.BOS)
         for i, line in enumerate(s.split("\n")):
-            key = (i == 0, line)
-            ids = memo.get(key)
-            if ids is None:
-                ids = memo[key] = tok.encode(line, bos=False, prefix=(i == 0))
+            ids = encode_line(line, i == 0)
+            if n <= 300:
+                assert ids == tok.encode(line, bos=False, prefix=(i == 0)), \
+                    "a merge crossed a word boundary; this tokenizer needs the slow path"
             if i:
                 out.append(nl_id)
             out.extend(ids)
         if n % 25000 == 0:
             print(f"    tokenizing {n:,}/{len(stories):,} "
-                  f"({time.time() - t0:.0f}s, {len(memo):,} distinct lines)",
+                  f"({time.time() - t0:.0f}s, {len(memo):,} distinct words)",
                   flush=True)
     ids = np.array(out, dtype=np.int32)
     np.save(cache, ids)

@@ -19,11 +19,6 @@ DEF PROMPT_MAX EQU 48                     ; characters the user can type        
 ; removes the bias correction from requantization.
 DEF ACC_BYTES EQU 2
 
-; Attention scores are a separate width and must not be tied to ACC_BYTES: a
-; score is q.k over HEAD_SIZE terms, up to 8 * 127 * 127 = 129,032, so it needs
-; 24 bits regardless of how wide the matvec accumulator happens to be.
-DEF SCORE_BYTES EQU 3
-
 ; --- Box drawing -----------------------------------------------------------
 ; Border tiles live just past the ASCII range, so Console_PutChar reaches them
 ; with ordinary character codes.
@@ -62,21 +57,16 @@ DEF OUT_MAX EQU 176
 DEF NOREPEAT_N EQU 4
 DEF NOREPEAT_TRIES EQU 8
 
+; The most tokens one reply may run. The newline normally ends a turn well
+; before this; the cap is for a reply that never finds one.
+DEF CHAT_REPLY_MAX EQU 48
+DEF TOK_MAX EQU 64                        ; encoder output, tokens
+
 DEF GEN_STEPS EQU 96
 
-; What the demo generates. Deliberately well past SEQ_LEN: the cache is a ring,
-; so nothing special happens at the window edge - the token counter walks past
-; it, the text keeps scrolling, and the only sign anything wrapped is the cycle
-; count going flat once every slot is live. That flattening is the trick, made
-; visible. The test suite stays on GEN_STEPS, since a longer golden would cost
-; loop latency and prove nothing extra.
+; What the demo generates per exchange. There is no window edge in v0.5 and
+; nothing to wrap: cost per token is flat from the first token to the last.
 DEF APP_GEN_STEPS EQU 160
-
-; Skipping zero-weight positions is worth 1.13x, but it makes attention's cost
-; depend on its input data - which silently invalidates stub-and-measure
-; profiling, because stubbing an upstream kernel changes how peaked the weights
-; are. Build with this at 0 to get a data-independent breakdown.
-DEF SKIP_ZERO_WEIGHTS EQU 1
 
 ; The lab ROM's handshake. It parks in an idle loop advertising LAB_IDLE, the
 ; harness fills in the prompt and step count, then writes LAB_GO.

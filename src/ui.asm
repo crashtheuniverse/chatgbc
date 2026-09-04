@@ -103,4 +103,4 @@ Ui_Frame::
     jp Ui_PrintAt
 
 ; Mixed case, on the handheld as everywhere else. It is a name, not a label.
-sUiTitle: db " ChatGBC v0.3 ", 0
+sUiTitle: db " Rei v0.1 ", 0

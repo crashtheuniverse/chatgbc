@@ -1,24 +1,24 @@
+"""v0.5 suite plumbing: the root harness, pointed at this app's ROMs."""
 import sys
 from pathlib import Path
 
-import pytest
+APP = Path(__file__).resolve().parents[2]
+ROOT = APP
+sys.path.insert(0, str(ROOT / "py"))
+sys.path.insert(0, str(APP / "py"))
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import pytest                    # noqa: E402
+import harness                   # noqa: E402
 
-from harness import Rom  # noqa: E402
+
+def lab_rom():
+    return harness.Rom(rom=APP / "build" / "chatgbc-lab.gbc",
+                       sym=APP / "build" / "chatgbc-lab.sym", lab=True)
 
 
 @pytest.fixture(scope="session")
-def rom():
-    """One booted lab ROM with a full-length run already done.
-
-    The lab build has no keyboard and no frame, and takes its prompt and token
-    count from here. That matters for more than tidiness: the suite used to boot
-    two separate demo ROMs and generate 96 tokens twice, which was 22 of its 24
-    seconds. Anything needing the presentation layer uses its own app-ROM
-    fixture instead.
-    """
-    r = Rom(lab=True)
-    r.lab_run(steps=r.defs["GEN_STEPS"])
+def booted():
+    r = lab_rom()
+    r.pyboy.tick(400, False)
     yield r
     r.close()

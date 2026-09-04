@@ -9,6 +9,11 @@ INCLUDE "model.inc"
 
 SECTION "Generate state", WRAM0
 wPrev::      dw                     ; previous token, for the BOS space rule
+; Position at which this run's wTokBuf[0] is consumed. Zero for a fresh run; a
+; chat continuation starts mid-stream, and the prompt-forcing index below is
+; relative to the run, not to the conversation.
+wRunStart::  db
+wFromModel:  db                     ; this step's token came from argmax, not the prompt
 wGenSteps::  db
 wTokCycles:: ds 4                   ; cycles for the most recent forward pass
 ; Attention is O(T), so the most recent pass is not representative of any other
@@ -72,8 +77,19 @@ PrintToken::
 ; Runs the model until wGenSteps tokens have been produced or EOS appears.
 Generate::
     xor a
-    ld [wPos], a
+    ld [wRunStart], a
     ld [wAbsPos], a
+
+    ld hl, wH                       ; a fresh conversation starts with an empty
+    ld bc, N_LAYERS * DIM           ; mind: the recurrent state is the memory,
+.zeroState                          ; and zero is its honest blank
+    xor a                           ; a is clobbered by the counter test below,
+    ld [hl+], a                     ; so it must be re-zeroed every iteration
+    dec bc
+    ld a, b
+    or c
+    jr nz, .zeroState
+    xor a
     ld [wGenCount], a
     ld [wGenTotal + 0], a
     ld [wGenTotal + 1], a
@@ -101,11 +117,23 @@ Generate::
     call CopyN
 
     ; Prompt tokens are forced; after that the model's own argmax continues.
+    ; The index is relative to this run: a continuation's buffer starts at
+    ; wRunStart, not at position zero.
+    ld a, [wRunStart]
+    ld b, a
     ld a, [wAbsPos]
     inc a
+    sub b
     ld hl, wTokCount
     cp [hl]
     jr nc, .useModel                ; prompt exhausted: the model takes over
+    xor a
+    ld [wFromModel], a
+    ld a, [wRunStart]
+    ld b, a
+    ld a, [wAbsPos]
+    inc a
+    sub b
     ld c, a
     ld b, 0
     ld hl, wTokBuf
@@ -115,7 +143,11 @@ Generate::
     ld [wBestTok + 0], a
     ld a, [hl]
     ld [wBestTok + 1], a
+    jr .picked
 .useModel
+    ld a, 1
+    ld [wFromModel], a
+.picked
 
     ld a, [wBestTok + 1]            ; stop at EOS
     or a
@@ -171,8 +203,9 @@ Generate::
     call StatusWin_Update           ; cycles and count, both current
     call Joy_Read
     ld a, [wJoyNew]
-    and KB_START
-    ret nz                          ; the player asked to go back
+    and KB_SELECT
+    ret nz                          ; the player asked to go back - SELECT is
+                                    ; "back" everywhere now, START only sends
 
     ld a, [wGenCount]
     ld b, a
@@ -180,18 +213,66 @@ Generate::
     cp b
     ret z
 
-    ; Advance the true position, then clamp the attended-slot bound. The cache
-    ; rings, so once SEQ_LEN slots are live every step attends all of them.
-    ld a, [wAbsPos]
-    inc a
-    ld [wAbsPos], a
-    ret z                           ; wrapped past 255: the RoPE table ends there
-    cp SEQ_LEN
-    jr c, .withinWindow
-    ld a, SEQ_LEN - 1
-.withinWindow
-    ld [wPos], a
+IF TOK_NL >= 0
+    ; Any model-chosen id at or below TOK_NL ends the turn. In the compact
+    ; layout those four ids are exactly unk, BOS, EOS and the newline - none is
+    ; ever part of a reply. The newline is the ordinary case: pip's line is
+    ; over. BOS is the subtle one: training concatenates conversations with a
+    ; BOS between them, so a model that considers the exchange complete
+    ; predicts BOS and then starts writing the player's next line itself - the
+    ; stray "> ..." lines the observer caught. Both mean the same thing: pip
+    ; has nothing more to say. Only a *model-chosen* token ends the turn; the
+    ; prompt's forced newlines must not, and once did.
+    ;
+    ; The stop token is printed but not yet consumed - Generate_Cont feeds it
+    ; back as the first token of the next run, so the stream stays the
+    ; training distribution: reply, separator, "> ", the player's words.
+    ld a, [wFromModel]
+    or a
+    jr z, .notTurnEnd
+    ld a, [wToken + 1]
+    or a
+    jr nz, .notTurnEnd
+    ld a, [wToken + 0]
+    cp TOK_NL + 1
+    ret c
+.notTurnEnd
+ENDC
+
+    ; A plain step counter now - it exists only to index the forced prompt
+    ; relative to wRunStart, and that subtraction is modular, so the byte may
+    ; wrap freely. The state has no table to fall off: no cap, no ring, no
+    ; session limit. The conversation ends when the player ends it.
+    ld hl, wAbsPos
+    inc [hl]
     jp .step
+
+IF TOK_NL >= 0
+; Continues the conversation in the same stream: the state keeps everything it
+; carried, the step counter keeps counting, and the new turn's tokens are
+; forced from wTokBuf. The gate does the forgetting - what the being retains
+; is whatever its training taught it to hold.
+Generate_Cont::
+    ld a, [wAbsPos]
+    inc a                           ; the step the stop left unconsumed
+    ld [wAbsPos], a
+    ld [wRunStart], a
+
+    xor a                           ; per-exchange stats and no-repeat history
+    ld [wGenCount], a
+    ld [wGenTotal + 0], a
+    ld [wGenTotal + 1], a
+    ld [wGenTotal + 2], a
+    ld [wGenTotal + 3], a
+    ld [wPrev + 0], a
+    ld [wPrev + 1], a
+
+    ld a, [wTokBuf + 0]             ; the newline the stop left behind
+    ld [wToken + 0], a
+    ld a, [wTokBuf + 1]
+    ld [wToken + 1], a
+    jp Generate.step
+ENDC
 
 ; hl -> de, b bytes.
 CopyN::

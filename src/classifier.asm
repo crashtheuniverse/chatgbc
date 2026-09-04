@@ -25,11 +25,9 @@ INCLUDE "chatgbc.inc"
 INCLUDE "model.inc"
 
 ; One WRAM bank holds every input's product table: input j's hi-nibble table
-; at wClsTbl + j*64, its lo-nibble table 32 bytes above. The KV cache owns
-; banks KV_BANK_BASE .. KV_BANK_BASE + N_LAYERS - 1 - banks 2 to 6 - and
-; claiming 6 here overwrote layer 4's keys on every build: step one decoded
-; correctly because layer 4 had already been read, and every later step
-; attended into product tables. The last bank is the free one.
+; at wClsTbl + j*64, its lo-nibble table 32 bytes above. v0.5 has no KV cache,
+; so every switchable bank is free; 7 is kept for continuity with v0.4, where
+; claiming a KV bank by mistake once cost an afternoon.
 DEF CLS_TBL_BANK EQU 7
 SECTION "Cls tables", WRAMX[$D000], BANK[CLS_TBL_BANK]
 wClsTbl:: ds 4096
@@ -43,6 +41,120 @@ hClsOut:   db                       ; outputs left in the part
 hClsGrp:   db                       ; 8-input groups left in the output
 
 SECTION "Cls code", ROM0
+
+IF CLS_TERNARY
+
+; --- the ternary classifier ------------------------------------------------
+;
+; The block kernel over all 512 outputs. Cls_BuildTables accumulates every
+; logit as an int16 block sum into wClsTbl - the bank that used to hold the
+; product tables holds the sums instead - and Cls_Argmax scans them. A
+; no-repeat retry is a rescan of kept sums, not a recompute: the storage the
+; register argmax deleted comes back because the sums are now cheap enough
+; to keep. Same signed compare, same tie rule, same blocked list.
+
+Cls_BuildTables::
+    ld a, CLS_TBL_BANK
+    ldh [rSVBK], a
+    ld hl, wClsTbl
+    ld bc, VOCAB * 2
+.zero
+    xor a
+    ld [hl+], a
+    dec bc
+    ld a, b
+    or c
+    jr nz, .zero
+
+    ld a, [cls_banks]
+    ld [wMvBank], a
+    ld a, [cls_addrs + 0]
+    ld [wMvW + 0], a
+    ld a, [cls_addrs + 1]
+    ld [wMvW + 1], a
+    ld a, LOW(wXb)
+    ld [wMvXPtr + 0], a
+    ld a, HIGH(wXb)
+    ld [wMvXPtr + 1], a
+    ld a, BLOCKS_DIM
+    ld [wMvIn], a
+    ld hl, VOCAB
+    call Matvec_SetOut
+    ld hl, wClsTbl
+    jp Matvec3_RunAccumHL
+
+Cls_Argmax::
+    ld a, CLS_TBL_BANK
+    ldh [rSVBK], a
+    xor a
+    ld [wClsBest + 0], a            ; -32768, high byte pre-flipped
+    ld [wClsBest + 1], a
+    ld [wClsIdx + 0], a
+    ld [wClsIdx + 1], a
+    ld [wBestTok + 0], a
+    ld [wBestTok + 1], a
+    ld hl, wClsTbl
+.output
+    ld a, [hl+]
+    ld e, a
+    ld a, [hl+]
+    ld d, a                         ; de = this token's logit
+    push hl
+
+    ld a, [wBlockedN]               ; tokens the no-repeat rule turned down
+    or a
+    jr z, .compare
+    ld b, a
+    ld hl, wBlocked
+.blocked
+    ld a, [wClsIdx + 0]
+    cp [hl]
+    inc hl
+    jr nz, .nextBlocked
+    ld a, [wClsIdx + 1]
+    cp [hl]
+    jr z, .skip
+.nextBlocked
+    inc hl
+    dec b
+    jr nz, .blocked
+
+.compare
+    ld a, d                         ; signed compare via flipped sign bits;
+    xor $80                         ; strictly greater takes, ties keep the
+    ld c, a                         ; earlier token, exactly as argmax does
+    ld a, [wClsBest + 1]
+    cp c
+    jr c, .take
+    jr nz, .skip
+    ld a, [wClsBest + 0]
+    cp e
+    jr nc, .skip
+.take
+    ld a, c
+    ld [wClsBest + 1], a
+    ld a, e
+    ld [wClsBest + 0], a
+    ld a, [wClsIdx + 0]
+    ld [wBestTok + 0], a
+    ld a, [wClsIdx + 1]
+    ld [wBestTok + 1], a
+.skip
+    pop hl
+    ld a, [wClsIdx + 0]
+    add a, 1
+    ld [wClsIdx + 0], a
+    ld a, [wClsIdx + 1]
+    adc a, 0
+    ld [wClsIdx + 1], a
+    cp HIGH(VOCAB)
+    jr nz, .output
+    ld a, [wClsIdx + 0]
+    cp LOW(VOCAB)
+    jr nz, .output
+    ret
+
+ELSE
 
 ; One input's two lookups into the running sum. bc = table entry, de = sum,
 ; hl = weight stream. 24 cycles per MAC, against the input-major kernel's 37 -
@@ -276,3 +388,5 @@ ENDR
     ldh [hClsOut], a
     jp nz, .output
     ret
+
+ENDC

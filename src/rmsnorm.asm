@@ -105,6 +105,9 @@ RmsNorm::
     ld a, [hl]
     ld [wRnR + 1], a
 
+    ; The per-element pass, in registers: x * r rounded down to Q11, times the
+    ; gain, rounded to int8. The census had the scratch-based version at ~930
+    ; cycles an element, of which the two multiplies were about a fifth.
     ld a, [wRnSrc + 0]
     ld l, a
     ld a, [wRnSrc + 1]
@@ -115,34 +118,38 @@ RmsNorm::
     push hl
     push bc
 
-    ld [wMulA8], a                  ; x_hat = shr_round(x * r, e/2), as Q11
+    ld c, a                         ; x
     ld a, [wRnR + 0]
-    ld [wMy + 0], a
+    ld l, a
     ld a, [wRnR + 1]
-    ld [wMy + 1], a
-    call MulS8xS16
+    ld h, a                         ; hl = r
+    ld a, c
+    push hl
+    pop bc                          ; bc = r
+    call MulS8xS16_Reg              ; e:hl = x * r
     ld a, [wRnE]
-    call Requant_Shift
+    ld b, a
+    call ShiftRound24               ; x_hat, Q11; fits 16 bits, as the twin's
+    push hl
+    pop bc                          ; bc = x_hat
 
-    ldh a, [wTmp32 + 0]              ; fold in the gain, land on int8
-    ld [wMy + 0], a
-    ldh a, [wTmp32 + 1]
-    ld [wMy + 1], a
-    ld a, [wRnGain + 0]
+    ld a, [wRnGain + 0]             ; the gain, and advance
     ld e, a
     ld a, [wRnGain + 1]
     ld d, a
     ld a, [de]
-    ld [wMulA8], a
     inc de
+    push af
     ld a, e
     ld [wRnGain + 0], a
     ld a, d
     ld [wRnGain + 1], a
-    call MulS8xS16
+    pop af
+    call MulS8xS16_Reg              ; e:hl = x_hat * gain
     ld a, [wRnShift]
-    call Requant_Shift
-    call Requant_Sat8
+    ld b, a
+    call ShiftRound24
+    call Sat8_24
 
     ld c, a
     ld a, [wRnDst + 0]

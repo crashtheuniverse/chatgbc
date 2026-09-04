@@ -18,7 +18,6 @@ INCLUDE "chatgbc.inc"
 INCLUDE "model.inc"
 
 DEF ENC_MAX_PIECE EQU 7             ; longest piece in the vocabulary
-DEF TOK_MAX       EQU 64            ; tokens after encoding
 
 SECTION "Encoder state", WRAM0
 wPromptText:: ds PROMPT_MAX
@@ -36,6 +35,7 @@ wEncPtr:      dw
 wEncPair:     db
 wEncAny:      db
 wEncChar:     db
+wEncNoBos:    db
 
 SECTION "Encoder code", ROM0
 
@@ -175,11 +175,31 @@ Enc_AppendPiece:
 
 ; wPromptText/wPromptLen -> wTokBuf/wTokCount.
 Encode::
+    xor a
+    ld [wEncNoBos], a
+    jr Enc_Body
+
+; The same encoder for a turn that continues an existing stream: no BOS and no
+; dummy prefix, because those belong to the start of a conversation, and a
+; mid-stream turn that carried them would be a token sequence training never
+; produced. The caller stages the newline as the first character of the text.
+EncodeCont::
+    ld a, 1
+    ld [wEncNoBos], a
+    ; fall through
+
+Enc_Body:
     ld a, BANK(enc_all)
     ld [rROMB0], a
 
-    ld hl, wTokBuf                  ; BOS
-    ld a, TOK_BOS
+    ld hl, wTokBuf
+    xor a
+    ld [wTokCount], a
+    ld a, [wEncNoBos]
+    or a
+    jr nz, .noBos
+
+    ld a, TOK_BOS                   ; BOS
     ld [hl+], a
     xor a
     ld [hl+], a
@@ -196,6 +216,7 @@ Encode::
     ld [hl+], a
     ld a, 2
     ld [wTokCount], a
+.noBos
 
     ld de, wPromptText
     ld a, [wPromptLen]
@@ -207,18 +228,21 @@ Encode::
     push de
     push bc
     push hl
-    ; The single character usually exists as its own piece; byte+3 is only a
-    ; fallback. Taking the fallback unconditionally yields "<0x4F>"-style pieces
-    ; that can never merge, so the whole BPE pass would do nothing.
+    ; The single character exists as its own piece - py/tokenizer.py gives every
+    ; key on this keyboard one, whether or not the corpus used it. Taking a
+    ; fallback unconditionally would yield "<0x4F>"-style pieces that can never
+    ; merge, so the whole BPE pass would do nothing.
+    ;
+    ; The miss path is UNK rather than byte+3. That offset only means anything
+    ; under llama2.c's layout, where ids 3..258 are the bytes; a compact
+    ; vocabulary spends those ids on merges, so byte+3 would silently encode a
+    ; typed character as an unrelated word.
     ld [wEncCand], a
     ld a, 1
     ld [wEncCandLen], a
     call Enc_Find
     jr c, .haveTok
-    ld a, [wEncChar]
-    add a, 3
-    ld l, a
-    ld h, 0
+    ld hl, TOK_UNK
 .haveTok
     ld d, h
     ld e, l

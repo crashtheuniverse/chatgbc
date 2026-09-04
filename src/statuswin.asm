@@ -187,4 +187,4 @@ Win_PutDec32Num:
 
 sWinCyc:  db "CYC/TOK", 0
 sWinTok:  db "TOK", 0
-sWinBack: db "START=MENU", 0
+sWinBack: db "SEL=MENU", 0
