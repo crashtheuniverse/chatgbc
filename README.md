@@ -7,12 +7,12 @@ a recurrent core instead of attention, four small experts per layer, and
 an integer twin that decided every rounding before the assembly did.
 
 **some stats:**
-- 0.95 s/token, ~0.33 s per character — measured by DIV/TIMA (v0.3 was 6.16 s and 2.26 s)
-- 1.19 bits per character on held-out TinyStories — better than v0.3's ROM (1.41) and better than the fp32 checkpoint v0.3 was quantized from (1.26)
+- 1.08 s/token, ~0.31 s per character — measured by DIV/TIMA (v0.3 was 6.16 s and 2.26 s)
+- 1.15 bits per character on held-out TinyStories — better than v0.3's ROM (1.41) and better than the fp32 checkpoint v0.3 was quantized from (1.26)
 - Weights are −1, 0 or +1. Three of them pick one of 27 precomputed sums: no multiplier, no product tables
 - No attention, no KV cache, no window. The state is 192 bytes and the story never has to end
 - Four experts per layer, one runs per token: half the work of a dense layer, twice the weights
-- 341K parameters in a 256 KB ROM
+- 374K parameters in a 256 KB ROM
 
 _Trained on TinyStories, compared per character against v0.3_
 
@@ -29,13 +29,13 @@ stack are on the cartridge.
 
 | | |
 |---|---|
-| Model | 3 layers, dim 64, minGRU core + ReLU² MLP as 4 experts of 176, vocab 512 BPE — 341K parameters |
-| Trained on | TinyStories V2 (254K stories, 72M tokens), 20,000 steps, on a laptop GPU in 2.7 hours |
+| Model | 3 layers, dim 64, minGRU core + ReLU² MLP as 4 experts of 176, vocab 1024 BPE — 374K parameters |
+| Trained on | TinyStories V2 (254K stories, 59M tokens), 20,000 steps, on a laptop GPU in 3.5 hours |
 | Context | a recurrent state: 3 × 64 bytes, unbounded output, no window |
 | Weights | ternary with one power-of-two scale per row; classifier and router ternary at one scale |
 | Arithmetic | int8 activations and state, exact 16-bit block sums, no floating point, no division, no multiply |
-| **Speed** | **0.95 s/token** (1,994,048 M-cycles), **0.33 s per character** at 2.87 characters a token |
-| **Quality** | **1.189 bits/char** on 200 held-out stories, teacher-forced. v0.3: 1.412 as shipped, 1.261 in fp32 |
+| **Speed** | **1.08 s/token** (2,259,829 M-cycles), **0.31 s per character** at 3.46 characters a token |
+| **Quality** | **1.146 bits/char** on 200 held-out stories, teacher-forced. v0.3: 1.412 as shipped, 1.261 in fp32 |
 | Kernel | ~10.5 M-cycles per multiply-accumulate, three MACs per table lookup |
 
 Numbers measured against HW timers; quality measured on the bit-exact twin
@@ -91,7 +91,7 @@ power-of-two row scales during training, activations and the recurrent state
 to int8, the classifier and router to ternary at a single scale — and a
 full-precision residual (the Arenas trick from
 [Sherry](https://arxiv.org/abs/2601.07892)) is annealed to zero so ternary
-converges at all. The exported integers score within 1.3% of the float model.
+converges at all. The exported integers score within 2% of the float model.
 
 _Note_: the GBC is technically 8MHz but those are T-Cycles. A full instruction usually is 4 of those.
 This means you really have 2MHz worth of `M` cycles, about 1 instruction each — so consider it a 2MHz HW
