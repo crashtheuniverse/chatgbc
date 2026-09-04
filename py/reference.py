@@ -169,11 +169,13 @@ _BYTE_PIECE = re.compile(rb"<0x([0-9A-Fa-f]{2})>")
 class Tokenizer:
     """llama2.c tokenizer.bin: max_len, then (score, len, bytes) per token."""
 
-    def __init__(self, path=TOKENIZER, vocab_size=512):
+    def __init__(self, path=TOKENIZER, vocab_size=None):
         blob = path.read_bytes()
         off = 4  # max_token_length
         self.vocab, self.scores = [], []
-        for _ in range(vocab_size):
+        # The file carries no count; it is as long as its pieces. None reads
+        # them all, which is right for every tokenizer here (512 or 1024).
+        while off < len(blob) if vocab_size is None else len(self.vocab) < vocab_size:
             score, length = struct.unpack_from("<fi", blob, off)
             off += 8
             self.vocab.append(blob[off : off + length])
