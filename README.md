@@ -2,23 +2,24 @@
 
 A language model that runs on a Game Boy Color written in Assembly.
 
-**some stats:**
-- 6.16 s/token, ~2.3 s per character — measured by DIV/TIMA (not emu clock)
-- No multiplications / divs on the SM83 CPU so lots of requants, pre computation and LUTs
-- W4 (4-bit weights) post quantized from original weights
-- Fits in 512KB ROM. Still room to spare 
-- 24 Tokens Attention window
+v0.4 is a model trained *for* this machine, not borrowed: ternary weights,
+a recurrent core instead of attention, four small experts per layer, and
+an integer twin that decided every rounding before the assembly did.
 
-_Based on TinyStories260K and weights_
+**some stats:**
+- 0.95 s/token, ~0.33 s per character — measured by DIV/TIMA (v0.3 was 6.16 s and 2.26 s)
+- 1.19 bits per character on held-out TinyStories — better than v0.3's ROM (1.41) and better than the fp32 checkpoint v0.3 was quantized from (1.26)
+- Weights are −1, 0 or +1. Three of them pick one of 27 precomputed sums: no multiplier, no product tables
+- No attention, no KV cache, no window. The state is 192 bytes and the story never has to end
+- Four experts per layer, one runs per token: half the work of a dense layer, twice the weights
+- 341K parameters in a 256 KB ROM
+
+_Trained on TinyStories, compared per character against v0.3_
 
 ![ChatGBC generating text](docs/chatgbc.gif)
 
-*One frame per token, roughly 100x the speed of the hardware — 160 tokens, and
-the real run is seventeen minutes on the handheld.*
-
-**Bottom Bar.** `TOK` walks past 24, which is the entire attention
-window, but the text just keeps going thanks to a `RING BUFFER`. 
-It's a trick. Eventually you lose coherence and allucinate.
+*The v0.3 capture, one frame per token. v0.4 writes about seven times as many
+characters in the same time; a new capture is coming.*
 
 You type a prompt on an on-screen keyboard (`A` types, `B` deletes, `SELECT`
 flips case, `START` generates). Tokenizer, weights and the whole inference
@@ -28,20 +29,21 @@ stack are on the cartridge.
 
 | | |
 |---|---|
-| Model | TinyStories-260K — 5 layers, dim 64, 8 heads / 4 KV heads, vocab 512 |
-| Context | 24-position sliding window, ring buffer, unbounded output |
-| Weights | 4-bit, Lloyd–Max codebooks, per-output-row scales; 8-bit used sparingly. |
-| Arithmetic | int8 activations, 16-bit accumulators, no floating point, no division |
-| **Speed** | **6.16 s/token** averaged over a 96-token run (12,918,757 M-cycles) |
-| | **2.26 s per character**, at 2.73 characters a token |
-| Quality | 78.1% top-1 agreement with fp32 on held-out prompts (KL 0.34 bits) |
-| Kernel | 19 M-cycles per multiply-accumulate |
+| Model | 3 layers, dim 64, minGRU core + ReLU² MLP as 4 experts of 176, vocab 512 BPE — 341K parameters |
+| Trained on | TinyStories V2 (254K stories, 72M tokens), 20,000 steps, on a laptop GPU in 2.7 hours |
+| Context | a recurrent state: 3 × 64 bytes, unbounded output, no window |
+| Weights | ternary with one power-of-two scale per row; classifier and router ternary at one scale |
+| Arithmetic | int8 activations and state, exact 16-bit block sums, no floating point, no division, no multiply |
+| **Speed** | **0.95 s/token** (1,994,048 M-cycles), **0.33 s per character** at 2.87 characters a token |
+| **Quality** | **1.189 bits/char** on 200 held-out stories, teacher-forced. v0.3: 1.412 as shipped, 1.261 in fp32 |
+| Kernel | ~10.5 M-cycles per multiply-accumulate, three MACs per table lookup |
 
-Numbers measured against HW timers. 
+Numbers measured against HW timers; quality measured on the bit-exact twin
+of the ROM, on stories the training never saw.
 
 ## Why this exists
 
-The model is [karpathy's TinyStories-260K](https://huggingface.co/karpathy/tinyllamas):
+The model behind v0.3 was [karpathy's TinyStories-260K](https://huggingface.co/karpathy/tinyllamas):
 a quarter-million parameters trained on the
 [TinyStories](https://arxiv.org/abs/2305.07759) corpus, whose point was that a
 model this small can write coherent English at all. That result is what makes a
@@ -58,22 +60,41 @@ That is the foundation this project actually is.
 How could I do a self improving loop on my laptop. 
 HW constraints allows me to look at the bits, memory dumps, and eventually train locally.
 
-## Tricks
+v0.4 closes that loop: the model is trained here, inside the same integers the
+cartridge computes with, and judged by the same twin that judges the assembly.
 
-**The multiply is a table lookup.** The SM83 has no multiplier. With 4-bit
-weights there are sixteen possible weight values and 256 possible activations, so
-every product the model could ever need fits in 8 KB of ROM per matrix. The
-kernel copies 32 bytes into HRAM and from then on "multiply" is `ldh a, [c]` —
-3,200 cycles become 200. This machine has 8 MB of ROM which is plenty but we are starving for CPU cycles. 
-Also there is no cache and everything is so slow that you always trade memory for computation.
+## What changed since v0.3
+
+v0.3 took a float transformer and squeezed it into 4-bit tables; the squeeze
+cost 12% in bits per character and the attention window cost the rest. v0.4
+turns it around: decide what the hardware does well, train a model that lives
+there from step one.
+
+**The multiply is a table of sums.** A ternary weight is −1, 0 or +1, so three
+of them applied to three activations is one of 27 signed sums. The kernel
+builds those 27 sums once per block of three inputs and then every weight
+triple is a single `ldh a, [c]` and an add. No product tables, no bank
+switch per input, and a matrix in ROM is one byte per three weights.
+
+**The core is a minGRU, not attention.** `h = h + z ⊙ (h̃ − h)`, gates from the
+input only. Three 64×64 matvecs per layer and a 64-byte state; nothing grows
+with the length of the story. v0.3 needed a ring of 24 cached positions and
+lost the thread when the ring wrapped. This never wraps.
+
+**Four experts, one runs.** Each layer's MLP is four experts of 176; a
+ternary router picks one per token. Half the multiply-accumulates of the dense
+layer, twice the parameters, and choosing an expert is one MBC5 bank register
+write.
+
+**Trained inside the integers.** Weights are fake-quantized to ternary with
+power-of-two row scales during training, activations and the recurrent state
+to int8, the classifier and router to ternary at a single scale — and a
+full-precision residual (the Arenas trick from
+[Sherry](https://arxiv.org/abs/2601.07892)) is annealed to zero so ternary
+converges at all. The exported integers score within 1.3% of the float model.
 
 _Note_: the GBC is technically 8MHz but those are T-Cycles. A full instruction usually is 4 of those.
 This means you really have 2MHz worth of `M` cycles, about 1 instruction each — so consider it a 2MHz HW
-
-**Generation never stops, because the cache is a ring.** The slot for position
-`p` is `p mod 24`, while the embedding keeps rotating by the *absolute*
-`p`. You can separate token in the context/output from its source state in memory. 
-A bit more bookkeeping to do but you can keep attending to the last 24 positions forever. 
 
 ## Build it
 
@@ -81,15 +102,27 @@ Windows, PowerShell. Everything is fetched into the project; No PATH required.
 I expressly chose tools that can work this way.
 
 ```powershell
-.\bootstrap.ps1   # RGBDS, SameBoy, a .venv with PyBoy
+.\bootstrap.ps1   # RGBDS, SameBoy, a .venv with PyBoy and torch
 .\build.ps1       # -> build\chatgbc.gbc
 .\test.ps1        # build, then the headless test suite
 .\tools\sameboy\sameboy.exe build\chatgbc.gbc
 ```
 
+## Train it
+
+```powershell
+# TinyStories from HF roneneldan/TinyStories into models\tinystories\, then:
+.venv\Scripts\python.exe py\tinystories.py                       # fold to the keyboard's alphabet
+.venv\Scripts\python.exe py\tokenizer.py --corpus models\tinystories\ts_train.txt --out models\tok_ts512.bin
+.venv\Scripts\python.exe py\fit.py --tokenizer models\tok_ts512.bin --name ts3L_v512
+.venv\Scripts\python.exe py\export5.py                           # checkpoint -> blobs + model.inc
+.venv\Scripts\python.exe py\score5.py                            # bits/char of what ships
+.\test.ps1
+```
+
 ## Twin and testing
 
-`py/quant.py` is a **bit-exact integer twin** of the assembly: same
+`py/twin5.py` is a **bit-exact integer twin** of the assembly: same
 quantization, rounding, saturation, order and widths. The tests boot the ROM
 headlessly and assert it emits an identical token sequence.
 
@@ -102,8 +135,8 @@ bisection with a definite answer.
 
 ![ChatGBC running on a real Game Boy Color](docs/chatgbc.jpg)
 
-#gbdev community on Discord was kind enough to flash it to a cartridge and capture a pic on original
-hardware. 
+#gbdev community on Discord was kind enough to flash v0.3 to a cartridge and
+capture a pic on original hardware. 
 
 ## More
 
@@ -116,8 +149,11 @@ hardware.
 
 ## Credits
 
-[karpathy/tinyllamas](https://huggingface.co/karpathy/tinyllamas) (`stories260K`)
-· [TinyStories](https://arxiv.org/abs/2305.07759) ·
+[TinyStories](https://arxiv.org/abs/2305.07759) (Eldan & Li; dataset
+[roneneldan/TinyStories](https://huggingface.co/datasets/roneneldan/TinyStories), CDLA-Sharing-1.0) ·
+[karpathy/tinyllamas](https://huggingface.co/karpathy/tinyllamas) (`stories260K`, v0.3) ·
+[Were RNNs All We Needed?](https://arxiv.org/abs/2410.01201) (minGRU) ·
+[Sherry](https://arxiv.org/abs/2601.07892) (the Arenas residual) ·
 [gbc-transformer](https://github.com/maddiedreese/gbc-transformer) ·
 [dhepper/font8x8](https://github.com/dhepper/font8x8) ·
 [RGBDS](https://rgbds.gbdev.io) ·

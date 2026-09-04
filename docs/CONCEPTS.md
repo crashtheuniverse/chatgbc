@@ -1,5 +1,7 @@
 # How the model works
 
+> **v0.4 note.** This page describes the v0.3 model - karpathy's stories260K transformer, 4-bit tables, a 24-token attention window. v0.4 runs a different model trained here: a minGRU core, four ternary experts per layer, a block-sum kernel. The README's *What changed since v0.3* has the short version; this page will follow.
+
 No machine-learning background assumed. If you know what a dot product is, you
 have enough.
 
