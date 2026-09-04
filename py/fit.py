@@ -187,14 +187,18 @@ def main():
     train.ARENAS["lam"] = 0.0
 
     bpt = grade(model, vx, vy, device)
+    # Grade BEFORE baking. The forward quantizes whatever it is given, and a
+    # ternary row quantized twice is rescaled by its fraction of non-zeros -
+    # so a baked model re-graded here scores nonsense (6.5 bits/token for a
+    # 3.36 model). The twin and the cartridge read the baked image directly;
+    # py/score5.py is the number to quote for what ships.
     bake(model, levels)
-    baked = grade(model, vx, vy, device)      # must equal bpt: the image is idempotent on the ROM side
     name = args.name or f"ts{args.layers}L{args.dim}d_h{args.hidden}_v{vocab}"
     path = args.out_dir / f"{name}.bin"
     path.parent.mkdir(parents=True, exist_ok=True)
     n = train.save_pip5(model.cpu(), path)
-    print(f"  {name}: held-out {bpt:.4f} bits/token = {bpt / chars_per_tok:.4f} bits/char "
-          f"(baked re-grade {baked:.4f}); ~{cyc/HZ:.2f} s/tok, {cyc/HZ/chars_per_tok:.3f} s/char; "
+    print(f"  {name}: held-out {bpt:.4f} bits/token = {bpt / chars_per_tok:.4f} bits/char; "
+          f"~{cyc/HZ:.2f} s/tok, {cyc/HZ/chars_per_tok:.3f} s/char; "
           f"saved {path.name} ({n:,} bytes)", flush=True)
 
 
