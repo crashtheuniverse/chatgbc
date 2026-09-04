@@ -305,20 +305,71 @@ class MinGRU(nn.Module):
                 Bv = torch.cat([Bv[:, :step], new_b], dim=1)
                 step *= 2
             return F.linear(Bv, qw(self.wo.weight, self.levels))
-        hs, h = [], torch.zeros_like(ht[:, 0])
-        for t in range(ht.shape[1]):        # sequential scan under state quant
-            h = (1 - z[:, t]) * h + z[:, t] * ht[:, t]
-            # The cartridge carries this state in int8 and re-quantizes it
-            # every token. A recurrence accumulates that rounding in a way
-            # attention - which re-reads clean cache entries - never does, so
-            # the training has to live with it too or the ROM inherits a gap
-            # no calibration can close. state_bits, not act_bits: the wo
-            # matvec reads a narrowed view below, but the carried state keeps
-            # the ROM's own width.
-            h = qa(h, self.state_bits)
-            hs.append(h)
-        y = torch.stack(hs, dim=1)
+        if SCAN["fused"]:
+            y = QuantScan.apply(z, ht, self.state_bits)
+        else:
+            hs, h = [], torch.zeros_like(ht[:, 0])
+            for t in range(ht.shape[1]):    # sequential scan under state quant
+                h = (1 - z[:, t]) * h + z[:, t] * ht[:, t]
+                # The cartridge carries this state in int8 and re-quantizes
+                # it every token. A recurrence accumulates that rounding in a
+                # way attention - which re-reads clean cache entries - never
+                # does, so the training has to live with it too or the ROM
+                # inherits a gap no calibration can close. state_bits, not
+                # act_bits: the wo matvec reads a narrowed view below, but
+                # the carried state keeps the ROM's own width.
+                h = qa(h, self.state_bits)
+                hs.append(h)
+            y = torch.stack(hs, dim=1)
         return F.linear(qa(y, self.act_bits), qw(self.wo.weight, self.levels))
+
+
+SCAN = {"fused": False}
+
+
+class QuantScan(torch.autograd.Function):
+    """The sequential scan above as ONE autograd node.
+
+    Same arithmetic, same rounding: h_t = (1 - z_t) h_t-1 + z_t ht_t, then
+    the per-row fake quantization of FakeQuantAct at `bits`. What changes is
+    the bookkeeping. The loop version builds ~10 autograd nodes per step,
+    and at T=96 over three layers that is thousands of tiny kernels and
+    Python frames per training step, forward and backward - the training
+    step was launch-bound at half a second. Here the forward is a plain loop
+    with no graph, and the backward is the reverse loop written out:
+    straight-through past the quantizer (its clip mask is always true under
+    a per-row max scale), then the recurrence's own chain rule.
+    """
+
+    @staticmethod
+    def forward(ctx, z, ht, bits):
+        n = (1 << (bits - 1)) - 1
+        T = ht.shape[1]
+        h = torch.zeros_like(ht[:, 0])
+        hq = []                             # quantized states, h_0 .. h_T-1
+        for t in range(T):
+            h = (1 - z[:, t]) * h + z[:, t] * ht[:, t]
+            scale = h.abs().amax(dim=-1, keepdim=True).clamp(min=1e-8) / n
+            h = torch.round(h / scale).clamp(-n - 1, n) * scale
+            hq.append(h)
+        y = torch.stack(hq, dim=1)
+        ctx.save_for_backward(z, ht, y)
+        return y
+
+    @staticmethod
+    def backward(ctx, gy):
+        z, ht, y = ctx.saved_tensors
+        T = ht.shape[1]
+        gz = torch.empty_like(z)
+        ght = torch.empty_like(ht)
+        carry = torch.zeros_like(gy[:, 0])   # d loss / d h_t through h_t+1..
+        for t in range(T - 1, -1, -1):
+            g = gy[:, t] + carry             # straight-through the quantizer
+            prev = y[:, t - 1] if t > 0 else torch.zeros_like(g)
+            gz[:, t] = g * (ht[:, t] - prev)
+            ght[:, t] = g * z[:, t]
+            carry = g * (1 - z[:, t])
+        return gz, ght, None
 
 
 class MoEMLP(nn.Module):

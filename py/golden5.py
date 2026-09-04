@@ -48,10 +48,11 @@ def main():
         tokens.append(nxt)
         text += tok.decode(nxt, prev)
         prev = token = nxt
-        # The ROM ends the turn on the first model-chosen id at or below the
-        # newline - unk, BOS, EOS or newline, none ever part of a reply. The
-        # golden obeys the same rule, so equality is strict, not a prefix.
-        if not forced and nxt <= tok.lookup[b"\n"]:
+        # A chat ROM ends the turn on the first model-chosen id at or below
+        # the newline - unk, BOS, EOS or newline, none ever part of a reply.
+        # The golden obeys the same rule, so equality is strict, not a
+        # prefix. A story ROM has no turns: it writes until the steps run out.
+        if not forced and export5.CHAT and nxt <= tok.lookup[b"\n"]:
             break
 
     OUT.parent.mkdir(parents=True, exist_ok=True)

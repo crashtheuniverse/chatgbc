@@ -117,6 +117,7 @@ def main():
     ap.add_argument("--lr", type=float, default=3e-3)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--grade-every", type=int, default=2000)
+    ap.add_argument("--log-every", type=int, default=250)
     ap.add_argument("--eval-seq", type=int, default=256)
     ap.add_argument("--eval-stories", type=int, default=400)
     ap.add_argument("--name", default=None)
@@ -175,6 +176,9 @@ def main():
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         opt.step()
         sched.step()
+        if (step_i + 1) % args.log_every == 0 and (step_i + 1) % args.grade_every:
+            print(f"    step {step_i + 1}: train {float(loss)/math.log(2):.3f} bits, "
+                  f"{(time.time() - t0) / (step_i + 1):.2f} s/step", flush=True)
         if (step_i + 1) % args.grade_every == 0 or step_i + 1 == args.steps:
             bpt = grade(model, vx, vy, device)
             print(f"    step {step_i + 1}: held-out {bpt:.4f} bits/token = "
