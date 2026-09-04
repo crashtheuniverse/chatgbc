@@ -2,3 +2,6 @@ pyboy==2.7.0
 numpy>=2.0
 pytest>=8.0
 pillow>=10.0
+# training only (py/fit.py); the ROM, twin and tests need none of it.
+# For a CUDA build install torch from pytorch.org first, then this file.
+torch>=2.4
