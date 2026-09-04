@@ -21,8 +21,9 @@ _Trained on TinyStories, compared per character against v0.3_
 
 ![ChatGBC generating text](docs/chatgbc.gif)
 
-*Roughly 100x the speed of the hardware; 160 tokens, then SELECT. The real
-run is under three minutes on the handheld (v0.3 took seventeen).*
+*One frame per character, about five times the pace of the hardware; 200
+tokens, then SELECT - it would go on. The real run is three and a half
+minutes on the handheld; v0.3's 160 tokens took seventeen.*
 
 You type a prompt on an on-screen keyboard (`A` types, `B` deletes, `SELECT`
 flips case, `START` generates, `SELECT` again stops the story). Tokenizer,

@@ -74,7 +74,10 @@ no-repeat history slides along the last 176 tokens.
 
 ## The captures
 
-Roughly 100x the speed of the hardware; 160 tokens each.
+v0.1 to v0.3: one frame per token, roughly 100x the speed of the hardware,
+160 tokens each. v0.4.1: one frame per character at about five times the
+hardware's pace, 200 tokens and then SELECT - past the old cap, and it
+would go on.
 
 | v0.1 | v0.2 |
 |---|---|

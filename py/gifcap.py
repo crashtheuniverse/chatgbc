@@ -35,13 +35,13 @@ OUT = ROOT / "build" / "chatgbc.gif"
 # prompt at boot on purpose, so this is the only way a capture can demonstrate
 # any other one - or the keyboard itself.
 TYPE = ""
-CAP = 160                    # tokens to record before pressing SELECT
+CAP = 200                    # tokens to record before pressing SELECT - past the old cap of 160
 SCALE = 2
 
 OPEN_MS = 1800               # hold on the entry screen before anything happens
 KEY_MS = 70                  # per button press while typing
 SETTLE_MS = 900              # on the finished prompt, before START
-TOKEN_MS = 90                # per token, which works out around 100x hardware
+TOKEN_MS = 60                # per character now: about 5x the hardware's 300 ms
 CLOSE_MS = 3000              # on the finished text, before the loop restarts
 
 DURATION = {"open": OPEN_MS, "key": KEY_MS, "settle": SETTLE_MS,
@@ -143,7 +143,7 @@ def capture():
     gentok = rom.addr("wGenTok")
     seen, last = screen(), 0
     while True:
-        rom.pyboy.tick(45, False)             # the teletype changes the screen per character
+        rom.pyboy.tick(18, False)             # one teletype character per tick, so one frame per character
         if rom.pyboy.memory[ready] == magic:
             print("  ROM finished generating", flush=True)
             break
@@ -157,7 +157,7 @@ def capture():
         last = tokens
         if tokens >= CAP:
             rec.press("select")                # the story runs until told to stop
-            rom.pyboy.tick(45, False)
+            rom.pyboy.tick(18, False)
             rec.frame("tok")
             print(f"  SELECT at {tokens} tokens", flush=True)
             break
