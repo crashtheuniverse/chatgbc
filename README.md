@@ -18,8 +18,8 @@ _Trained on TinyStories, compared per character against v0.3_
 
 ![ChatGBC generating text](docs/chatgbc.gif)
 
-*The v0.3 capture, one frame per token. v0.4 writes about seven times as many
-characters in the same time; a new capture is coming.*
+*One frame per token, roughly 100x the speed of the hardware. 160 tokens, and
+the real run is under three minutes on the handheld (v0.3 took seventeen).*
 
 You type a prompt on an on-screen keyboard (`A` types, `B` deletes, `SELECT`
 flips case, `START` generates). Tokenizer, weights and the whole inference

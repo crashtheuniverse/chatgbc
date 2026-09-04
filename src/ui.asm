@@ -10,6 +10,7 @@
 
 INCLUDE "hardware.inc"
 INCLUDE "chatgbc.inc"
+INCLUDE "model.inc"
 
 SECTION "UI code", ROM0
 
@@ -103,4 +104,8 @@ Ui_Frame::
     jp Ui_PrintAt
 
 ; Mixed case, on the handheld as everywhere else. It is a name, not a label.
+IF CHAT_MODE
 sUiTitle: db " Rei v0.1 ", 0
+ELSE
+sUiTitle: db " ChatGBC v0.4 ", 0
+ENDC
