@@ -45,9 +45,18 @@ HZ = 2_097_152       # M-cycles per second, CGB double speed
 CYC_PER_MAC, CYC_PER_CLS_MAC, CYC_PER_LAYER = 10.5, 8.3, 203_000
 
 
-def price(layers, dim, hid_exp, vocab):
+MAC_BIT = 2.23       # DIRECT: src/bitbench.asm, one-bit weights, per activation bit plane
+
+
+def price(layers, dim, hid_exp, vocab, levels=3, act_bits=8):
+    """Ternary runs the measured block kernel. Binary runs the bit-plane
+    kernel, whose cost is linear in the activation width - so binary only
+    pays at narrow activations, and this prices that trade honestly."""
     macs = layers * (3 * dim * dim + 2 * dim * hid_exp + 4 * dim)
-    return layers * CYC_PER_LAYER + CYC_PER_MAC * macs + CYC_PER_CLS_MAC * vocab * dim
+    if levels == 3:
+        return layers * CYC_PER_LAYER + CYC_PER_MAC * macs + CYC_PER_CLS_MAC * vocab * dim
+    per_mac = MAC_BIT * max(act_bits, 1)
+    return layers * CYC_PER_LAYER + per_mac * (macs + vocab * dim)
 
 
 def arenas_lambda(step_i, steps, warm=0.1):
@@ -111,6 +120,9 @@ def main():
     ap.add_argument("--layers", type=int, default=3)
     ap.add_argument("--dim", type=int, default=64)
     ap.add_argument("--hidden", type=int, default=352, help="total FFN hidden; each of 4 experts gets half")
+    ap.add_argument("--levels", type=int, default=3, help="3 ternary (the shipped kernel), 2 binary {-1,+1}, 21 binary {0,+1}")
+    ap.add_argument("--act-bits", type=int, default=8, help="activation width into every matvec")
+    ap.add_argument("--state-bits", type=int, default=8, help="the carried recurrent state")
     ap.add_argument("--steps", type=int, default=20000)
     ap.add_argument("--seq", type=int, default=96)
     ap.add_argument("--batch", type=int, default=96)
@@ -146,18 +158,20 @@ def main():
     shape = arch.Shape(dim=args.dim, hidden=args.hidden, layers=args.layers,
                        heads=8, kv_heads=4, vocab=vocab)
     hid_exp = args.hidden // 2
-    cyc = price(args.layers, args.dim, hid_exp, vocab)
-    print(f"  shape {args.layers}L {args.dim}d, 4 experts of {hid_exp}, vocab {vocab}: "
+    cyc = price(args.layers, args.dim, hid_exp, vocab, args.levels, args.act_bits)
+    print(f"  shape {args.layers}L {args.dim}d, 4 experts of {hid_exp}, vocab {vocab}, "
+          f"levels {args.levels}, {args.act_bits}-bit acts, {args.state_bits}-bit state: "
           f"~{cyc/1e6:.2f}M cyc/tok = {cyc/HZ:.2f} s/tok = {cyc/HZ/chars_per_tok:.3f} s/char "
           f"(v0.3: 2.26 s/char)", flush=True)
 
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed_all(args.seed)
-    levels = 3
+    levels = args.levels
     train.POW2_SCALE["on"] = True
     model = train.Tiny(shape, levels=levels, seq=args.seq, window=24,
-                       core="mingru", mlp="moe4", act_bits=8, state_bits=8,
-                       gate_levels=None, emb_levels=train.TERNARY_ONE).to(device)
+                       core="mingru", mlp="moe4", act_bits=args.act_bits,
+                       state_bits=args.state_bits, gate_levels=None,
+                       emb_levels=train.TERNARY_ONE).to(device)
     n_params = sum(p.numel() for p in model.parameters())
     print(f"  {n_params:,} parameters", flush=True)
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.01,
@@ -193,7 +207,7 @@ def main():
     # 3.36 model). The twin and the cartridge read the baked image directly;
     # py/score5.py is the number to quote for what ships.
     bake(model, levels)
-    name = args.name or f"ts{args.layers}L{args.dim}d_h{args.hidden}_v{vocab}"
+    name = args.name or f"ts{args.layers}L{args.dim}d_h{args.hidden}_v{vocab}_q{args.levels}a{args.act_bits}"
     path = args.out_dir / f"{name}.bin"
     path.parent.mkdir(parents=True, exist_ok=True)
     n = train.save_pip5(model.cpu(), path)

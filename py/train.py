@@ -78,6 +78,20 @@ class FakeQuant(torch.autograd.Function):
             scale = (kept.sum(dim=(1, 2), keepdim=True)
                      / keep.sum(dim=(1, 2), keepdim=True).clamp(min=1))
             return (torch.sign(g) * keep * scale).view(out, inn)
+        if levels == BINARY01:
+            # One bit, {0, +1} times a power-of-two row scale: the "mask"
+            # codebook. A masked sum is what the bit-plane kernel computes
+            # natively; the {-1, +1} codebook is the same sum with one
+            # correction per row (2 * masked - all), so the cartridge can run
+            # either and the choice per matrix is bookkeeping. Which one
+            # trains better is the question this exists to answer. The scale
+            # is the mean of the positive half, so a row keeps its mass.
+            keep = (w > 0).to(w.dtype)
+            pos = (w * keep).sum(dim=-1, keepdim=True)
+            scale = (pos / keep.sum(dim=-1, keepdim=True).clamp(min=1)).clamp(min=1e-8)
+            if POW2_SCALE["on"]:
+                scale = torch.exp2(torch.round(torch.log2(scale)))
+            return keep * scale
         if levels <= 3:
             # One and 1.58 bits. The scale is the mean magnitude rather than the
             # max, which is what BitNet uses and what makes it work: with two or
@@ -164,6 +178,7 @@ def qs(x, on=True):
 
 SHERRY = 34               # the `levels` value meaning Sherry's 3:4 ternary
 TERNARY_ONE = 35          # ternary, one power-of-two scale for the whole tensor
+BINARY01 = 21             # one bit, {0, +1} times a power-of-two row scale
 POW2_SCALE = {"on": False}   # ternary row scales snapped to powers of two
 
 # Arenas (same paper): during training the quantized weight is augmented with
@@ -178,7 +193,7 @@ ARENAS = {"lam": 0.0}
 def qw(w, levels):
     q = FakeQuant.apply(w, levels)
     lam = ARENAS["lam"]
-    if lam > 0.0 and levels in (2, 3, SHERRY):
+    if lam > 0.0 and levels in (2, 3, SHERRY, BINARY01):
         return q + lam * w
     return q
 
@@ -407,7 +422,8 @@ class MoEMLP(nn.Module):
         # per tensor - whenever the experts are ternary, so the cartridge's
         # exact block sums reproduce the argmax the model trained with. A
         # fp32 router quantized after the fact would route differently.
-        rw = (qw(self.router.weight, TERNARY_ONE) if self.levels <= 3
+        rw = (qw(self.router.weight, TERNARY_ONE)
+              if self.levels <= 3 or self.levels == BINARY01
               else self.router.weight)
         r = torch.softmax(F.linear(h, rw), dim=-1)          # (B,T,E)
         idx = r.argmax(-1)
