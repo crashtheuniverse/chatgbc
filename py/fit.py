@@ -45,18 +45,29 @@ HZ = 2_097_152       # M-cycles per second, CGB double speed
 CYC_PER_MAC, CYC_PER_CLS_MAC, CYC_PER_LAYER = 10.5, 8.3, 203_000
 
 
+# One-bit weights with int8 activations run subset-sum tables (src/binbench.asm
+# on the lab branch, bit-exact, measured): a block of 5 in HRAM costs 6.97
+# cycles a MAC at 64 outputs and 4.82 at 176; a block of 8 in WRAM costs 3.08
+# at 1024 outputs. The activation width does not enter - only the bit-plane
+# kernel (2.23 a MAC per activation bit) cares, and it loses to the tables
+# at every width above two bits.
+BIN_MAC_64, BIN_MAC_176, BIN_MAC_CLS = 6.97, 4.82, 3.08
 MAC_BIT = 2.23       # DIRECT: src/bitbench.asm, one-bit weights, per activation bit plane
 
 
 def price(layers, dim, hid_exp, vocab, levels=3, act_bits=8):
-    """Ternary runs the measured block kernel. Binary runs the bit-plane
-    kernel, whose cost is linear in the activation width - so binary only
-    pays at narrow activations, and this prices that trade honestly."""
-    macs = layers * (3 * dim * dim + 2 * dim * hid_exp + 4 * dim)
+    """Ternary runs the measured block kernel; binary the measured subset-sum
+    tables (block of 5 on the gates, w1 and w2, block of 8 on the classifier),
+    or the bit-plane kernel where that is cheaper (2-bit activations)."""
+    gates = layers * 3 * dim * dim
+    w1 = layers * (dim * hid_exp + 4 * dim)
+    w2 = layers * dim * hid_exp
+    cls = vocab * dim
     if levels == 3:
-        return layers * CYC_PER_LAYER + CYC_PER_MAC * macs + CYC_PER_CLS_MAC * vocab * dim
-    per_mac = MAC_BIT * max(act_bits, 1)
-    return layers * CYC_PER_LAYER + per_mac * (macs + vocab * dim)
+        return layers * CYC_PER_LAYER + CYC_PER_MAC * (gates + w1 + w2) + CYC_PER_CLS_MAC * cls
+    planes = MAC_BIT * max(act_bits, 1)
+    table = (BIN_MAC_64 * (gates + w2) + BIN_MAC_176 * w1 + BIN_MAC_CLS * cls)
+    return layers * CYC_PER_LAYER + min(table, planes * (gates + w1 + w2 + cls))
 
 
 def arenas_lambda(step_i, steps, warm=0.1):
