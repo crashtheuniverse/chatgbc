@@ -31,6 +31,17 @@ character per cycle, once each has been trained and scored.
 
 ## The order of work
 
+**0. The BitNet question, settled by a sweep.** One-bit weights are worth
+cycles only with narrow activations (the bit-plane kernel is 2.23 cycles
+per MAC per activation bit: 17.8 at eight bits, 8.9 at four, 4.5 at two),
+and the earlier no came from the chat's recall grids, not from bits per
+character. Two codebooks - {-1,+1} and {0,+1} times a power-of-two row
+scale, which one masked-sum kernel serves with a per-row correction - at
+8, 4 and 2-bit activations, against the shipped ternary regime, on the same
+shape and corpus. Ranked by bits per character against seconds per
+character. If a binary point sits on the frontier, v0.5's capacity is spent
+there; if not, the answer is on record with numbers.
+
 **1. Make training cheap enough to sweep.** A 20K-step run is 3.5 hours and
 the step is launch-bound (0.37 s alone, 3 s if anything shares the GPU). The
 fused scan is in. Next: capture the whole training step as a CUDA graph, and
