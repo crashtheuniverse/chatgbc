@@ -22,6 +22,7 @@ character per cycle, once each has been trained and scored.
 | shape | M-cycles/tok | s/tok | s/char | params | ROM |
 |---|---|---|---|---|---|
 | v0.4.1: 3L 64d, experts of 176, vocab 1024 | 2.26 | 1.08 | 0.31 | 374K | 256 KB |
+| binary 3L 96d x256, v1024 (measured kernels) | 2.36 | 1.13 | 0.33 | 773K | 256 KB |
 | 4L 64d x176, v1024 | 2.83 | 1.35 | 0.39 | 476K | 256 KB |
 | 3L 64d x256, v1024 | 2.58 | 1.23 | 0.36 | 496K | 512 KB |
 | 3L 96d x256, v1024 | 3.86 | 1.84 | 0.53 | 772K | 512 KB |
@@ -31,16 +32,19 @@ character per cycle, once each has been trained and scored.
 
 ## The order of work
 
-**0. The BitNet question, settled by a sweep.** One-bit weights are worth
-cycles only with narrow activations (the bit-plane kernel is 2.23 cycles
-per MAC per activation bit: 17.8 at eight bits, 8.9 at four, 4.5 at two),
-and the earlier no came from the chat's recall grids, not from bits per
-character. Two codebooks - {-1,+1} and {0,+1} times a power-of-two row
-scale, which one masked-sum kernel serves with a per-row correction - at
-8, 4 and 2-bit activations, against the shipped ternary regime, on the same
-shape and corpus. Ranked by bits per character against seconds per
-character. If a binary point sits on the frontier, v0.5's capacity is spent
-there; if not, the answer is on record with numbers.
+**0. The BitNet question - settled: v0.5 goes binary.** One-bit weights
+with int8 activations run subset-sum tables (every sum a block of inputs
+can produce, built once per block per token, one lookup per block per
+output): measured on the lab bench, a block of 5 in HRAM costs 6.97 cycles
+a MAC at 64 outputs and a block of 8 in WRAM 3.08 on the classifier,
+against ternary's 10.70. Trained at equal seconds per character - binary
+at dim 96 with experts of 256 against the shipped ternary - binary scores
+1.086 bits per character to ternary's 1.115, with 2.1x the parameters at
+one bit each. Activation width stays at 8 bits: narrowing it cost 6% in
+bits and buys nothing under table kernels. The port is a twin that sums
+blocks of {-1,+1} coefficients exactly, an exporter that writes each
+block's table position, and the two kernels from the bench, all under
+golden strict.
 
 **1. Make training cheap enough to sweep.** A 20K-step run is 3.5 hours and
 the step is launch-bound (0.37 s alone, 3 s if anything shares the GPU). The
