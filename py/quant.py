@@ -86,13 +86,26 @@ def exp_for(maxabs):
 
 # --- lookup tables (exported to ROM verbatim) -------------------------------
 
+def rsqrt_table(n=64):
+    """~2^RSQRT_BITS / sqrt(f) over f in [0.25, 1), the norm's table. It also
+    carries sqrt(n) / 2^rootn for a width that is not a power of two: rmsnorm
+    takes sqrt(n) as a shift by rootn = int(log2 n) // 2, exact at 64 and 18%
+    short at 96, and the table is where that factor lives without a multiply
+    on the cartridge. At a power of two the factor is one and the table is
+    the old one byte for byte."""
+    rootn = int(np.log2(n)) // 2
+    k = np.sqrt(n / float(1 << (2 * rootn)))
+    rsqrt = np.zeros(256, dtype=np.uint16)
+    for i in range(1, 256):              # index 0 stays 0, as it always has
+        rsqrt[i] = min(0xFFFF, round(k * (1 << RSQRT_BITS) / np.sqrt((i + 0.5) / 256.0)))
+    return rsqrt
+
+
 def build_tables():
     """The three nonlinearities, as the exact tables both sides will use."""
     # 1/sqrt(f) for f in [0.25, 1), indexed by the top 8 bits of a normalized
     # sum of squares. Only indices 64..255 are ever reached.
-    rsqrt = np.zeros(256, dtype=np.uint16)
-    for i in range(1, 256):
-        rsqrt[i] = min(0xFFFF, round((1 << RSQRT_BITS) / np.sqrt((i + 0.5) / 256.0)))
+    rsqrt = rsqrt_table(64)
 
     # sigmoid over Q4.4 input, i.e. x in [-8, 8), as Q0.8.
     sigmoid = np.zeros(256, dtype=np.uint8)

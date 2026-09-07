@@ -238,14 +238,21 @@ def quantize5(m, sites):
         q.wexp["tok_emb"] = e
         q.weights["tok_emb"] = Q.quantize(m.tok_emb, e)
         q.rowexp["tok_emb"] = np.zeros(m.cfg.vocab, dtype=np.int8)
+    # RMSNorm on the cartridge takes sqrt(dim) as a shift by int(log2 dim)//2:
+    # exact at 64, 18% short at 96. The missing factor sqrt(dim / 4^rootn)
+    # lives in the gains, which the norm multiplies by anyway - the table's
+    # entries would overflow the ROM's signed 16-bit multiplier, the gains
+    # cannot. One at a power of two, so nothing moves at 64.
+    rootn = int(np.log2(m.cfg.dim)) // 2
+    k_norm = float(np.sqrt(m.cfg.dim / float(1 << (2 * rootn))))
     for name in ("rms_att", "rms_ffn"):
-        arr = np.stack(getattr(m, name))
+        arr = np.stack(getattr(m, name)) * k_norm
         eN = Q.exp_for(float(np.abs(arr).max()))
         q.wexp[name] = eN
         q.weights[name] = Q.quantize(arr, eN)
-    ef = Q.exp_for(float(np.abs(m.rms_final).max()))
+    ef = Q.exp_for(float(np.abs(m.rms_final * k_norm).max()))
     q.wexp["rms_final"] = ef
-    q.weights["rms_final"] = Q.quantize(m.rms_final, ef)
+    q.weights["rms_final"] = Q.quantize(m.rms_final * k_norm, ef)
 
     q.ternary = {}
     q.binary = {}
