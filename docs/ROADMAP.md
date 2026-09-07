@@ -22,7 +22,8 @@ character per cycle, once each has been trained and scored.
 | shape | M-cycles/tok | s/tok | s/char | params | ROM |
 |---|---|---|---|---|---|
 | v0.4.1: 3L 64d, experts of 176, vocab 1024 | 2.26 | 1.08 | 0.31 | 374K | 256 KB |
-| binary 3L 96d x256, v1024 (measured kernels) | 2.36 | 1.13 | 0.33 | 773K | 256 KB |
+| one-bit 3L 96d x256, v1024 - measured, twin 1.138 bits/char | 3.12 | 1.49 | 0.43 | 773K | 512 KB |
+| **one-bit 4L 96d x256, v1024 - measured, twin 1.073 bits/char** | 3.92 | 1.87 | 0.54 | 997K | 512 KB |
 | 4L 64d x176, v1024 | 2.83 | 1.35 | 0.39 | 476K | 256 KB |
 | 3L 64d x256, v1024 | 2.58 | 1.23 | 0.36 | 496K | 512 KB |
 | 3L 96d x256, v1024 | 3.86 | 1.84 | 0.53 | 772K | 512 KB |
@@ -50,8 +51,9 @@ twin, not the trainer - the one-bit dim-96 model scores 1.138 against
 trainer's per-token activation scaling is a normalization the cartridge's
 static exponents cannot follow, and the one-bit model leans on it. So the
 next lever is a per-token activation exponent on the cartridge (one max
-scan a vector, the requant shift adjusted by the difference); until it
-closes that gap, v0.5 ships ternary rows, and the one-bit kernels wait.
+scan a vector, the requant shift adjusted by the difference); the four-layer one-bit model already ships at 1.073 bits/char on the twin at
+0.54 s/char - the first cartridge better than v0.4.1 in bits by a margin
+the twin believes - and that gap is what stands between it and 1.046.
 
 **1. Make training cheap enough to sweep.** A 20K-step run is 3.5 hours and
 the step is launch-bound (0.37 s alone, 3 s if anything shares the GPU). The
