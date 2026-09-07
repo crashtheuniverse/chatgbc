@@ -131,8 +131,10 @@ def binary_weight_blob(name, b, block=twin5.BINARY_BLOCK, hram=True):
             for i in range(block):
                 if blocks[o, k, i]:
                     pattern |= 1 << i
-            pos = gray_position(pattern)
-            data.append(pos * 2 + HLUT_BASE if hram else pos)
+            # The HRAM kernel walks its table in Gray order; the WRAM planes
+            # are built by doubling in natural order, so their code is the
+            # pattern itself.
+            data.append(gray_position(pattern) * 2 + HLUT_BASE if hram else pattern)
     assert len(data) <= 0x4000, f"{name}: {len(data)} bytes exceeds a bank"
     return blob(name, bytes(data), rom0=False)
 
@@ -239,9 +241,24 @@ def main():
 
     # --- classifier ---
     assert int(np.abs(q.rowexp["tok_emb"]).max()) == 0
-    assert not getattr(q, "binary_cls", False), "one-bit classifier: the block-8 kernel is not ported yet"
     const("CLS_TERNARY", int(q.ternary_cls))
-    if q.ternary_cls:
+    const("CLS_BINARY", int(getattr(q, "binary_cls", False)))
+    if getattr(q, "binary_cls", False):
+        # Blocks of eight against 256-entry planes in the sum bank: a part is
+        # 512 outputs (what the sums' stretch and the code arithmetic assume),
+        # a block's codes are 512 bytes, the whole vocabulary's planes need
+        # 512 bytes above the sums - so 2048 pieces would not fit the bank.
+        per = 512
+        assert c.vocab % per == 0 and c.dim % 8 == 0 and c.vocab * 2 + 512 <= 4096
+        nparts = c.vocab // per
+        b_cls = q.weights["tok_emb"].astype(np.int8)
+        for i in range(nparts):
+            binary_weight_blob(f"cls_w_p{i}", b_cls[i * per:(i + 1) * per],
+                               block=twin5.BINARY_CLS_BLOCK, hram=False)
+        const("CLS_BLOCKS8", c.dim // twin5.BINARY_CLS_BLOCK)
+        blob("lut_cls_hi", bytes(1), rom0=False)
+        blob("lut_cls_lo", bytes(1), rom0=False)
+    elif q.ternary_cls:
         # The block kernel over the outputs, in parts of 512: 22 blocks x 512
         # codes = 11,264 bytes a part, one bank, and 128 groups of four -
         # the byte wMvGroups counts in. A 1024-piece vocabulary is two parts

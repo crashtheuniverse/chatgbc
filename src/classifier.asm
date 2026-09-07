@@ -39,11 +39,224 @@ wClsIdx:   dw                       ; token index of the output being summed
 SECTION "Cls HRAM", HRAM
 hClsOut:   db                       ; outputs left in the part
 hClsPart:  db                       ; the part being accumulated (ternary)
+hClsSrc:   dw                       ; one-bit: the block's first activation
+hClsBlk:   db                       ; one-bit: the block being built
 hClsGrp:   db                       ; 8-input groups left in the output
 
 SECTION "Cls code", ROM0
 
-IF CLS_TERNARY
+IF CLS_TERNARY || CLS_BINARY
+
+IF CLS_BINARY
+
+; --- the one-bit classifier -------------------------------------------------
+;
+; Blocks of eight inputs against a 256-entry table of exact +-1 sums, held as
+; two page-aligned planes in the sum bank so the weight byte IS the index:
+; 3.08 cycles a MAC at 1024 outputs on the lab bench. The table is built by
+; doubling in natural order - entry 0 is -(x0+..+x7), and every entry with
+; bit k set is the entry without it plus 2x_k - so the exporter's code is
+; the row's sign pattern itself, bit i set for +1 on input i. Blocks are
+; the outer loop: a table is built once and serves every part.
+DEF wClsPlaneLo EQU wClsTbl + 2048          ; $D800, page-aligned
+DEF wClsPlaneHi EQU wClsTbl + 2048 + 256    ; $D900
+
+; de = 2 * activation \1 of the block at hClsSrc, sign-extended.
+MACRO CLS8_LOADK
+    ldh a, [hClsSrc + 0]
+    ld l, a
+    ldh a, [hClsSrc + 1]
+    ld h, a
+    IF \1 > 0
+        ld a, l
+        add a, \1
+        ld l, a
+        ld a, h
+        adc a, 0
+        ld h, a
+    ENDC
+    ld a, [hl]
+    ld e, a
+    add a, a
+    sbc a, a
+    ld d, a
+    sla e
+    rl d
+ENDM
+
+; Entries 2^k .. 2^(k+1)-1 = entries 0 .. 2^k-1 plus de. b:c reads, h:l
+; writes, both on the low plane; the high plane is one page up.
+MACRO CLS8_DOUBLE
+    ld c, 0
+    ld b, HIGH(wClsPlaneLo)
+    ld h, b
+    ld l, 1 << \1
+.d\@
+    ld a, [bc]
+    add a, e
+    ld [hl], a
+    inc b
+    inc h
+    ld a, [bc]
+    adc a, d
+    ld [hl], a
+    dec b
+    dec h
+    inc c
+    inc l
+    ld a, c
+    cp 1 << \1
+    jr nz, .d\@
+ENDM
+
+; Builds the planes for the eight activations at hl.
+Cls8_Build:
+    ld a, l
+    ldh [hClsSrc + 0], a
+    ld a, h
+    ldh [hClsSrc + 1], a
+    ld de, 0                        ; entry 0: minus the sum of the eight
+    ld b, 8
+.sum
+    ld a, [hl+]
+    ld c, a
+    add a, a
+    sbc a, a                        ; a = sign extension
+    push hl
+    ld h, a
+    ld l, c                         ; hl = sign-extended activation
+    add hl, de
+    ld d, h
+    ld e, l
+    pop hl
+    dec b
+    jr nz, .sum
+    xor a
+    sub e
+    ld [wClsPlaneLo], a
+    ld a, 0
+    sbc a, d
+    ld [wClsPlaneHi], a
+    CLS8_LOADK 0
+    CLS8_DOUBLE 0
+    CLS8_LOADK 1
+    CLS8_DOUBLE 1
+    CLS8_LOADK 2
+    CLS8_DOUBLE 2
+    CLS8_LOADK 3
+    CLS8_DOUBLE 3
+    CLS8_LOADK 4
+    CLS8_DOUBLE 4
+    CLS8_LOADK 5
+    CLS8_DOUBLE 5
+    CLS8_LOADK 6
+    CLS8_DOUBLE 6
+    CLS8_LOADK 7
+    CLS8_DOUBLE 7
+    ret
+
+; One block's planes against CLS_OUTPUTS_PER_PART outputs: de = the weight
+; stream, hl = the sums. b is the plane page, c the code; sixteen unrolled
+; then a count, which costs a couple of percent against a full unroll and
+; a kilobyte of ROM0 less.
+Cls8_Rows:
+    ld a, CLS_OUTPUTS_PER_PART / 16
+    ldh [hClsOut], a
+.chunk
+    ld b, HIGH(wClsPlaneLo)
+REPT 16
+    ld a, [de]                      ; 2  the sign pattern
+    inc de                          ; 2
+    ld c, a                         ; 1
+    ld a, [bc]                      ; 2  low plane
+    add a, [hl]                     ; 2
+    ld [hl+], a                     ; 2
+    inc b                           ; 1
+    ld a, [bc]                      ; 2  high plane
+    adc a, [hl]                     ; 2
+    ld [hl+], a                     ; 2
+    dec b                           ; 1
+ENDR
+    ldh a, [hClsOut]
+    dec a
+    ldh [hClsOut], a
+    jp nz, .chunk                   ; the unrolled body is past jr's reach
+    ret
+
+Cls_BuildTables::
+    ld a, CLS_TBL_BANK
+    ldh [rSVBK], a
+    ld hl, wClsTbl
+    ld bc, VOCAB * 2
+.zero
+    xor a
+    ld [hl+], a
+    dec bc
+    ld a, b
+    or c
+    jr nz, .zero
+
+    xor a
+    ldh [hClsBlk], a
+.block
+    ldh a, [hClsBlk]                ; hl = wXb + block * 8
+    ld l, a
+    ld h, 0
+    add hl, hl
+    add hl, hl
+    add hl, hl
+    ld de, wXb
+    add hl, de
+    call Cls8_Build
+    xor a
+    ldh [hClsPart], a
+.part
+    ldh a, [hClsPart]
+    ld c, a
+    ld b, 0
+    ld hl, cls_banks
+    add hl, bc
+    ld a, [hl]
+    ld [rROMB0], a
+    ld hl, cls_addrs
+    add hl, bc
+    add hl, bc                      ; word entries
+    ld a, [hl+]
+    ld e, a
+    ld a, [hl]
+    ld d, a                         ; de = the part's codes
+    ldh a, [hClsBlk]                ; + block * CLS_OUTPUTS_PER_PART bytes
+    add a, a                        ; (512 a block: two pages)
+    add a, d
+    ld d, a
+    ld hl, wClsTbl                  ; + part * CLS_OUTPUTS_PER_PART * 2
+    ldh a, [hClsPart]
+    or a
+    jr z, .go
+    ld a, HIGH(CLS_OUTPUTS_PER_PART * 2)
+.advance
+    add a, h
+    ld h, a
+    ldh a, [hClsPart]
+    dec a
+    jr z, .go
+    ld a, HIGH(CLS_OUTPUTS_PER_PART * 2)
+    jr .advance
+.go
+    call Cls8_Rows
+    ldh a, [hClsPart]
+    inc a
+    ldh [hClsPart], a
+    cp CLS_PARTS
+    jr nz, .part
+    ldh a, [hClsBlk]
+    inc a
+    ldh [hClsBlk], a
+    cp CLS_BLOCKS8
+    jr nz, .block
+    ret
+
+ELSE
 
 ; --- the ternary classifier ------------------------------------------------
 ;
@@ -113,6 +326,8 @@ Cls_BuildTables::
     cp CLS_PARTS
     jr nz, .part
     ret
+
+ENDC                                ; CLS_BINARY / ternary build
 
 Cls_Argmax::
     ld a, CLS_TBL_BANK
