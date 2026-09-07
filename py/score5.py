@@ -45,11 +45,13 @@ def main():
     ap.add_argument("--stories", type=int, default=200)
     ap.add_argument("--max-tokens", type=int, default=256)
     ap.add_argument("--valid", type=Path, default=VALID)
+    ap.add_argument("--headroom", type=float, default=0.0, help="extra bits of headroom in every site's exponent (calibrate5 extra=)")
     args = ap.parse_args()
 
     m = Model5(export5.CKPT)
     tok = Tokenizer()
-    q = twin5.quantize5(m, twin5.calibrate5(m, tok, export5.cal_prompts()))
+    q = twin5.quantize5(m, twin5.calibrate5(m, tok, export5.cal_prompts(), extra=args.headroom))
+    print(f"sites: x {q.site('x')} xb_final {q.site('xb_final')} headroom {args.headroom}", flush=True)
     scale = 2.0 ** (q.wexp["tok_emb"] + q.site("xb_final"))
 
     text = args.valid.read_text(encoding="utf-8")

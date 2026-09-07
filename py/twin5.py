@@ -60,6 +60,15 @@ MATS = ("wz", "wh", "wo", "w1", "w2")
 # whose rows are {-a, 0, +a} with a a power of two - what the trainer's
 # ternary quantizer with POW2_SCALE emits - is detected per tensor and
 # takes this path.
+# The residual stream lives on the trainer's fixed grid: StreamQuant clamps
+# it at +-16 in 127 steps of 0.126. The cartridge's int8 at exponent -3 is
+# that grid (steps of 0.125, saturation at 15.875), so the stream's exponent
+# is pinned rather than calibrated - calibrating it from the float model's
+# clamp-free reach gave -1 (steps of 0.5, four times coarser than training)
+# on every model, and cost the one-bit dim-96 model 12% between trainer and
+# twin. The float reference and the calibration walk clamp the same way.
+STREAM_CLIP = 16.0
+STREAM_EXP = -3
 TERNARY_BLOCK = 3
 TERNARY_ACC_SHIFT = 0
 W2_SPLIT_BLOCKS = 59                       # inputs 0..176 | 177..351
@@ -172,7 +181,7 @@ def calibrate5(m, tok, prompts, extra=0.0):
                                  np.abs(ht).max())
                 ao = m.wo[l] @ st.h[l]
                 mx["att_out"][l] = max(mx["att_out"][l], np.abs(ao).max())
-                x = x + ao
+                x = np.clip(x + ao, -STREAM_CLIP, STREAM_CLIP)
                 mx["x"] = max(mx["x"], np.abs(x).max())
                 xf = rms(x, m.rms_ffn[l])
                 mx["xb_ffn"][l] = max(mx["xb_ffn"][l], np.abs(xf).max())
@@ -185,7 +194,7 @@ def calibrate5(m, tok, prompts, extra=0.0):
                 mx["h1"][l] = max(mx["h1"][l], np.abs(a).max())
                 u = np.maximum(a, 0.0) ** 2
                 mx["hb"][l] = max(mx["hb"][l], np.abs(u).max())
-                x = x + w2 @ u
+                x = np.clip(x + w2 @ u, -STREAM_CLIP, STREAM_CLIP)
                 mx["x"] = max(mx["x"], np.abs(x).max())
             xb = rms(x, m.rms_final)
             mx["xb_final"] = max(mx["xb_final"], np.abs(xb).max())
@@ -197,6 +206,7 @@ def calibrate5(m, tok, prompts, extra=0.0):
             sites[k] = Q.exp_for(float(v) * (1 + extra))
         else:
             sites[k] = [Q.exp_for(float(x) * (1 + extra)) for x in v]
+    sites["x"] = STREAM_EXP                 # the trainer's grid, not the float reach
     return sites
 
 

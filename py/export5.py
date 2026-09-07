@@ -404,10 +404,12 @@ def main():
         sh = base - q.rowexp[name][l]
         # Requant_All16 rounds by shifting s-1 then adding one then shifting
         # once more. For s >= 2 that cannot overflow; for s == 1 the kernel
-        # special-cases the one accumulator (32767) whose +1 would wrap. A
-        # shift below 1 - a left shift - would need the old 32-bit path, and
-        # is a calibration problem to fix here, not silently in the kernel.
-        assert int(sh.min()) >= 1, f"{name} layer {l}: shift {int(sh.min())} < 1"
+        # special-cases the one accumulator (32767) whose +1 would wrap.
+        # s == 0 stores the sum as it is, and s < 0 doubles it per step with
+        # saturation - w2 rows ask for both now that the stream sits on the
+        # trainer's grid. Deeper left shifts than a few would mean a
+        # calibration mistake, so they still fail here.
+        assert int(sh.min()) >= -4, f"{name} layer {l}: shift {int(sh.min())} < -4"
         return sh
 
     wblob = binary_weight_blob if binary else block_weight_blob if ternary else weight_blob

@@ -358,6 +358,30 @@ Requant_All16::
     ld a, [de]
     ld h, a
     inc de
+    ; The stream sits on the trainer's grid now (exponent -3), so a row of
+    ; w2 can ask for no shift at all, or for one to the LEFT: its sum is
+    ; already on the grid, or below it. Neither has a half to round.
+    ld a, b
+    or a
+    jr z, .sat8                     ; s == 0: the sum is the answer
+    bit 7, a
+    jr z, .right
+.left                               ; s < 0: times 2 per step, saturating
+    ld a, h                         ; |hl| >= 16384 would leave int16 on
+    add a, 64                       ; doubling; its int8 answer is the sign
+    cp 128
+    jr nc, .satSign
+    add hl, hl
+    inc b
+    jr nz, .left
+    jr .sat8
+.satSign
+    bit 7, h
+    ld a, 127
+    jr z, .store
+    ld a, -127
+    jr .store
+.right
     dec b                           ; s - 1 arithmetic shifts
     jr nz, .shift
     ; s == 1: nothing to pre-shift, and the +1 below would wrap the one
@@ -379,6 +403,7 @@ Requant_All16::
     inc hl                          ; + 1, then one more: round-half-up
     sra h
     rr l
+.sat8
     ld a, l                         ; saturate to [-127, 127]: h must be the
     add a, a                        ; sign extension of l
     sbc a, a

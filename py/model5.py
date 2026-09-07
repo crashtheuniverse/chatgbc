@@ -92,6 +92,9 @@ class State5:
         self.h = np.zeros((cfg.layers, cfg.dim))
 
 
+STREAM_CLIP = 16.0      # the trainer's StreamQuant window; the model never saw past it
+
+
 def forward5(m, st, token):
     """One step. No position argument: the state is the only memory."""
     x = m.tok_emb[token].copy()
@@ -100,14 +103,14 @@ def forward5(m, st, token):
         z = 1.0 / (1.0 + np.exp(-(m.wz[l] @ xn)))
         ht = m.wh[l] @ xn
         st.h[l] = (1.0 - z) * st.h[l] + z * ht
-        x = x + m.wo[l] @ st.h[l]
+        x = np.clip(x + m.wo[l] @ st.h[l], -STREAM_CLIP, STREAM_CLIP)   # StreamQuant's clamp
         xf = rms(x, m.rms_ffn[l])
         if m.experts:
             # hard top-1: the router's argmax picks the one expert that runs
             e = int(np.argmax(m.router[l] @ xf))
-            x = x + m.w2[l][e] @ np.maximum(m.w1[l][e] @ xf, 0.0) ** 2
+            x = np.clip(x + m.w2[l][e] @ np.maximum(m.w1[l][e] @ xf, 0.0) ** 2, -STREAM_CLIP, STREAM_CLIP)
         else:
-            x = x + m.w2[l] @ np.maximum(m.w1[l] @ xf, 0.0) ** 2
+            x = np.clip(x + m.w2[l] @ np.maximum(m.w1[l] @ xf, 0.0) ** 2, -STREAM_CLIP, STREAM_CLIP)
     return m.tok_emb @ rms(x, m.rms_final)
 
 
