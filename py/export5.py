@@ -106,6 +106,37 @@ def block_weight_blob(name, t):
     return blob(name, bytes(data), rom0=False)
 
 
+def gray_position(pattern):
+    """The table position p whose gray code p ^ (p >> 1) is `pattern`."""
+    p = 0
+    while pattern:
+        p ^= pattern
+        pattern >>= 1
+    return p
+
+
+def binary_weight_blob(name, b, block=twin5.BINARY_BLOCK, hram=True):
+    """One-bit (out, in) in {-1, +1} -> input-major block codes: for each
+    block of `block` inputs, one byte per output - the Gray position of the
+    row's sign pattern (bit i set = +1 on input i), as an HRAM offset for the
+    16-entry kernel or the bare position for the 256-entry one. No padding:
+    every width is a multiple of the block."""
+    out, n_in = b.shape
+    assert n_in % block == 0, f"{name}: {n_in} inputs is not a multiple of {block}"
+    blocks = (b > 0).reshape(out, n_in // block, block)
+    data = bytearray()
+    for k in range(blocks.shape[1]):
+        for o in range(out):
+            pattern = 0
+            for i in range(block):
+                if blocks[o, k, i]:
+                    pattern |= 1 << i
+            pos = gray_position(pattern)
+            data.append(pos * 2 + HLUT_BASE if hram else pos)
+    assert len(data) <= 0x4000, f"{name}: {len(data)} bytes exceeds a bank"
+    return blob(name, bytes(data), rom0=False)
+
+
 def sbytes(values):
     return bytes(int(v) & 0xFF for v in values)
 
@@ -208,6 +239,7 @@ def main():
 
     # --- classifier ---
     assert int(np.abs(q.rowexp["tok_emb"]).max()) == 0
+    assert not getattr(q, "binary_cls", False), "one-bit classifier: the block-8 kernel is not ported yet"
     const("CLS_TERNARY", int(q.ternary_cls))
     if q.ternary_cls:
         # The block kernel over the outputs, in parts of 512: 22 blocks x 512
@@ -279,13 +311,27 @@ def main():
     # checkpoint (every matrix in {-a, 0, +a}, a a power of two) takes the
     # block kernel; anything else the 4-bit product tables.
     ternary = all(q.ternary[n] for n in MATS)
+    binary = all(q.binary[n] for n in MATS)
     assert ternary or not any(q.ternary[n] for n in MATS), "mixed kernels"
+    assert binary or not any(q.binary[n] for n in MATS), "mixed kernels"
     const("TERNARY", int(ternary))
-    const("BLOCKS_DIM", -(-c.dim // twin5.TERNARY_BLOCK))
-    const("BLOCKS_HIDDEN", -(-c.hidden // twin5.TERNARY_BLOCK))
-    const("W2_BLOCKS_A", twin5.W2_SPLIT_BLOCKS)
-    const("W2_BLOCKS_B", -(-c.hidden // twin5.TERNARY_BLOCK) - twin5.W2_SPLIT_BLOCKS)
-    const("W2_SPLIT_IN", twin5.W2_SPLIT_BLOCKS * twin5.TERNARY_BLOCK)
+    const("BINARY", int(binary))
+    # The block kernel in force: four inputs a block for one-bit rows (src/
+    # matvec4b.asm), three for ternary (src/matvec3.asm). Both count wMvIn in
+    # blocks and share the inner body.
+    blk = twin5.BINARY_BLOCK if binary else twin5.TERNARY_BLOCK
+    w2_split = twin5.W2_SPLIT_BLOCKS_BIN if binary else twin5.W2_SPLIT_BLOCKS
+    if binary:
+        assert c.dim % blk == 0 and c.hidden % blk == 0, "one-bit rows cannot pad"
+    const("BLOCKS_DIM", -(-c.dim // blk))
+    # The router and a ternary classifier keep the ternary kernel whatever
+    # the rows run: their codes are blocks of three, so their counts are.
+    const("ROUTER_BLOCKS", -(-c.dim // twin5.TERNARY_BLOCK))
+    const("CLS_BLOCKS", -(-c.dim // twin5.TERNARY_BLOCK))
+    const("BLOCKS_HIDDEN", -(-c.hidden // blk))
+    const("W2_BLOCKS_A", w2_split)
+    const("W2_BLOCKS_B", -(-c.hidden // blk) - w2_split)
+    const("W2_SPLIT_IN", w2_split * blk)
     # Experts: `hidden` in the header is per expert. An expert's w1 (hidden
     # outputs) and w2 (hidden inputs, at most 176 * 127 in int16) each fit a
     # bank whole, so the MoE FFN is one router matvec, one select, two
@@ -294,12 +340,12 @@ def main():
     experts = getattr(m, "experts", 0)
     const("EXPERTS", experts)
     if experts:
-        assert ternary, "experts are only wired for the block kernel"
+        assert ternary or binary, "experts are only wired for the block kernels"
         assert experts == 4, "forward.asm forms layer * 4 + expert with two adds"
         assert c.hidden * 127 <= 32767, "an expert's w2 must sum inside int16"
         const("HID_EXP", c.hidden)
-        const("BLOCKS_HID_EXP", -(-c.hidden // twin5.TERNARY_BLOCK))
-    acc_shift = twin5.TERNARY_ACC_SHIFT if ternary else Q.ACC_SHIFT
+        const("BLOCKS_HID_EXP", -(-c.hidden // blk))
+    acc_shift = twin5.TERNARY_ACC_SHIFT if (ternary or binary) else Q.ACC_SHIFT
 
     def shift_bytes(name, l):
         to_exp = S("x") if out_site[name] == "x" else S(out_site[name], l)
@@ -313,8 +359,8 @@ def main():
         assert int(sh.min()) >= 1, f"{name} layer {l}: shift {int(sh.min())} < 1"
         return sh
 
-    wblob = block_weight_blob if ternary else weight_blob
-    if not ternary:
+    wblob = binary_weight_blob if binary else block_weight_blob if ternary else weight_blob
+    if not (ternary or binary):
         for name in MATS:
             blob(f"lut_{name}", product_lut(q.codebooks[name]), rom0=False)
     for name in ("wz", "wh", "wo"):
@@ -342,11 +388,11 @@ def main():
         blob(f"w1a_sh_l{l}", sbytes(sh[:half]))
         blob(f"w1b_sh_l{l}", sbytes(sh[half:]))
         idx = q.indices["w2"][l]                  # (dim out, hidden in)
-        if ternary:
-            # Two input halves of 59 blocks, so every accumulator is an exact
-            # int16 sum - no halving, no rounding bias. Each half is its own
-            # matvec, requantized and added into the stream in turn.
-            split = twin5.W2_SPLIT_BLOCKS * twin5.TERNARY_BLOCK
+        if ternary or binary:
+            # Two input halves, so every accumulator is an exact int16 sum -
+            # no halving, no rounding bias. Each half is its own matvec,
+            # requantized and added into the stream in turn.
+            split = w2_split * blk
             wblob(f"w2a_l{l}", idx[:, :split])
             wblob(f"w2b_l{l}", idx[:, split:])
         else:

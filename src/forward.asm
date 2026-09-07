@@ -126,7 +126,7 @@ ForwardLayer::
     CENSUS_START
     ld hl, wXb
     call SetXPtr
-IF TERNARY
+IF TERNARY || BINARY
     ld a, BLOCKS_DIM                ; the block kernel counts inputs in threes
     ld [wMvIn], a
 ELSE
@@ -142,8 +142,8 @@ ENDC
     call SetMatrix
     ld hl, DIM
     call Matvec_SetOut
-IF TERNARY
-    call Matvec3_Run
+IF TERNARY || BINARY
+    BLOCK_RUN
 ELSE
     call Matvec_Run
 ENDC
@@ -199,7 +199,7 @@ ENDC
     CENSUS_START
     ld hl, wXb                      ; the candidate state
     call SetXPtr
-IF TERNARY
+IF TERNARY || BINARY
     ld a, BLOCKS_DIM
     ld [wMvIn], a
 ELSE
@@ -215,8 +215,8 @@ ENDC
     call SetMatrix
     ld hl, DIM
     call Matvec_SetOut
-IF TERNARY
-    call Matvec3_Run
+IF TERNARY || BINARY
+    BLOCK_RUN
 ELSE
     call Matvec_Run
 ENDC
@@ -274,7 +274,7 @@ ENDC
     ld a, [wGruH + 1]
     ld h, a
     call SetXPtr
-IF TERNARY
+IF TERNARY || BINARY
     ld a, BLOCKS_DIM
     ld [wMvIn], a
 ELSE
@@ -290,8 +290,8 @@ ENDC
     call SetMatrix
     ld hl, DIM
     call Matvec_SetOut
-IF TERNARY
-    call Matvec3_Run
+IF TERNARY || BINARY
+    BLOCK_RUN
 ELSE
     call Matvec_Run
 ENDC
@@ -372,15 +372,15 @@ IF EXPERTS
     CENSUS_START
     ld hl, wXb
     call SetXPtr
-    ld a, BLOCKS_DIM
-    ld [wMvIn], a
+    ld a, ROUTER_BLOCKS             ; ternary codes, blocks of three, whatever
+    ld [wMvIn], a                   ; kernel the rows run
     ld hl, router_banks
     ld de, router_addrs
     ld a, [wLayer]
     call SetMatrix
     ld hl, EXPERTS
     call Matvec_SetOut
-    call Matvec3_Run
+    call Matvec3_Run                ; the router stays on the ternary kernel
     ld a, [wLayer]                  ; layer-0 snapshots: the FFN input and
     or a                            ; the router's sums, for the twin to check
     jr nz, :+
@@ -442,7 +442,7 @@ IF EXPERTS
     call SetMatrix
     ld hl, HID_EXP
     call Matvec_SetOut
-    call Matvec3_Run
+    BLOCK_RUN
     CENSUS_END 11
     CENSUS_START
     ld hl, w1_shifts
@@ -492,7 +492,7 @@ IF EXPERTS
     call SetMatrix
     ld hl, DIM
     call Matvec_SetOut
-    call Matvec3_Run
+    BLOCK_RUN
     CENSUS_END 14
     CENSUS_START
     ld hl, w2_shifts
@@ -534,7 +534,7 @@ ELSE
     ; counters allow, and requants its own rows with its own shift table.
     ld hl, wXb
     call SetXPtr
-IF TERNARY
+IF TERNARY || BINARY
     ld a, BLOCKS_DIM
     ld [wMvIn], a
 ELSE
@@ -550,8 +550,8 @@ ENDC
     call SetMatrix
     ld hl, FFN_SPLIT
     call Matvec_SetOut
-IF TERNARY
-    call Matvec3_Run
+IF TERNARY || BINARY
+    BLOCK_RUN
 ELSE
     call Matvec_Run
 ENDC
@@ -572,8 +572,8 @@ ENDC
     call SetMatrix
     ld hl, HIDDEN - FFN_SPLIT
     call Matvec_SetOut
-IF TERNARY
-    call Matvec3_Run
+IF TERNARY || BINARY
+    BLOCK_RUN
 ELSE
     call Matvec_Run
 ENDC
@@ -622,7 +622,7 @@ ENDC
     CENSUS_START
     ld hl, wHb
     call SetXPtr
-IF TERNARY
+IF TERNARY || BINARY
     ; Two input halves, each an exact int16 sum, each requantized and added
     ; into the stream in turn - the twin's order. The first half here; the
     ; second follows its own requant and add below.
@@ -634,7 +634,7 @@ IF TERNARY
     call SetMatrix
     ld hl, DIM
     call Matvec_SetOut
-    call Matvec3_Run
+    BLOCK_RUN
 ELSE
     ld a, FFN_SPLIT
     ld [wMvIn], a
@@ -678,7 +678,7 @@ ENDC
     call CopyBytes
 :
     CENSUS_END 17
-IF TERNARY
+IF TERNARY || BINARY
     CENSUS_START
     ld hl, wXb
     ld de, wX
@@ -697,7 +697,7 @@ IF TERNARY
     call SetMatrix
     ld hl, DIM
     call Matvec_SetOut
-    call Matvec3_Run
+    BLOCK_RUN
     CENSUS_END 14
     CENSUS_START
     ld hl, w2_shifts

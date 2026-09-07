@@ -12,7 +12,7 @@ INCLUDE "model.inc"
 SECTION "Selftest code", ROM0
 
 Selftest_Setup::
-IF !TERNARY
+IF !(TERNARY || BINARY)
     ld a, BANK(lut_w1)
     ld [wMvLutBank], a
     ld a, LOW(lut_w1)
@@ -45,7 +45,7 @@ ELSE
     ld a, HIGH(w1a_l0)
     ld [wMvW + 1], a
 
-IF TERNARY
+IF TERNARY || BINARY
     ld a, BLOCKS_DIM
 ELSE
     ld a, DIM
@@ -63,15 +63,19 @@ ENDC
 
 ; Both halves, exactly as the forward pass runs them, so the split path is the
 ; covered path and test_h1 stays the full row.
-IF TERNARY
+IF TERNARY || BINARY
+IF BINARY
+DEF SELFTEST_RUN EQUS "Matvec4b_Run"
+ELSE
 DEF SELFTEST_RUN EQUS "Matvec3_Run"
+ENDC
 ELSE
 DEF SELFTEST_RUN EQUS "Matvec_Run"
 ENDC
 
 Selftest_Run::
 IF EXPERTS
-    call Matvec3_Run
+    BLOCK_RUN
     ld de, w1_sh_l0_e0
     ld bc, wH1
     jp Requant_All16

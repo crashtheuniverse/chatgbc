@@ -98,3 +98,14 @@ DEF STATUS_DOUBLE EQU 1 << 1
 DEF READY_MAGIC EQU $5A
 
 ENDC
+
+; The block kernel in force, chosen by the exporter: one-bit rows run
+; Matvec4b (blocks of four), ternary rows Matvec3 (blocks of three). Both
+; count wMvIn in blocks; the constants BLOCKS_DIM etc. already match.
+MACRO BLOCK_RUN
+    IF BINARY
+        call Matvec4b_Run
+    ELSE
+        call Matvec3_Run
+    ENDC
+ENDM

@@ -71,9 +71,9 @@ Cls_BuildTables::
     ld [wMvXPtr + 0], a
     ld a, HIGH(wXb)
     ld [wMvXPtr + 1], a
-    ld a, BLOCKS_DIM
-    ld [wMvIn], a
-    xor a
+    ld a, CLS_BLOCKS                ; the classifier's OWN block count: its
+    ld [wMvIn], a                   ; codes are ternary threes even when the
+    xor a                           ; model's rows are one-bit fours
     ldh [hClsPart], a
     ; One part of CLS_OUTPUTS_PER_PART outputs at a time - a part is what
     ; fits a bank, and what wMvGroups can count - each accumulating into its

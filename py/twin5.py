@@ -64,6 +64,33 @@ TERNARY_BLOCK = 3
 TERNARY_ACC_SHIFT = 0
 W2_SPLIT_BLOCKS = 59                       # inputs 0..176 | 177..351
 
+# The one-bit block kernel: blocks of FOUR inputs, coefficients in {-1, +1},
+# every block sum exact - the 16-entry table src/matvec4b.asm builds. Four
+# tiles every width the model uses, so there is no padding (a one-bit row has
+# no zero to pad with). A checkpoint whose rows are {-a, +a} with a a power of
+# two - the trainer's binary quantizer with POW2_SCALE - takes this path; it
+# is checked before the ternary test, which would also accept such rows.
+BINARY_BLOCK = 4
+BINARY_CLS_BLOCK = 8                       # the classifier's WRAM-table kernel
+W2_SPLIT_BLOCKS_BIN = 44                   # inputs 0..175 | 176..351
+
+
+def binary_rows(arr):
+    """(b, rowexp) if every row of every layer is exactly {-a, +a} with a a
+    power of two and no zero anywhere, else None. b is int8 in {-1, +1}."""
+    b = np.where(arr > 0, 1, -1).astype(np.int8)
+    rowexp = np.zeros(arr.shape[:-1], dtype=np.int32)
+    for idx in np.ndindex(arr.shape[:-1]):
+        row = arr[idx]
+        mags = np.unique(np.abs(row))
+        if len(mags) != 1 or mags[0] <= 0:
+            return None
+        e = np.log2(mags[0])
+        if e != np.round(e):
+            return None
+        rowexp[idx] = int(np.round(e))
+    return b, rowexp
+
 
 def ternary_rows(arr):
     """(t, rowexp) if every row of every layer is {-a, 0, +a} with a a power
@@ -178,7 +205,14 @@ def quantize5(m, sites):
     # A ternary embedding with ONE scale for the whole tensor takes the block
     # kernel for the classifier: argmax over block sums needs no per-row
     # rescale when every row shares the scale.
-    tern = ternary_rows(m.tok_emb[None, :, :])
+    q.binary_cls = False
+    binr = binary_rows(m.tok_emb[None, :, :])
+    if binr is not None and np.all(binr[1] == binr[1].flat[0]):
+        q.wexp["tok_emb"] = int(binr[1].flat[0])
+        q.weights["tok_emb"] = binr[0][0].astype(np.int64)
+        q.rowexp["tok_emb"] = np.zeros(m.cfg.vocab, dtype=np.int8)
+        q.binary_cls = True
+    tern = None if q.binary_cls else ternary_rows(m.tok_emb[None, :, :])
     q.ternary_cls = False
     if tern is not None:
         t, rowexp = tern
@@ -188,7 +222,7 @@ def quantize5(m, sites):
             q.weights["tok_emb"] = t[0].astype(np.int64)
             q.rowexp["tok_emb"] = np.zeros(m.cfg.vocab, dtype=np.int8)
             q.ternary_cls = True
-    if not q.ternary_cls:
+    if not q.ternary_cls and not q.binary_cls:
         e = Q.exp_for(float(np.abs(m.tok_emb).max()))
         q.wexp["tok_emb"] = e
         q.weights["tok_emb"] = Q.quantize(m.tok_emb, e)
@@ -203,8 +237,22 @@ def quantize5(m, sites):
     q.weights["rms_final"] = Q.quantize(m.rms_final, ef)
 
     q.ternary = {}
+    q.binary = {}
     for name in MATS:
         arr = np.stack(getattr(m, name))
+        binr = binary_rows(arr)
+        if binr is not None:
+            b, rowexp = binr
+            e = int(rowexp.min())
+            q.wexp[name] = e
+            q.rowexp[name] = (rowexp - e).astype(np.int8)
+            q.indices[name] = b
+            q.codebooks[name] = np.array([-1, 1], dtype=np.int64)
+            q.weights[name] = b.astype(np.int64)
+            q.ternary[name] = False
+            q.binary[name] = True
+            continue
+        q.binary[name] = False
         tern = ternary_rows(arr)
         if tern is not None:
             # Lossless: the weight IS t * 2^(wexp + rowexp). wexp is the
@@ -250,7 +298,10 @@ def mv(q, name, l, x, in_exp, out_exp, e=None):
     expert's slice of an experts-major tensor."""
     w = q.weights[name][l] if e is None else q.weights[name][l][e]
     rowexp = q.rowexp[name][l] if e is None else q.rowexp[name][l][e]
-    if q.ternary.get(name):
+    if q.binary.get(name):
+        acc = Q.matvec_blocks(w, x, BINARY_BLOCK, TERNARY_ACC_SHIFT)
+        acc_shift = TERNARY_ACC_SHIFT
+    elif q.ternary.get(name):
         acc = Q.matvec_blocks(w, x, TERNARY_BLOCK, TERNARY_ACC_SHIFT)
         acc_shift = TERNARY_ACC_SHIFT
     else:
@@ -306,13 +357,14 @@ def forward_q5(q, st, token):
         a = mv(q, "w1", l, xf, exf, e1)
         u = Q.sat8(shr_round_any(
             np.maximum(a.astype(np.int64), 0) ** 2, ehb - 2 * e1))
-        if q.ternary.get("w2"):
+        if q.ternary.get("w2") or q.binary.get("w2"):
             # Two input halves, each exact, each requantized and added: the
             # cartridge's order, so the two saturations happen where its do.
-            split = W2_SPLIT_BLOCKS * TERNARY_BLOCK
+            blk = BINARY_BLOCK if q.binary.get("w2") else TERNARY_BLOCK
+            split = (W2_SPLIT_BLOCKS_BIN if q.binary.get("w2") else W2_SPLIT_BLOCKS) * blk
             t = q.weights["w2"][l]
             for lo, hi in ((0, split), (split, c.hidden)):
-                acc = Q.matvec_blocks(t[:, lo:hi], u[lo:hi], TERNARY_BLOCK,
+                acc = Q.matvec_blocks(t[:, lo:hi], u[lo:hi], blk,
                                       TERNARY_ACC_SHIFT)
                 part = Q.requant_rows(acc, q.wexp["w2"] + ehb + TERNARY_ACC_SHIFT,
                                       q.rowexp["w2"][l], ex)
@@ -323,6 +375,9 @@ def forward_q5(q, st, token):
 
     exbf = q.site("xb_final")
     xb = Q.rmsnorm(x, q.weights["rms_final"], q.wexp["rms_final"], exbf)
+    if getattr(q, "binary_cls", False):
+        return Q.matvec_blocks(q.weights["tok_emb"], xb, BINARY_CLS_BLOCK,
+                               TERNARY_ACC_SHIFT)
     if getattr(q, "ternary_cls", False):
         return Q.matvec_blocks(q.weights["tok_emb"], xb, TERNARY_BLOCK,
                                TERNARY_ACC_SHIFT)
