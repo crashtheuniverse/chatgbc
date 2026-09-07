@@ -78,6 +78,13 @@ class FakeQuant(torch.autograd.Function):
             scale = (kept.sum(dim=(1, 2), keepdim=True)
                      / keep.sum(dim=(1, 2), keepdim=True).clamp(min=1))
             return (torch.sign(g) * keep * scale).view(out, inn)
+        if levels == BINARY_ONE:
+            # One bit with ONE power-of-two scale for the whole tensor: the
+            # classifier's regime in the binary line, so argmax over block
+            # sums needs no per-row rescale and the tied embedding shares it.
+            scale = w.abs().mean().clamp(min=1e-8)
+            scale = torch.exp2(torch.round(torch.log2(scale)))
+            return torch.where(w >= 0, scale, -scale)
         if levels == BINARY01:
             # One bit, {0, +1} times a power-of-two row scale: the "mask"
             # codebook. A masked sum is what the bit-plane kernel computes
@@ -179,6 +186,7 @@ def qs(x, on=True):
 SHERRY = 34               # the `levels` value meaning Sherry's 3:4 ternary
 TERNARY_ONE = 35          # ternary, one power-of-two scale for the whole tensor
 BINARY01 = 21             # one bit, {0, +1} times a power-of-two row scale
+BINARY_ONE = 22           # one bit, {-1, +1}, one power-of-two scale for the whole tensor
 POW2_SCALE = {"on": False}   # ternary row scales snapped to powers of two
 
 # Arenas (same paper): during training the quantized weight is augmented with
@@ -193,7 +201,7 @@ ARENAS = {"lam": 0.0}
 def qw(w, levels):
     q = FakeQuant.apply(w, levels)
     lam = ARENAS["lam"]
-    if lam > 0.0 and levels in (2, 3, SHERRY, BINARY01):
+    if lam > 0.0 and levels in (2, 3, SHERRY, BINARY01, BINARY_ONE):
         return q + lam * w
     return q
 

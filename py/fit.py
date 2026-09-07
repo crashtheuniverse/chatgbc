@@ -51,11 +51,11 @@ CYC_PER_MAC, CYC_PER_CLS_MAC, CYC_PER_LAYER = 10.5, 8.3, 203_000
 # at 1024 outputs. The activation width does not enter - only the bit-plane
 # kernel (2.23 a MAC per activation bit) cares, and it loses to the tables
 # at every width above two bits.
-BIN_MAC_64, BIN_MAC_176, BIN_MAC_CLS = 6.97, 4.82, 3.08
+BIN_MAC_64, BIN_MAC_176, BIN_MAC_CLS = 7.22, 5.48, 3.08   # block 4 (tiles 64/96/176/256), block 4, block 8
 MAC_BIT = 2.23       # DIRECT: src/bitbench.asm, one-bit weights, per activation bit plane
 
 
-def price(layers, dim, hid_exp, vocab, levels=3, act_bits=8):
+def price(layers, dim, hid_exp, vocab, levels=3, act_bits=8, emb_levels=35):
     """Ternary runs the measured block kernel; binary the measured subset-sum
     tables (block of 5 on the gates, w1 and w2, block of 8 on the classifier),
     or the bit-plane kernel where that is cheaper (2-bit activations)."""
@@ -63,10 +63,11 @@ def price(layers, dim, hid_exp, vocab, levels=3, act_bits=8):
     w1 = layers * (dim * hid_exp + 4 * dim)
     w2 = layers * dim * hid_exp
     cls = vocab * dim
+    cls_cost = BIN_MAC_CLS * cls if emb_levels == 22 else CYC_PER_CLS_MAC * cls
     if levels == 3:
-        return layers * CYC_PER_LAYER + CYC_PER_MAC * (gates + w1 + w2) + CYC_PER_CLS_MAC * cls
+        return layers * CYC_PER_LAYER + CYC_PER_MAC * (gates + w1 + w2) + cls_cost
     planes = MAC_BIT * max(act_bits, 1)
-    table = (BIN_MAC_64 * (gates + w2) + BIN_MAC_176 * w1 + BIN_MAC_CLS * cls)
+    table = (BIN_MAC_64 * (gates + w2) + BIN_MAC_176 * w1 + cls_cost)
     return layers * CYC_PER_LAYER + min(table, planes * (gates + w1 + w2 + cls))
 
 
@@ -134,6 +135,7 @@ def main():
     ap.add_argument("--levels", type=int, default=3, help="3 ternary (the shipped kernel), 2 binary {-1,+1}, 21 binary {0,+1}")
     ap.add_argument("--act-bits", type=int, default=8, help="activation width into every matvec")
     ap.add_argument("--state-bits", type=int, default=8, help="the carried recurrent state")
+    ap.add_argument("--emb-levels", type=int, default=35, help="tied embedding/classifier codebook: 35 ternary one-scale, 22 binary one-scale")
     ap.add_argument("--steps", type=int, default=20000)
     ap.add_argument("--seq", type=int, default=96)
     ap.add_argument("--batch", type=int, default=96)
@@ -169,7 +171,7 @@ def main():
     shape = arch.Shape(dim=args.dim, hidden=args.hidden, layers=args.layers,
                        heads=8, kv_heads=4, vocab=vocab)
     hid_exp = args.hidden // 2
-    cyc = price(args.layers, args.dim, hid_exp, vocab, args.levels, args.act_bits)
+    cyc = price(args.layers, args.dim, hid_exp, vocab, args.levels, args.act_bits, args.emb_levels)
     print(f"  shape {args.layers}L {args.dim}d, 4 experts of {hid_exp}, vocab {vocab}, "
           f"levels {args.levels}, {args.act_bits}-bit acts, {args.state_bits}-bit state: "
           f"~{cyc/1e6:.2f}M cyc/tok = {cyc/HZ:.2f} s/tok = {cyc/HZ/chars_per_tok:.3f} s/char "
@@ -182,7 +184,7 @@ def main():
     model = train.Tiny(shape, levels=levels, seq=args.seq, window=24,
                        core="mingru", mlp="moe4", act_bits=args.act_bits,
                        state_bits=args.state_bits, gate_levels=None,
-                       emb_levels=train.TERNARY_ONE).to(device)
+                       emb_levels=args.emb_levels).to(device)
     n_params = sum(p.numel() for p in model.parameters())
     print(f"  {n_params:,} parameters", flush=True)
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.01,
@@ -218,7 +220,7 @@ def main():
     # 3.36 model). The twin and the cartridge read the baked image directly;
     # py/score5.py is the number to quote for what ships.
     bake(model, levels)
-    name = args.name or f"ts{args.layers}L{args.dim}d_h{args.hidden}_v{vocab}_q{args.levels}a{args.act_bits}"
+    name = args.name or f"ts{args.layers}L{args.dim}d_h{args.hidden}_v{vocab}_q{args.levels}a{args.act_bits}e{args.emb_levels}"
     path = args.out_dir / f"{name}.bin"
     path.parent.mkdir(parents=True, exist_ok=True)
     n = train.save_pip5(model.cpu(), path)
