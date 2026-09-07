@@ -215,11 +215,12 @@ Relu2_Row::
     ; the pointers carry across, only the counter reloads. One expert's
     ; hidden is a single pass.
 IF EXPERTS
+    ASSERT HID_EXP <= 256, "an expert's hidden must fit an 8-bit count (0 = 256)"
     ld a, 1
     ldh [hGruOuter], a
 .half
-    ld a, HID_EXP
-    ldh [hGruCnt], a
+    ld a, LOW(HID_EXP)              ; 256 wide counts as 0: the dec-jr loop
+    ldh [hGruCnt], a                ; below runs 256 times from zero
 ELSE
     ld a, 2
     ldh [hGruOuter], a

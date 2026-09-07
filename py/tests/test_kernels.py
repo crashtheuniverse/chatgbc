@@ -5,10 +5,18 @@ import export5                    # noqa: E402
 from conftest import APP
 
 
+def _dim():
+    inc = (APP / "src" / "model.inc").read_text()
+    return int(inc.split("DEF DIM EQU ")[1].split()[0])
+
+
+DIM = _dim()          # the model's width, from the export - not a number typed in
+
+
 def test_gate_matches_the_twin_vectors(booted):
     want = np.frombuffer((APP / "build" / "blobs" / "test_gate_out.bin"
                           ).read_bytes(), np.int8)
-    got = np.frombuffer(bytes(booted.read("wGateOut", 64)), np.int8)
+    got = np.frombuffer(bytes(booted.read("wGateOut", DIM)), np.int8)
     assert (got == want).all(), np.nonzero(got != want)[0][:8]
 
 

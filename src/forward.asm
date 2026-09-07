@@ -962,13 +962,30 @@ NoRepeat_Ok:
 ; wX = requantized embedding row for wToken. The table is 32 KB, so it spans two
 ; banks of 256 tokens each.
 EmbedToken:
-    ; A part holds 256 rows (the exporter asserts it), so the token's high
-    ; byte is the part and its low byte the row. Two parts were once wired
-    ; by hand here; a 1024-piece vocabulary has four, and the manifest
-    ; already listed them.
+    ; A part holds 2^EMB_ROW_BITS rows (the exporter sizes it to the bank):
+    ; the part is the token shifted right by that many bits, the row the
+    ; remainder. 64 wide: 256 rows, the high byte and the low byte. 96 wide:
+    ; 128 rows, so bit 7 of the low byte joins the part.
     ld a, [wToken + 1]
-    ld c, a
+    ld c, a                         ; c = high byte
+    ld a, [wToken + 0]
+    ld e, a                         ; e = low byte
+IF EMB_ROW_BITS == 8
+    ld a, e                         ; row = low byte, part = high byte
+ELIF EMB_ROW_BITS == 7
+    sla c                           ; part = high byte * 2 + bit 7 of the low
+    bit 7, e
+    jr z, :+
+    inc c
+:   ld a, e
+    and $7F                         ; row = low 7 bits
+ELSE
+    FAIL "EmbedToken: EMB_ROW_BITS must be 7 or 8"
+ENDC
+    ld l, a                         ; hl = row
+    ld h, 0
     ld b, 0
+    push hl
     ld hl, emb_banks
     add hl, bc
     ld a, [hl]
@@ -980,13 +997,26 @@ EmbedToken:
     ld e, a
     ld a, [hl]
     ld d, a                         ; de = the part's base
-
-    ld a, [wToken + 0]
-    ld l, a
-    ld h, 0
+    pop hl
+IF DIM == 64
 REPT 6
-    add hl, hl                      ; (token & 255) * DIM
+    add hl, hl                      ; row * 64
 ENDR
+ELIF DIM == 96
+REPT 5
+    add hl, hl                      ; row * 32
+ENDR
+    ld b, h
+    ld c, l
+    add hl, hl                      ; row * 64
+    add hl, bc                      ; row * 96
+ELIF DIM == 128
+REPT 7
+    add hl, hl                      ; row * 128
+ENDR
+ELSE
+    FAIL "EmbedToken: no row multiply for this DIM"
+ENDC
     add hl, de
 
     ld de, wX

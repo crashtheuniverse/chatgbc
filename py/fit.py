@@ -59,16 +59,19 @@ def price(layers, dim, hid_exp, vocab, levels=3, act_bits=8, emb_levels=35):
     """Ternary runs the measured block kernel; binary the measured subset-sum
     tables (block of 5 on the gates, w1 and w2, block of 8 on the classifier),
     or the bit-plane kernel where that is cheaper (2-bit activations)."""
+    # The norms, gate and requantization scale with the width, not the
+    # MACs: 203K a layer at 64 wide, measured 305K at 96.
+    per_layer = CYC_PER_LAYER * dim / 64
     gates = layers * 3 * dim * dim
     w1 = layers * (dim * hid_exp + 4 * dim)
     w2 = layers * dim * hid_exp
     cls = vocab * dim
     cls_cost = BIN_MAC_CLS * cls if emb_levels == 22 else CYC_PER_CLS_MAC * cls
     if levels == 3:
-        return layers * CYC_PER_LAYER + CYC_PER_MAC * (gates + w1 + w2) + cls_cost
+        return layers * per_layer + CYC_PER_MAC * (gates + w1 + w2) + cls_cost
     planes = MAC_BIT * max(act_bits, 1)
     table = (BIN_MAC_64 * (gates + w2) + BIN_MAC_176 * w1 + cls_cost)
-    return layers * CYC_PER_LAYER + min(table, planes * (gates + w1 + w2 + cls))
+    return layers * per_layer + min(table, planes * (gates + w1 + w2 + cls))
 
 
 def arenas_lambda(step_i, steps, warm=0.1):
