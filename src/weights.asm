@@ -32,10 +32,10 @@ SECTION "emb_rows_p3", ROMX
 emb_rows_p3:: INCBIN "build/blobs/emb_rows_p3.bin"   ; 16384 bytes
 
 SECTION "cls_w_p0", ROMX
-cls_w_p0:: INCBIN "build/blobs/cls_w_p0.bin"   ; 11264 bytes
+cls_w_p0:: INCBIN "build/blobs/cls_w_p0.bin"   ; 6656 bytes
 
 SECTION "cls_w_p1", ROMX
-cls_w_p1:: INCBIN "build/blobs/cls_w_p1.bin"   ; 11264 bytes
+cls_w_p1:: INCBIN "build/blobs/cls_w_p1.bin"   ; 6656 bytes
 
 SECTION "lut_cls_hi", ROMX
 lut_cls_hi:: INCBIN "build/blobs/lut_cls_hi.bin"   ; 1 bytes
@@ -60,210 +60,144 @@ rmsffn_shift:: INCBIN "build/blobs/rmsffn_shift.bin"   ; 3 bytes
 
 SECTION "wz_l0", ROMX
 wz_l0:: INCBIN "build/blobs/wz_l0.bin"   ; 1408 bytes
-
-SECTION "wz_sh_l0", ROM0
-wz_sh_l0:: INCBIN "build/blobs/wz_sh_l0.bin"   ; 64 bytes
+wz_sh_l0:: INCBIN "build/blobs/wz_sh_l0.bin"   ; 64 bytes, in the bank of wz_l0
 
 SECTION "wz_l1", ROMX
 wz_l1:: INCBIN "build/blobs/wz_l1.bin"   ; 1408 bytes
-
-SECTION "wz_sh_l1", ROM0
-wz_sh_l1:: INCBIN "build/blobs/wz_sh_l1.bin"   ; 64 bytes
+wz_sh_l1:: INCBIN "build/blobs/wz_sh_l1.bin"   ; 64 bytes, in the bank of wz_l1
 
 SECTION "wz_l2", ROMX
 wz_l2:: INCBIN "build/blobs/wz_l2.bin"   ; 1408 bytes
-
-SECTION "wz_sh_l2", ROM0
-wz_sh_l2:: INCBIN "build/blobs/wz_sh_l2.bin"   ; 64 bytes
+wz_sh_l2:: INCBIN "build/blobs/wz_sh_l2.bin"   ; 64 bytes, in the bank of wz_l2
 
 SECTION "wh_l0", ROMX
 wh_l0:: INCBIN "build/blobs/wh_l0.bin"   ; 1408 bytes
-
-SECTION "wh_sh_l0", ROM0
-wh_sh_l0:: INCBIN "build/blobs/wh_sh_l0.bin"   ; 64 bytes
+wh_sh_l0:: INCBIN "build/blobs/wh_sh_l0.bin"   ; 64 bytes, in the bank of wh_l0
 
 SECTION "wh_l1", ROMX
 wh_l1:: INCBIN "build/blobs/wh_l1.bin"   ; 1408 bytes
-
-SECTION "wh_sh_l1", ROM0
-wh_sh_l1:: INCBIN "build/blobs/wh_sh_l1.bin"   ; 64 bytes
+wh_sh_l1:: INCBIN "build/blobs/wh_sh_l1.bin"   ; 64 bytes, in the bank of wh_l1
 
 SECTION "wh_l2", ROMX
 wh_l2:: INCBIN "build/blobs/wh_l2.bin"   ; 1408 bytes
-
-SECTION "wh_sh_l2", ROM0
-wh_sh_l2:: INCBIN "build/blobs/wh_sh_l2.bin"   ; 64 bytes
+wh_sh_l2:: INCBIN "build/blobs/wh_sh_l2.bin"   ; 64 bytes, in the bank of wh_l2
 
 SECTION "wo_l0", ROMX
 wo_l0:: INCBIN "build/blobs/wo_l0.bin"   ; 1408 bytes
-
-SECTION "wo_sh_l0", ROM0
-wo_sh_l0:: INCBIN "build/blobs/wo_sh_l0.bin"   ; 64 bytes
+wo_sh_l0:: INCBIN "build/blobs/wo_sh_l0.bin"   ; 64 bytes, in the bank of wo_l0
 
 SECTION "wo_l1", ROMX
 wo_l1:: INCBIN "build/blobs/wo_l1.bin"   ; 1408 bytes
-
-SECTION "wo_sh_l1", ROM0
-wo_sh_l1:: INCBIN "build/blobs/wo_sh_l1.bin"   ; 64 bytes
+wo_sh_l1:: INCBIN "build/blobs/wo_sh_l1.bin"   ; 64 bytes, in the bank of wo_l1
 
 SECTION "wo_l2", ROMX
 wo_l2:: INCBIN "build/blobs/wo_l2.bin"   ; 1408 bytes
-
-SECTION "wo_sh_l2", ROM0
-wo_sh_l2:: INCBIN "build/blobs/wo_sh_l2.bin"   ; 64 bytes
+wo_sh_l2:: INCBIN "build/blobs/wo_sh_l2.bin"   ; 64 bytes, in the bank of wo_l2
 
 SECTION "router_l0", ROMX
 router_l0:: INCBIN "build/blobs/router_l0.bin"   ; 88 bytes
 
 SECTION "w1_l0_e0", ROMX
 w1_l0_e0:: INCBIN "build/blobs/w1_l0_e0.bin"   ; 3872 bytes
+w1_sh_l0_e0:: INCBIN "build/blobs/w1_sh_l0_e0.bin"   ; 176 bytes, in the bank of w1_l0_e0
 
 SECTION "w2_l0_e0", ROMX
 w2_l0_e0:: INCBIN "build/blobs/w2_l0_e0.bin"   ; 3776 bytes
-
-SECTION "w1_sh_l0_e0", ROM0
-w1_sh_l0_e0:: INCBIN "build/blobs/w1_sh_l0_e0.bin"   ; 176 bytes
-
-SECTION "w2_sh_l0_e0", ROM0
-w2_sh_l0_e0:: INCBIN "build/blobs/w2_sh_l0_e0.bin"   ; 64 bytes
+w2_sh_l0_e0:: INCBIN "build/blobs/w2_sh_l0_e0.bin"   ; 64 bytes, in the bank of w2_l0_e0
 
 SECTION "w1_l0_e1", ROMX
 w1_l0_e1:: INCBIN "build/blobs/w1_l0_e1.bin"   ; 3872 bytes
+w1_sh_l0_e1:: INCBIN "build/blobs/w1_sh_l0_e1.bin"   ; 176 bytes, in the bank of w1_l0_e1
 
 SECTION "w2_l0_e1", ROMX
 w2_l0_e1:: INCBIN "build/blobs/w2_l0_e1.bin"   ; 3776 bytes
-
-SECTION "w1_sh_l0_e1", ROM0
-w1_sh_l0_e1:: INCBIN "build/blobs/w1_sh_l0_e1.bin"   ; 176 bytes
-
-SECTION "w2_sh_l0_e1", ROM0
-w2_sh_l0_e1:: INCBIN "build/blobs/w2_sh_l0_e1.bin"   ; 64 bytes
+w2_sh_l0_e1:: INCBIN "build/blobs/w2_sh_l0_e1.bin"   ; 64 bytes, in the bank of w2_l0_e1
 
 SECTION "w1_l0_e2", ROMX
 w1_l0_e2:: INCBIN "build/blobs/w1_l0_e2.bin"   ; 3872 bytes
+w1_sh_l0_e2:: INCBIN "build/blobs/w1_sh_l0_e2.bin"   ; 176 bytes, in the bank of w1_l0_e2
 
 SECTION "w2_l0_e2", ROMX
 w2_l0_e2:: INCBIN "build/blobs/w2_l0_e2.bin"   ; 3776 bytes
-
-SECTION "w1_sh_l0_e2", ROM0
-w1_sh_l0_e2:: INCBIN "build/blobs/w1_sh_l0_e2.bin"   ; 176 bytes
-
-SECTION "w2_sh_l0_e2", ROM0
-w2_sh_l0_e2:: INCBIN "build/blobs/w2_sh_l0_e2.bin"   ; 64 bytes
+w2_sh_l0_e2:: INCBIN "build/blobs/w2_sh_l0_e2.bin"   ; 64 bytes, in the bank of w2_l0_e2
 
 SECTION "w1_l0_e3", ROMX
 w1_l0_e3:: INCBIN "build/blobs/w1_l0_e3.bin"   ; 3872 bytes
+w1_sh_l0_e3:: INCBIN "build/blobs/w1_sh_l0_e3.bin"   ; 176 bytes, in the bank of w1_l0_e3
 
 SECTION "w2_l0_e3", ROMX
 w2_l0_e3:: INCBIN "build/blobs/w2_l0_e3.bin"   ; 3776 bytes
-
-SECTION "w1_sh_l0_e3", ROM0
-w1_sh_l0_e3:: INCBIN "build/blobs/w1_sh_l0_e3.bin"   ; 176 bytes
-
-SECTION "w2_sh_l0_e3", ROM0
-w2_sh_l0_e3:: INCBIN "build/blobs/w2_sh_l0_e3.bin"   ; 64 bytes
+w2_sh_l0_e3:: INCBIN "build/blobs/w2_sh_l0_e3.bin"   ; 64 bytes, in the bank of w2_l0_e3
 
 SECTION "router_l1", ROMX
 router_l1:: INCBIN "build/blobs/router_l1.bin"   ; 88 bytes
 
 SECTION "w1_l1_e0", ROMX
 w1_l1_e0:: INCBIN "build/blobs/w1_l1_e0.bin"   ; 3872 bytes
+w1_sh_l1_e0:: INCBIN "build/blobs/w1_sh_l1_e0.bin"   ; 176 bytes, in the bank of w1_l1_e0
 
 SECTION "w2_l1_e0", ROMX
 w2_l1_e0:: INCBIN "build/blobs/w2_l1_e0.bin"   ; 3776 bytes
-
-SECTION "w1_sh_l1_e0", ROM0
-w1_sh_l1_e0:: INCBIN "build/blobs/w1_sh_l1_e0.bin"   ; 176 bytes
-
-SECTION "w2_sh_l1_e0", ROM0
-w2_sh_l1_e0:: INCBIN "build/blobs/w2_sh_l1_e0.bin"   ; 64 bytes
+w2_sh_l1_e0:: INCBIN "build/blobs/w2_sh_l1_e0.bin"   ; 64 bytes, in the bank of w2_l1_e0
 
 SECTION "w1_l1_e1", ROMX
 w1_l1_e1:: INCBIN "build/blobs/w1_l1_e1.bin"   ; 3872 bytes
+w1_sh_l1_e1:: INCBIN "build/blobs/w1_sh_l1_e1.bin"   ; 176 bytes, in the bank of w1_l1_e1
 
 SECTION "w2_l1_e1", ROMX
 w2_l1_e1:: INCBIN "build/blobs/w2_l1_e1.bin"   ; 3776 bytes
-
-SECTION "w1_sh_l1_e1", ROM0
-w1_sh_l1_e1:: INCBIN "build/blobs/w1_sh_l1_e1.bin"   ; 176 bytes
-
-SECTION "w2_sh_l1_e1", ROM0
-w2_sh_l1_e1:: INCBIN "build/blobs/w2_sh_l1_e1.bin"   ; 64 bytes
+w2_sh_l1_e1:: INCBIN "build/blobs/w2_sh_l1_e1.bin"   ; 64 bytes, in the bank of w2_l1_e1
 
 SECTION "w1_l1_e2", ROMX
 w1_l1_e2:: INCBIN "build/blobs/w1_l1_e2.bin"   ; 3872 bytes
+w1_sh_l1_e2:: INCBIN "build/blobs/w1_sh_l1_e2.bin"   ; 176 bytes, in the bank of w1_l1_e2
 
 SECTION "w2_l1_e2", ROMX
 w2_l1_e2:: INCBIN "build/blobs/w2_l1_e2.bin"   ; 3776 bytes
-
-SECTION "w1_sh_l1_e2", ROM0
-w1_sh_l1_e2:: INCBIN "build/blobs/w1_sh_l1_e2.bin"   ; 176 bytes
-
-SECTION "w2_sh_l1_e2", ROM0
-w2_sh_l1_e2:: INCBIN "build/blobs/w2_sh_l1_e2.bin"   ; 64 bytes
+w2_sh_l1_e2:: INCBIN "build/blobs/w2_sh_l1_e2.bin"   ; 64 bytes, in the bank of w2_l1_e2
 
 SECTION "w1_l1_e3", ROMX
 w1_l1_e3:: INCBIN "build/blobs/w1_l1_e3.bin"   ; 3872 bytes
+w1_sh_l1_e3:: INCBIN "build/blobs/w1_sh_l1_e3.bin"   ; 176 bytes, in the bank of w1_l1_e3
 
 SECTION "w2_l1_e3", ROMX
 w2_l1_e3:: INCBIN "build/blobs/w2_l1_e3.bin"   ; 3776 bytes
-
-SECTION "w1_sh_l1_e3", ROM0
-w1_sh_l1_e3:: INCBIN "build/blobs/w1_sh_l1_e3.bin"   ; 176 bytes
-
-SECTION "w2_sh_l1_e3", ROM0
-w2_sh_l1_e3:: INCBIN "build/blobs/w2_sh_l1_e3.bin"   ; 64 bytes
+w2_sh_l1_e3:: INCBIN "build/blobs/w2_sh_l1_e3.bin"   ; 64 bytes, in the bank of w2_l1_e3
 
 SECTION "router_l2", ROMX
 router_l2:: INCBIN "build/blobs/router_l2.bin"   ; 88 bytes
 
 SECTION "w1_l2_e0", ROMX
 w1_l2_e0:: INCBIN "build/blobs/w1_l2_e0.bin"   ; 3872 bytes
+w1_sh_l2_e0:: INCBIN "build/blobs/w1_sh_l2_e0.bin"   ; 176 bytes, in the bank of w1_l2_e0
 
 SECTION "w2_l2_e0", ROMX
 w2_l2_e0:: INCBIN "build/blobs/w2_l2_e0.bin"   ; 3776 bytes
-
-SECTION "w1_sh_l2_e0", ROM0
-w1_sh_l2_e0:: INCBIN "build/blobs/w1_sh_l2_e0.bin"   ; 176 bytes
-
-SECTION "w2_sh_l2_e0", ROM0
-w2_sh_l2_e0:: INCBIN "build/blobs/w2_sh_l2_e0.bin"   ; 64 bytes
+w2_sh_l2_e0:: INCBIN "build/blobs/w2_sh_l2_e0.bin"   ; 64 bytes, in the bank of w2_l2_e0
 
 SECTION "w1_l2_e1", ROMX
 w1_l2_e1:: INCBIN "build/blobs/w1_l2_e1.bin"   ; 3872 bytes
+w1_sh_l2_e1:: INCBIN "build/blobs/w1_sh_l2_e1.bin"   ; 176 bytes, in the bank of w1_l2_e1
 
 SECTION "w2_l2_e1", ROMX
 w2_l2_e1:: INCBIN "build/blobs/w2_l2_e1.bin"   ; 3776 bytes
-
-SECTION "w1_sh_l2_e1", ROM0
-w1_sh_l2_e1:: INCBIN "build/blobs/w1_sh_l2_e1.bin"   ; 176 bytes
-
-SECTION "w2_sh_l2_e1", ROM0
-w2_sh_l2_e1:: INCBIN "build/blobs/w2_sh_l2_e1.bin"   ; 64 bytes
+w2_sh_l2_e1:: INCBIN "build/blobs/w2_sh_l2_e1.bin"   ; 64 bytes, in the bank of w2_l2_e1
 
 SECTION "w1_l2_e2", ROMX
 w1_l2_e2:: INCBIN "build/blobs/w1_l2_e2.bin"   ; 3872 bytes
+w1_sh_l2_e2:: INCBIN "build/blobs/w1_sh_l2_e2.bin"   ; 176 bytes, in the bank of w1_l2_e2
 
 SECTION "w2_l2_e2", ROMX
 w2_l2_e2:: INCBIN "build/blobs/w2_l2_e2.bin"   ; 3776 bytes
-
-SECTION "w1_sh_l2_e2", ROM0
-w1_sh_l2_e2:: INCBIN "build/blobs/w1_sh_l2_e2.bin"   ; 176 bytes
-
-SECTION "w2_sh_l2_e2", ROM0
-w2_sh_l2_e2:: INCBIN "build/blobs/w2_sh_l2_e2.bin"   ; 64 bytes
+w2_sh_l2_e2:: INCBIN "build/blobs/w2_sh_l2_e2.bin"   ; 64 bytes, in the bank of w2_l2_e2
 
 SECTION "w1_l2_e3", ROMX
 w1_l2_e3:: INCBIN "build/blobs/w1_l2_e3.bin"   ; 3872 bytes
+w1_sh_l2_e3:: INCBIN "build/blobs/w1_sh_l2_e3.bin"   ; 176 bytes, in the bank of w1_l2_e3
 
 SECTION "w2_l2_e3", ROMX
 w2_l2_e3:: INCBIN "build/blobs/w2_l2_e3.bin"   ; 3776 bytes
-
-SECTION "w1_sh_l2_e3", ROM0
-w1_sh_l2_e3:: INCBIN "build/blobs/w1_sh_l2_e3.bin"   ; 176 bytes
-
-SECTION "w2_sh_l2_e3", ROM0
-w2_sh_l2_e3:: INCBIN "build/blobs/w2_sh_l2_e3.bin"   ; 64 bytes
+w2_sh_l2_e3:: INCBIN "build/blobs/w2_sh_l2_e3.bin"   ; 64 bytes, in the bank of w2_l2_e3
 
 SECTION "vocab_data", ROMX
 vocab_data:: INCBIN "build/blobs/vocab_data.bin"   ; 7051 bytes

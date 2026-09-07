@@ -72,6 +72,7 @@ W2_SPLIT_BLOCKS = 59                       # inputs 0..176 | 177..351
 # is checked before the ternary test, which would also accept such rows.
 BINARY_BLOCK = 4
 BINARY_CLS_BLOCK = 8                       # the classifier's WRAM-table kernel
+TERNARY_CLS_BLOCK = 5                      # the ternary classifier's planes: 3^5 = 243 sums
 W2_SPLIT_BLOCKS_BIN = 44                   # inputs 0..175 | 176..351
 
 
@@ -379,7 +380,8 @@ def forward_q5(q, st, token):
         return Q.matvec_blocks(q.weights["tok_emb"], xb, BINARY_CLS_BLOCK,
                                TERNARY_ACC_SHIFT)
     if getattr(q, "ternary_cls", False):
-        return Q.matvec_blocks(q.weights["tok_emb"], xb, TERNARY_BLOCK,
+        # Exact sums, so the blocking is documentation: five, as the planes.
+        return Q.matvec_blocks(q.weights["tok_emb"], xb, TERNARY_CLS_BLOCK,
                                TERNARY_ACC_SHIFT)
     return q.weights["tok_emb"].astype(np.int64) @ xb.astype(np.int64)
 

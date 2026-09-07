@@ -51,7 +51,12 @@ CYC_PER_MAC, CYC_PER_CLS_MAC, CYC_PER_LAYER = 10.5, 8.3, 203_000
 # at 1024 outputs. The activation width does not enter - only the bit-plane
 # kernel (2.23 a MAC per activation bit) cares, and it loses to the tables
 # at every width above two bits.
-BIN_MAC_64, BIN_MAC_176, BIN_MAC_CLS = 7.22, 5.48, 3.08   # block 4 (tiles 64/96/176/256), block 4, block 8
+BIN_MAC_64, BIN_MAC_176 = 7.22, 5.48   # block 4 in HRAM, from the bench (tiles 64/96/176/256)
+# The classifiers, from the census of the real kernels at 1024 outputs and
+# 64 inputs: one-bit planes 295,808 cycles, ternary planes (3^5 entries,
+# a block of five) 423,477 - loops and zeroing included, so a little above
+# the bench's 3.08 for the bare block-8 body.
+BIN_MAC_CLS, TERN_MAC_CLS = 4.51, 6.46
 MAC_BIT = 2.23       # DIRECT: src/bitbench.asm, one-bit weights, per activation bit plane
 
 
@@ -66,7 +71,7 @@ def price(layers, dim, hid_exp, vocab, levels=3, act_bits=8, emb_levels=35):
     w1 = layers * (dim * hid_exp + 4 * dim)
     w2 = layers * dim * hid_exp
     cls = vocab * dim
-    cls_cost = BIN_MAC_CLS * cls if emb_levels == 22 else CYC_PER_CLS_MAC * cls
+    cls_cost = (BIN_MAC_CLS if emb_levels == 22 else TERN_MAC_CLS) * cls
     if levels == 3:
         return layers * per_layer + CYC_PER_MAC * (gates + w1 + w2) + cls_cost
     planes = MAC_BIT * max(act_bits, 1)

@@ -47,7 +47,39 @@ SECTION "Cls code", ROM0
 
 IF CLS_TERNARY || CLS_BINARY
 
+DEF wClsPlaneLo EQU wClsTbl + 2048          ; $D800, page-aligned
+DEF wClsPlaneHi EQU wClsTbl + 2048 + 256    ; $D900
+
+; One block's planes against CLS_OUTPUTS_PER_PART outputs: de = the weight
+; stream, hl = the sums. b is the plane page, c the code; sixteen unrolled
+; then a count, which costs a couple of percent against a full unroll and
+; a kilobyte of ROM0 less.
+Cls8_Rows:
+    ld a, CLS_OUTPUTS_PER_PART / 16
+    ldh [hClsOut], a
+.chunk
+    ld b, HIGH(wClsPlaneLo)
+REPT 16
+    ld a, [de]                      ; 2  the sign pattern
+    inc de                          ; 2
+    ld c, a                         ; 1
+    ld a, [bc]                      ; 2  low plane
+    add a, [hl]                     ; 2
+    ld [hl+], a                     ; 2
+    inc b                           ; 1
+    ld a, [bc]                      ; 2  high plane
+    adc a, [hl]                     ; 2
+    ld [hl+], a                     ; 2
+    dec b                           ; 1
+ENDR
+    ldh a, [hClsOut]
+    dec a
+    ldh [hClsOut], a
+    jp nz, .chunk                   ; the unrolled body is past jr's reach
+    ret
+
 IF CLS_BINARY
+
 
 ; --- the one-bit classifier -------------------------------------------------
 ;
@@ -58,9 +90,6 @@ IF CLS_BINARY
 ; bit k set is the entry without it plus 2x_k - so the exporter's code is
 ; the row's sign pattern itself, bit i set for +1 on input i. Blocks are
 ; the outer loop: a table is built once and serves every part.
-DEF wClsPlaneLo EQU wClsTbl + 2048          ; $D800, page-aligned
-DEF wClsPlaneHi EQU wClsTbl + 2048 + 256    ; $D900
-
 ; de = 2 * activation \1 of the block at hClsSrc, sign-extended.
 MACRO CLS8_LOADK
     ldh a, [hClsSrc + 0]
@@ -155,34 +184,6 @@ Cls8_Build:
     CLS8_DOUBLE 7
     ret
 
-; One block's planes against CLS_OUTPUTS_PER_PART outputs: de = the weight
-; stream, hl = the sums. b is the plane page, c the code; sixteen unrolled
-; then a count, which costs a couple of percent against a full unroll and
-; a kilobyte of ROM0 less.
-Cls8_Rows:
-    ld a, CLS_OUTPUTS_PER_PART / 16
-    ldh [hClsOut], a
-.chunk
-    ld b, HIGH(wClsPlaneLo)
-REPT 16
-    ld a, [de]                      ; 2  the sign pattern
-    inc de                          ; 2
-    ld c, a                         ; 1
-    ld a, [bc]                      ; 2  low plane
-    add a, [hl]                     ; 2
-    ld [hl+], a                     ; 2
-    inc b                           ; 1
-    ld a, [bc]                      ; 2  high plane
-    adc a, [hl]                     ; 2
-    ld [hl+], a                     ; 2
-    dec b                           ; 1
-ENDR
-    ldh a, [hClsOut]
-    dec a
-    ldh [hClsOut], a
-    jp nz, .chunk                   ; the unrolled body is past jr's reach
-    ret
-
 Cls_BuildTables::
     ld a, CLS_TBL_BANK
     ldh [rSVBK], a
@@ -258,14 +259,113 @@ Cls_BuildTables::
 
 ELSE
 
-; --- the ternary classifier ------------------------------------------------
+; --- the ternary classifier, on planes -------------------------------------
 ;
-; The block kernel over all 512 outputs. Cls_BuildTables accumulates every
-; logit as an int16 block sum into wClsTbl - the bank that used to hold the
-; product tables holds the sums instead - and Cls_Argmax scans them. A
-; no-repeat retry is a rescan of kept sums, not a recompute: the storage the
-; register argmax deleted comes back because the sums are now cheap enough
-; to keep. Same signed compare, same tie rule, same blocked list.
+; The same planes as the one-bit classifier, filled with the 243 sums a block
+; of FIVE ternary inputs can produce (3^5 fits a byte of code), built by
+; tripling in mixed-radix order: entry 0 is minus the sum of the five (every
+; coefficient -1), and for input k the entries with digit k = 1 are the
+; entries with digit 0 plus x_k, digit 2 plus 2x_k. The exporter's code is
+; the digit string sum((c_i + 1) * 3^i), 0..242. A block past the end of the
+; vector carries digit 1 (coefficient zero) for the inputs that are not
+; there, so whatever lies past wXb never reaches a sum. Same rows as the
+; one-bit classifier, five MACs a lookup instead of eight, no quality lost
+; to a one-bit tied embedding.
+
+; de = activation \1 of the block at hClsSrc, sign-extended (not doubled).
+MACRO CLS5_LOADK
+    ldh a, [hClsSrc + 0]
+    ld l, a
+    ldh a, [hClsSrc + 1]
+    ld h, a
+    IF \1 > 0
+        ld a, l
+        add a, \1
+        ld l, a
+        ld a, h
+        adc a, 0
+        ld h, a
+    ENDC
+    ld a, [hl]
+    ld e, a
+    add a, a
+    sbc a, a
+    ld d, a
+ENDM
+
+; Entries \2 .. \2 + \1 - 1 = entries 0 .. \1 - 1 plus de. b:c reads, h:l
+; writes, low plane; the high plane is one page up.
+MACRO CLS5_SPREAD
+    ld c, 0
+    ld b, HIGH(wClsPlaneLo)
+    ld h, b
+    ld l, \2
+.s\@
+    ld a, [bc]
+    add a, e
+    ld [hl], a
+    inc b
+    inc h
+    ld a, [bc]
+    adc a, d
+    ld [hl], a
+    dec b
+    dec h
+    inc c
+    inc l
+    ld a, c
+    cp \1
+    jr nz, .s\@
+ENDM
+
+; Digit k: the entries with digit 1 (+x_k) and digit 2 (+2x_k), from the
+; entries with digit 0. \1 = 3^k.
+MACRO CLS5_TRIPLE
+    CLS5_SPREAD \1, \1
+    sla e
+    rl d
+    CLS5_SPREAD \1, 2 * \1
+ENDM
+
+; Builds the planes for the five activations at hl.
+Cls5_Build:
+    ld a, l
+    ldh [hClsSrc + 0], a
+    ld a, h
+    ldh [hClsSrc + 1], a
+    ld de, 0                        ; entry 0: minus the sum of the five
+    ld b, 5
+.sum
+    ld a, [hl+]
+    ld c, a
+    add a, a
+    sbc a, a
+    push hl
+    ld h, a
+    ld l, c
+    add hl, de
+    ld d, h
+    ld e, l
+    pop hl
+    dec b
+    jr nz, .sum
+    xor a
+    sub e
+    ld [wClsPlaneLo], a
+    ld a, 0
+    sbc a, d
+    ld [wClsPlaneHi], a
+    CLS5_LOADK 0
+    CLS5_TRIPLE 1
+    CLS5_LOADK 1
+    CLS5_TRIPLE 3
+    CLS5_LOADK 2
+    CLS5_TRIPLE 9
+    CLS5_LOADK 3
+    CLS5_TRIPLE 27
+    CLS5_LOADK 4
+    CLS5_TRIPLE 81
+    ret
 
 Cls_BuildTables::
     ld a, CLS_TBL_BANK
@@ -280,18 +380,22 @@ Cls_BuildTables::
     or c
     jr nz, .zero
 
-    ld a, LOW(wXb)
-    ld [wMvXPtr + 0], a
-    ld a, HIGH(wXb)
-    ld [wMvXPtr + 1], a
-    ld a, CLS_BLOCKS                ; the classifier's OWN block count: its
-    ld [wMvIn], a                   ; codes are ternary threes even when the
-    xor a                           ; model's rows are one-bit fours
+    xor a
+    ldh [hClsBlk], a
+.block
+    ldh a, [hClsBlk]                ; hl = wXb + block * 5
+    ld l, a
+    ld h, 0
+    add hl, hl
+    add hl, hl
+    ld c, a
+    ld b, 0
+    add hl, bc
+    ld de, wXb
+    add hl, de
+    call Cls5_Build
+    xor a
     ldh [hClsPart], a
-    ; One part of CLS_OUTPUTS_PER_PART outputs at a time - a part is what
-    ; fits a bank, and what wMvGroups can count - each accumulating into its
-    ; own stretch of the sum table. The manifest sits in ROM0, so it can be
-    ; read whatever bank the previous part left mapped.
 .part
     ldh a, [hClsPart]
     ld c, a
@@ -299,32 +403,43 @@ Cls_BuildTables::
     ld hl, cls_banks
     add hl, bc
     ld a, [hl]
-    ld [wMvBank], a
+    ld [rROMB0], a
     ld hl, cls_addrs
     add hl, bc
     add hl, bc                      ; word entries
     ld a, [hl+]
-    ld [wMvW + 0], a
+    ld e, a
     ld a, [hl]
-    ld [wMvW + 1], a
-    ld hl, CLS_OUTPUTS_PER_PART
-    call Matvec_SetOut
-    ld hl, wClsTbl
+    ld d, a                         ; de = the part's codes
+    ldh a, [hClsBlk]                ; + block * CLS_OUTPUTS_PER_PART bytes
+    add a, a                        ; (512 a block: two pages)
+    add a, d
+    ld d, a
+    ld hl, wClsTbl                  ; + part * CLS_OUTPUTS_PER_PART * 2
     ldh a, [hClsPart]
     or a
     jr z, .go
-    ld de, CLS_OUTPUTS_PER_PART * 2
+    ld a, HIGH(CLS_OUTPUTS_PER_PART * 2)
 .advance
-    add hl, de
+    add a, h
+    ld h, a
+    ldh a, [hClsPart]
     dec a
-    jr nz, .advance
+    jr z, .go
+    ld a, HIGH(CLS_OUTPUTS_PER_PART * 2)
+    jr .advance
 .go
-    call Matvec3_RunAccumHL
+    call Cls8_Rows                  ; the planes do not care how they were filled
     ldh a, [hClsPart]
     inc a
     ldh [hClsPart], a
     cp CLS_PARTS
     jr nz, .part
+    ldh a, [hClsBlk]
+    inc a
+    ldh [hClsBlk], a
+    cp CLS_BLOCKS5
+    jr nz, .block
     ret
 
 ENDC                                ; CLS_BINARY / ternary build
