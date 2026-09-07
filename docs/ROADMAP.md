@@ -32,7 +32,7 @@ character per cycle, once each has been trained and scored.
 
 ## The order of work
 
-**0. The BitNet question - settled: v0.5 goes binary.** One-bit weights
+**0. The BitNet question - the kernels are in; the model is not yet.** One-bit weights
 with int8 activations run subset-sum tables (every sum a block of inputs
 can produce, built once per block per token, one lookup per block per
 output): measured on the lab bench, a block of 5 in HRAM costs 6.97 cycles
@@ -41,10 +41,17 @@ against ternary's 10.70. Trained at equal seconds per character - binary
 at dim 96 with experts of 256 against the shipped ternary - binary scores
 1.086 bits per character to ternary's 1.115, with 2.1x the parameters at
 one bit each. Activation width stays at 8 bits: narrowing it cost 6% in
-bits and buys nothing under table kernels. The port is a twin that sums
-blocks of {-1,+1} coefficients exactly, an exporter that writes each
-block's table position, and the two kernels from the bench, all under
-golden strict.
+bits and buys nothing under table kernels. The port is done and golden strict:
+blocks of four in HRAM for the rows, blocks of eight on planes for a
+one-bit classifier, and a ternary classifier on 243-entry planes that
+takes 120K cycles off v0.4.1 with no retraining. But as shipped - on the
+twin, not the trainer - the one-bit dim-96 model scores 1.138 against
+1.126 for v0.4.1's weights on the same tree, at 44% more cycles: the
+trainer's per-token activation scaling is a normalization the cartridge's
+static exponents cannot follow, and the one-bit model leans on it. So the
+next lever is a per-token activation exponent on the cartridge (one max
+scan a vector, the requant shift adjusted by the difference); until it
+closes that gap, v0.5 ships ternary rows, and the one-bit kernels wait.
 
 **1. Make training cheap enough to sweep.** A 20K-step run is 3.5 hours and
 the step is launch-bound (0.37 s alone, 3 s if anything shares the GPU). The
