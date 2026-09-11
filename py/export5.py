@@ -6,9 +6,9 @@ sigmoid gate tables baked per calibrated exponent - and py/twin5.py is the
 authority this output must reproduce bit for bit on the cartridge.
 
 What is gone against the v0.4 exporter: RoPE, the exp/recip softmax tables,
-the score LUTs, every KV constant. What is new: per-layer gate tables
-(sigmoid at the layer's zl exponent, Q0.8) and the ReLU^2 shift, one signed
-byte per layer.
+the score LUTs, every KV constant. What is new: the gate as one shared byte
+table with each layer's sigmoid folded into a pair of side pages, and the
+ReLU^2 shift, one signed byte per layer.
 """
 
 import os
@@ -48,16 +48,21 @@ MATS = twin5.MATS                # wz wh wo w1 w2
 _blobs = []
 
 
-def blob(name, data, rom0=True, attach=None):
+def blob(name, data, rom0=True, attach=None, bank=None, align=None):
     """A blob becomes its own section - ROM0 or a bank of rgblink's choosing -
     unless `attach` names another blob, in which case it is placed inside
     THAT blob's section: the guarantee a per-row shift table needs to sit in
     the same bank as its matrix, which is the bank still mapped when the
     requant that reads it runs. ROM0 could not hold the shifts of a 96-wide
-    model with 256-wide experts; the banks can, and the code did not move."""
+    model with 256-wide experts; the banks can, and the code did not move.
+
+    `bank` pins a ROMX blob to one bank number (a table whose rows spill
+    across banks needs its parts consecutive, and rgblink only promises that
+    when told); `align` is the section's ALIGN[] power (8 = page aligned,
+    for a table the kernel indexes with `ld l, a` and a fixed high byte)."""
     data = bytes(data)
     (BLOBS / f"{name}.bin").write_bytes(data)
-    _blobs.append((name, len(data), rom0, attach))
+    _blobs.append((name, len(data), rom0, attach, bank, align))
     return name
 
 
@@ -180,6 +185,51 @@ def product_lut(codebook):
     return bytes(out)
 
 
+# The gate table's geometry, shared with src/gate.asm: a row is the 512
+# entries u = d + 256 for d = ht - h in [-254, 254] (u = 0, 1 and 511 are
+# never reached and hold whatever the formula gives), 32 rows fill a bank,
+# and the parts sit in consecutive banks from GATE_BANK0 so a row's bank is
+# GATE_BANK0 + row // 32 and its high address byte $40 + 2 * (row % 32).
+GATE_ROW_BYTES = 512
+GATE_ROWS_PER_BANK = 0x4000 // GATE_ROW_BYTES
+GATE_BANK0 = 1
+
+
+def gate_entry(v, u):
+    """One table byte: (T + 128) mod 256 with T = (v*(u-256) + 128) >> 8, the
+    twin's shr_round of the gated difference. The loop adds h ^ $80 to it and
+    the byte sum is h + T - the new state, in range by the convex bound."""
+    return ((((v * (u - 256)) + 128) >> 8) + 128) & 0xFF
+
+
+def gate_tables(sig_tables):
+    """(rows, parts, sides): the sorted distinct sigmoid values across every
+    layer's table, the table split into 16 KB bank parts, and per layer one
+    512-byte side page - bytes 0..255 the bank of raw byte zl's row, bytes
+    256..511 that row's high address byte for d < 0 (the d >= 0 half is
+    one page up, which the kernel adds from the subtract's borrow)."""
+    rows = sorted({int(v) for t in sig_tables for v in t})
+    u = np.arange(GATE_ROW_BYTES, dtype=np.int64) - 256
+    table = bytearray()
+    for v in rows:
+        table += bytes(int(b) for b in
+                       ((((v * u) + 128) >> 8) + 128) & 0xFF)
+    assert len(table) == len(rows) * GATE_ROW_BYTES
+    per = GATE_ROWS_PER_BANK * GATE_ROW_BYTES
+    parts = [bytes(table[i:i + per]) for i in range(0, len(table), per)]
+    assert GATE_BANK0 + len(parts) <= 256, "the bank numbers must fit ROMB0"
+    row_of = {v: r for r, v in enumerate(rows)}
+    sides = []
+    for t in sig_tables:
+        bank, hi = bytearray(256), bytearray(256)
+        for zl in range(256):                       # the raw int8 byte
+            r = row_of[int(t[zl ^ 0x80])]           # sig index is zl + 128
+            bank[zl] = GATE_BANK0 + r // GATE_ROWS_PER_BANK
+            hi[zl] = 0x40 + 2 * (r % GATE_ROWS_PER_BANK)
+        sides.append(bytes(bank + hi))
+    return rows, parts, sides
+
+
 def nibble_luts():
     hi, lo = bytearray(), bytearray()
     for x in range(-128, 128):
@@ -239,11 +289,24 @@ def main():
     qsq = (np.arange(257, dtype=np.int64) ** 2) // 4
     blob("tbl_qsq", qsq.astype("<u2").tobytes())
 
-    # Gate tables: sigmoid at each layer's zl exponent, Q0.8, indexed zl+128.
-    # Resident in ROM0 - the gate step sits between two banked matvecs and
-    # having its table always mapped keeps the kernel free of switches.
-    for l in range(c.layers):
-        blob(f"sig_l{l}", q.sig_tables[l].astype(np.uint8).tobytes())
+    # The gate as one byte table, the sigmoid folded in (src/gate.asm). The
+    # twin's line is h_new = sat8(shr_round(zg*ht + (256-zg)*h, 8)) with
+    # zg = sig_l[zl + 128]; it equals h + ((zg*(ht-h) + 128) >> 8) for every
+    # input and never leaves [min(h,ht), max(h,ht)], so one byte per entry
+    # is the whole answer (py/tests/test_gate_table.py re-proves both over
+    # all 256 x 255 x 255 inputs). One row per distinct sigmoid value, shared
+    # by every layer; the per-layer side pages map a raw zl byte to its
+    # row's bank and high address byte, so the loop never sees zg at all.
+    gate_rows, gate_parts, gate_sides = gate_tables(q.sig_tables)
+    for i, part in enumerate(gate_parts):
+        blob(f"gate_rows_p{i}", part, rom0=False, bank=GATE_BANK0 + i)
+    for l, side in enumerate(gate_sides):
+        blob(f"gate_side_l{l}", side, align=8)
+    const("GATE_BANK0", GATE_BANK0)
+    const("GATE_BANKS", len(gate_parts))
+    const("GATE_ROWS", len(gate_rows))
+    print(f"gate: {len(gate_rows)} sigmoid rows shared by {c.layers} layers, "
+          f"{len(gate_parts)} banks of {GATE_ROW_BYTES} B rows")
 
     # ReLU^2: u = sat8(shr_round(relu(a)^2, e_hb - 2*e_h1)), per layer. The
     # register path shifts right only; a negative count would need the old
@@ -530,13 +593,19 @@ def main():
     lines.append('INCLUDE "model.inc"')
     lines.append("")
     attached = {}
-    for name, size, rom0, attach in _blobs:
+    for name, size, rom0, attach, bank, align in _blobs:
         if attach:
             attached.setdefault(attach, []).append((name, size))
-    for name, size, rom0, attach in _blobs:
+    for name, size, rom0, attach, bank, align in _blobs:
         if attach:
             continue
-        lines.append(f'SECTION "{name}", {"ROM0" if rom0 else "ROMX"}')
+        where = "ROM0" if rom0 else "ROMX"
+        if bank is not None:
+            assert not rom0, f"{name}: only a ROMX blob takes a bank"
+            where += f", BANK[{bank}]"
+        if align is not None:
+            where += f", ALIGN[{align}]"
+        lines.append(f'SECTION "{name}", {where}')
         lines.append(f'{name}:: INCBIN "build/blobs/{name}.bin"   ; {size} bytes')
         for aname, asize in attached.get(name, []):
             lines.append(f"{aname}:: INCBIN \"build/blobs/{aname}.bin\"   ; {asize} bytes, in the bank of {name}")
@@ -588,8 +657,6 @@ def main():
                 f"{name}_sh_l{l}" for l in range(c.layers)))
             lines.append(f"{name}_shbanks:: db " + ", ".join(
                 f"BANK({name}_sh_l{l})" for l in range(c.layers)))
-    lines.append("sig_tables:: dw " + ", ".join(
-        f"sig_l{l}" for l in range(c.layers)))
     lines.append("")
 
     WEIGHTS_ASM.write_text("\n".join(lines), encoding="utf-8")

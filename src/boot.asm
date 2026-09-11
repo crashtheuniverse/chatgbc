@@ -86,7 +86,7 @@ Boot::
     call RecordStatus
     call Measure
     call Prof_Start             ; time the gate row while checking it: one
-    call GateSelftest           ; Sigmoid_Row + one Gate_Update over 64 dims
+    call GateSelftest           ; Gate_Update over 64 dims, plus the copies
     call Prof_Stop
     ld hl, wProfCycles
     ld de, wGateCycles
@@ -263,9 +263,11 @@ sMv:       db "CYC/TOK ", 0
 
 INCLUDE "font.inc"
 
-; Runs Sigmoid_Row + Gate_Update on the exporter's known-answer vectors, so
-; the recurrent kernel is judged in isolation before the forward pass ever
-; runs. The harness compares wGateOut against test_gate_out.
+; Runs Gate_Update on the exporter's known-answer vectors (layer 0's
+; sigmoid, the vectors in layer 0's slices), so the recurrent kernel is
+; judged in isolation before the forward pass ever runs. The harness
+; compares wGateOut against test_gate_out; Generate re-zeroes wH before any
+; token runs, so the state the test leaves behind is never seen.
 GateSelftest::
     ld hl, test_gate_zl
     ld de, wZl
@@ -276,22 +278,18 @@ GateSelftest::
     ld bc, DIM
     call CopyBytes
     ld hl, test_gate_h
-    ld de, wGateOut
+    ld de, wH
     ld bc, DIM
     call CopyBytes
 
-    ld a, LOW(sig_l0)
-    ld [wGruSig + 0], a
-    ld a, HIGH(sig_l0)
-    ld [wGruSig + 1], a
-    call Sigmoid_Row
+    xor a
+    ld [wLayer], a
+    call Gate_Update
 
-    ld a, LOW(wGateOut)
-    ld [wGruH + 0], a
-    ld a, HIGH(wGateOut)
-    ld [wGruH + 1], a
-    jp Gate_Update
+    ld hl, wH
+    ld de, wGateOut
+    ld bc, DIM
+    jp CopyBytes
 
 SECTION "Gate selftest state", WRAM0
-wGateOut:: ds DIM
 wGateCycles:: ds 4

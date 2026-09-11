@@ -17,7 +17,6 @@ wDbgFfn::   ds DIM
 wDbgRes::   ds DIM
 wDbgXb::    ds DIM              ; layer 0: post-rmsnorm input to wz/wh
 wDbgZl::    ds DIM              ; layer 0: gate logits
-wDbgZg::    ds DIM              ; layer 0: gates after sigmoid
 wDbgHt::    ds DIM              ; layer 0: candidate state
 wDbgH1::    ds HIDDEN           ; layer 0: w1 output
 wDbgHb::    ds HIDDEN           ; layer 0: after relu^2
@@ -149,12 +148,16 @@ ELSE
 ENDC
     CENSUS_END 1
     CENSUS_START
+    ld hl, wZl                      ; this layer's slice: the gate walks all
+    ld a, [wLayer]                  ; three buffers with one page index
+    call LayerSlice
+    push hl
     ld hl, wz_shifts
     ld a, [wLayer]
     call ShiftTable
     ld d, h
     ld e, l
-    ld bc, wZl
+    pop bc
     call Requant_All16
     CENSUS_END 2
 
@@ -172,30 +175,9 @@ ENDC
     call CopyBytes
 :
     CENSUS_END 17
-    CENSUS_START
-    ld hl, sig_tables               ; the layer's sigmoid, exponent baked in
-    ld a, [wLayer]
-    ld c, a
-    ld b, 0
-    add hl, bc
-    add hl, bc
-    ld a, [hl+]
-    ld [wGruSig + 0], a
-    ld a, [hl]
-    ld [wGruSig + 1], a
-    call Sigmoid_Row
-    CENSUS_END 3
-    CENSUS_START
-    ld a, [wLayer]
-    or a
-    jr nz, :+
-    ld hl, wZg
-    ld de, wDbgZg
-    ld bc, DIM
-    call CopyBytes
-:
-    CENSUS_END 17
 
+    ; No sigmoid pass: the gate reads its logits raw, through side pages
+    ; that fold the layer's sigmoid into the table row (src/gate.asm).
     CENSUS_START
     ld hl, wXb                      ; the candidate state
     call SetXPtr
@@ -222,30 +204,24 @@ ELSE
 ENDC
     CENSUS_END 4
     CENSUS_START
+    ld hl, wHt
+    ld a, [wLayer]
+    call LayerSlice
+    push hl
     ld hl, wh_shifts
     ld a, [wLayer]
     call ShiftTable
     ld d, h
     ld e, l
-    ld bc, wHt
+    pop bc
     call Requant_All16
     CENSUS_END 5
 
     CENSUS_START
-    ld hl, wH                       ; this layer's 64 bytes of memory
-    ld a, [wLayer]
-    ld de, DIM
-    call OffsetByLayer
-    ld a, l
-    ld [wGruH + 0], a
-    ld a, h
-    ld [wGruH + 1], a
-    CENSUS_END 17
-    CENSUS_START
     ld a, [wLayer]
     or a
     jr nz, :+
-    ld hl, wHt
+    ld hl, wHt                      ; layer 0's slice is the buffer's start
     ld de, wDbgHt
     ld bc, DIM
     call CopyBytes
@@ -259,20 +235,16 @@ ENDC
     ld a, [wLayer]                  ; snapshot layer 0's state for diffstep
     or a
     jr nz, :+
-    ld a, [wGruH + 0]
-    ld l, a
-    ld a, [wGruH + 1]
-    ld h, a
+    ld hl, wH
     ld de, wDbgAtt
     ld bc, DIM
     call CopyBytes
 :
     CENSUS_END 17
     CENSUS_START
-    ld a, [wGruH + 0]               ; project the state back into the stream
-    ld l, a
-    ld a, [wGruH + 1]
-    ld h, a
+    ld hl, wH                       ; project the state back into the stream
+    ld a, [wLayer]
+    call LayerSlice
     call SetXPtr
 IF TERNARY || BINARY
     ld a, BLOCKS_DIM
@@ -764,6 +736,11 @@ OffsetByLayer:
     dec b
     jr nz, .loop
     ret
+
+; hl -> layer a's DIM-wide slice of the per-layer buffer at hl. Clobbers de.
+LayerSlice:
+    ld de, DIM
+    jr OffsetByLayer
 
 ; de[i] = sat8(de[i] + hl[i]) for b elements.
 ;

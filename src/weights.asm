@@ -7,14 +7,26 @@ tbl_rsqrt:: INCBIN "build/blobs/tbl_rsqrt.bin"   ; 512 bytes
 SECTION "tbl_qsq", ROM0
 tbl_qsq:: INCBIN "build/blobs/tbl_qsq.bin"   ; 514 bytes
 
-SECTION "sig_l0", ROM0
-sig_l0:: INCBIN "build/blobs/sig_l0.bin"   ; 256 bytes
+SECTION "gate_rows_p0", ROMX, BANK[1]
+gate_rows_p0:: INCBIN "build/blobs/gate_rows_p0.bin"   ; 16384 bytes
 
-SECTION "sig_l1", ROM0
-sig_l1:: INCBIN "build/blobs/sig_l1.bin"   ; 256 bytes
+SECTION "gate_rows_p1", ROMX, BANK[2]
+gate_rows_p1:: INCBIN "build/blobs/gate_rows_p1.bin"   ; 16384 bytes
 
-SECTION "sig_l2", ROM0
-sig_l2:: INCBIN "build/blobs/sig_l2.bin"   ; 256 bytes
+SECTION "gate_rows_p2", ROMX, BANK[3]
+gate_rows_p2:: INCBIN "build/blobs/gate_rows_p2.bin"   ; 16384 bytes
+
+SECTION "gate_rows_p3", ROMX, BANK[4]
+gate_rows_p3:: INCBIN "build/blobs/gate_rows_p3.bin"   ; 11264 bytes
+
+SECTION "gate_side_l0", ROM0, ALIGN[8]
+gate_side_l0:: INCBIN "build/blobs/gate_side_l0.bin"   ; 512 bytes
+
+SECTION "gate_side_l1", ROM0, ALIGN[8]
+gate_side_l1:: INCBIN "build/blobs/gate_side_l1.bin"   ; 512 bytes
+
+SECTION "gate_side_l2", ROM0, ALIGN[8]
+gate_side_l2:: INCBIN "build/blobs/gate_side_l2.bin"   ; 512 bytes
 
 SECTION "r2_shift", ROM0
 r2_shift:: INCBIN "build/blobs/r2_shift.bin"   ; 3 bytes
@@ -253,4 +265,3 @@ w2_banks:: db BANK(w2_l0_e0), BANK(w2_l0_e1), BANK(w2_l0_e2), BANK(w2_l0_e3), BA
 w2_addrs:: dw w2_l0_e0, w2_l0_e1, w2_l0_e2, w2_l0_e3, w2_l1_e0, w2_l1_e1, w2_l1_e2, w2_l1_e3, w2_l2_e0, w2_l2_e1, w2_l2_e2, w2_l2_e3
 w2_shifts:: dw w2_sh_l0_e0, w2_sh_l0_e1, w2_sh_l0_e2, w2_sh_l0_e3, w2_sh_l1_e0, w2_sh_l1_e1, w2_sh_l1_e2, w2_sh_l1_e3, w2_sh_l2_e0, w2_sh_l2_e1, w2_sh_l2_e2, w2_sh_l2_e3
 w2_shbanks:: db BANK(w2_sh_l0_e0), BANK(w2_sh_l0_e1), BANK(w2_sh_l0_e2), BANK(w2_sh_l0_e3), BANK(w2_sh_l1_e0), BANK(w2_sh_l1_e1), BANK(w2_sh_l1_e2), BANK(w2_sh_l1_e3), BANK(w2_sh_l2_e0), BANK(w2_sh_l2_e1), BANK(w2_sh_l2_e2), BANK(w2_sh_l2_e3)
-sig_tables:: dw sig_l0, sig_l1, sig_l2
