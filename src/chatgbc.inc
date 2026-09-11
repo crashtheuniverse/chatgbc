@@ -72,6 +72,13 @@ DEF APP_GEN_STEPS EQU 160
 ; harness fills in the prompt and step count, then writes LAB_GO.
 DEF LAB_IDLE EQU $A5
 DEF LAB_GO   EQU $C3
+; A lab op: RmsNorm alone, on wX as the harness filled it with wRnGain and
+; wRnShift as set, into wXb - the kernel by itself for py/tests/test_rmsnorm.py.
+DEF LAB_GO_NORM EQU $D2
+; Another: ShiftRound24 on the signed 24-bit value at wX+0..2 by the count at
+; wX+3, result to wXb+0..2 - the byte peel has no caller on this model's own
+; shifts, so py/tests/test_regmath.py exercises every count this way.
+DEF LAB_GO_SHIFT EQU $E1
 
 ; --- Input -----------------------------------------------------------------
 ; Joy_Read returns the d-pad in the high nibble and buttons in the low one.

@@ -48,16 +48,20 @@ MATS = twin5.MATS                # wz wh wo w1 w2
 _blobs = []
 
 
-def blob(name, data, rom0=True, attach=None):
+def blob(name, data, rom0=True, attach=None, align=None):
     """A blob becomes its own section - ROM0 or a bank of rgblink's choosing -
     unless `attach` names another blob, in which case it is placed inside
     THAT blob's section: the guarantee a per-row shift table needs to sit in
     the same bank as its matrix, which is the bank still mapped when the
     requant that reads it runs. ROM0 could not hold the shifts of a 96-wide
-    model with 256-wide experts; the banks can, and the code did not move."""
+    model with 256-wide experts; the banks can, and the code did not move.
+
+    `align` is a power-of-two exponent for the section's start: a kernel
+    that walks a table or a row through one low address byte needs it not
+    to cross a 256-byte page, and asserts so at link time."""
     data = bytes(data)
     (BLOBS / f"{name}.bin").write_bytes(data)
-    _blobs.append((name, len(data), rom0, attach))
+    _blobs.append((name, len(data), rom0, attach, align))
     return name
 
 
@@ -236,8 +240,10 @@ def main():
 
     # --- lookup tables ---
     blob("tbl_rsqrt", Q.TABLES["rsqrt"].astype("<u2").tobytes())
+    # Page-aligned: the norm's sum of squares forms the entry offset 4|x| as
+    # a byte plus a page carry instead of a 16-bit add.
     qsq = (np.arange(257, dtype=np.int64) ** 2) // 4
-    blob("tbl_qsq", qsq.astype("<u2").tobytes())
+    blob("tbl_qsq", qsq.astype("<u2").tobytes(), align=8)
 
     # Gate tables: sigmoid at each layer's zl exponent, Q0.8, indexed zl+128.
     # Resident in ROM0 - the gate step sits between two banked matvecs and
@@ -323,15 +329,32 @@ def main():
     const("CLS_OUTPUTS_PER_PART", per)
 
     # --- rmsnorm gains and shifts ---
-    blob("rms_att", q.weights["rms_att"].astype(np.int8).tobytes())
-    blob("rms_ffn", q.weights["rms_ffn"].astype(np.int8).tobytes())
-    blob("rms_final", q.weights["rms_final"].astype(np.int8).tobytes())
+    # The kernel (src/rmsnorm.asm) walks a gain row through its low address
+    # byte, so a row must not cross a 256-byte page: 64-aligned blobs keep
+    # every DIM-wide row inside one. It multiplies by the gain as an unsigned
+    # 7-bit number, and lands the gain product on 16 bits before saturating,
+    # which needs the closing shift to be at least 7 (|xh * g| < 2^22).
+    # Both are properties of this checkpoint's calibration, checked here so
+    # a model that breaks them fails at export, not by a wrong integer.
+    row_align = int(np.log2(c.dim))
+    assert (1 << row_align) == c.dim <= 256, "gain rows must be a power of two wide"
+    for name in ("rms_att", "rms_ffn", "rms_final"):
+        g = q.weights[name].astype(np.int64)
+        assert g.min() >= 0 and g.max() <= 127, f"{name} gains outside 0..127"
+        blob(name, q.weights[name].astype(np.int8).tobytes(), align=row_align)
     const("RMS_ROOTN", int(np.log2(c.dim)) // 2)
-    blob("rmsatt_shift", sbytes(S("xb_att", l) - (-11 + q.wexp["rms_att"])
-                                for l in range(c.layers)))
-    blob("rmsffn_shift", sbytes(S("xb_ffn", l) - (-11 + q.wexp["rms_ffn"])
-                                for l in range(c.layers)))
-    const("RMSFINAL_SHIFT", S("xb_final") - (-11 + q.wexp["rms_final"]))
+    rms_shifts = {
+        "rmsatt_shift": [S("xb_att", l) - (-11 + q.wexp["rms_att"])
+                         for l in range(c.layers)],
+        "rmsffn_shift": [S("xb_ffn", l) - (-11 + q.wexp["rms_ffn"])
+                         for l in range(c.layers)],
+        "RMSFINAL_SHIFT": [S("xb_final") - (-11 + q.wexp["rms_final"])],
+    }
+    for name, shifts in rms_shifts.items():
+        assert min(shifts) >= 7 and max(shifts) <= 24, f"{name} {shifts} outside 7..24"
+    blob("rmsatt_shift", sbytes(rms_shifts["rmsatt_shift"]))
+    blob("rmsffn_shift", sbytes(rms_shifts["rmsffn_shift"]))
+    const("RMSFINAL_SHIFT", rms_shifts["RMSFINAL_SHIFT"][0])
 
     # --- matrices: codebook product tables, weights, per-row requant shifts ---
     # wo lands directly on the stream's exponent, exactly as v0.4's did: the
@@ -530,13 +553,16 @@ def main():
     lines.append('INCLUDE "model.inc"')
     lines.append("")
     attached = {}
-    for name, size, rom0, attach in _blobs:
+    for name, size, rom0, attach, align in _blobs:
         if attach:
             attached.setdefault(attach, []).append((name, size))
-    for name, size, rom0, attach in _blobs:
+    for name, size, rom0, attach, align in _blobs:
         if attach:
             continue
-        lines.append(f'SECTION "{name}", {"ROM0" if rom0 else "ROMX"}')
+        where = "ROM0" if rom0 else "ROMX"
+        if align is not None:
+            where += f", ALIGN[{align}]"
+        lines.append(f'SECTION "{name}", {where}')
         lines.append(f'{name}:: INCBIN "build/blobs/{name}.bin"   ; {size} bytes')
         for aname, asize in attached.get(name, []):
             lines.append(f"{aname}:: INCBIN \"build/blobs/{aname}.bin\"   ; {asize} bytes, in the bank of {name}")

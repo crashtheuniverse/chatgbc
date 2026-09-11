@@ -31,6 +31,10 @@ Run::
     ld [wLabState], a
 .wait
     ld a, [wLabGo]
+    cp LAB_GO_NORM
+    jr z, .norm
+    cp LAB_GO_SHIFT
+    jr z, .shift
     cp LAB_GO
     jr nz, .wait
     xor a
@@ -46,13 +50,40 @@ Run::
 
     ; Last, so the forward pass cannot overwrite the buffer it checks.
     call MeasureSelftest
+    jr .done
 
+.norm                           ; one kernel, on the vector the harness wrote
+    xor a
+    ld [wLabState], a
+    call RmsNorm
+    jr .done
+
+.shift                          ; e:hl = wX+0..2, b = wX+3 -> wXb+0..2
+    xor a
+    ld [wLabState], a
+    ld a, [wX + 0]
+    ld l, a
+    ld a, [wX + 1]
+    ld h, a
+    ld a, [wX + 2]
+    ld e, a
+    ld a, [wX + 3]
+    ld b, a
+    call ShiftRound24
+    ld a, l
+    ld [wXb + 0], a
+    ld a, h
+    ld [wXb + 1], a
+    ld a, e
+    ld [wXb + 2], a
+
+.done
     ld a, READY_MAGIC
     ld [wReady], a
 .held
-    ld a, [wLabGo]              ; hold the result until the harness clears it
-    cp LAB_GO
-    jr z, .held
+    ld a, [wLabGo]              ; hold the result until the harness clears it,
+    or a                        ; whichever go value started this run
+    jr nz, .held
     jr .idle
 
 Lab_DefaultPrompt:

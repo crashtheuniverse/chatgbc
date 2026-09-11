@@ -116,11 +116,7 @@ ForwardLayer::
     ld a, [hl]
     ld [wRnShift], a
     CENSUS_START
-    ld hl, wX
-    call SetRnSrc
-    ld hl, wXb
-    call SetRnDst
-    call RmsNorm
+    call RmsNorm                    ; wX -> wXb
     CENSUS_END 0
 
     CENSUS_START
@@ -355,11 +351,7 @@ ENDC
     add hl, bc
     ld a, [hl]
     ld [wRnShift], a
-    ld hl, wX
-    call SetRnSrc
-    ld hl, wXb
-    call SetRnDst
-    call RmsNorm
+    call RmsNorm                    ; wX -> wXb
     CENSUS_END 10
 
 IF EXPERTS
@@ -740,20 +732,6 @@ ENDC
 ENDC
 ENDC                                ; EXPERTS
 
-SetRnSrc:
-    ld a, l
-    ld [wRnSrc + 0], a
-    ld a, h
-    ld [wRnSrc + 1], a
-    ret
-
-SetRnDst:
-    ld a, l
-    ld [wRnDst + 0], a
-    ld a, h
-    ld [wRnDst + 1], a
-    ret
-
 ; hl += a * de
 OffsetByLayer:
     or a
@@ -835,11 +813,7 @@ Forward::
     ld [wRnGain + 1], a
     ld a, RMSFINAL_SHIFT
     ld [wRnShift], a
-    ld hl, wX
-    call SetRnSrc
-    ld hl, wXb
-    call SetRnDst
-    call RmsNorm
+    call RmsNorm                    ; wX -> wXb
     CENSUS_END 19
 IF DEF(CENSUS)
     CENSUS_START
