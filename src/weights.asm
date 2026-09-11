@@ -32,10 +32,7 @@ SECTION "emb_rows_p3", ROMX
 emb_rows_p3:: INCBIN "build/blobs/emb_rows_p3.bin"   ; 16384 bytes
 
 SECTION "cls_w_p0", ROMX
-cls_w_p0:: INCBIN "build/blobs/cls_w_p0.bin"   ; 6656 bytes
-
-SECTION "cls_w_p1", ROMX
-cls_w_p1:: INCBIN "build/blobs/cls_w_p1.bin"   ; 6656 bytes
+cls_w_p0:: INCBIN "build/blobs/cls_w_p0.bin"   ; 16384 bytes
 
 SECTION "lut_cls_hi", ROMX
 lut_cls_hi:: INCBIN "build/blobs/lut_cls_hi.bin"   ; 1 bytes
@@ -229,8 +226,8 @@ test_gate_out:: INCBIN "build/blobs/test_gate_out.bin"   ; 64 bytes
 SECTION "Model manifest", ROM0
 emb_banks:: db BANK(emb_rows_p0), BANK(emb_rows_p1), BANK(emb_rows_p2), BANK(emb_rows_p3)
 emb_addrs:: dw emb_rows_p0, emb_rows_p1, emb_rows_p2, emb_rows_p3
-cls_banks:: db BANK(cls_w_p0), BANK(cls_w_p1)
-cls_addrs:: dw cls_w_p0, cls_w_p1
+cls_banks:: db BANK(cls_w_p0)
+cls_addrs:: dw cls_w_p0
 wz_banks:: db BANK(wz_l0), BANK(wz_l1), BANK(wz_l2)
 wz_addrs:: dw wz_l0, wz_l1, wz_l2
 wz_shifts:: dw wz_sh_l0, wz_sh_l1, wz_sh_l2

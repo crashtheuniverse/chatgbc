@@ -145,25 +145,36 @@ def binary_weight_blob(name, b, block=twin5.BINARY_BLOCK, hram=True):
     return blob(name, bytes(data), rom0=False)
 
 
-def ternary_plane_blob(name, t, block=5):
-    """Ternary (out, in) in {-1, 0, 1} -> input-major codes for the 243-entry
-    planes: per block of five inputs, one byte per output, the digit string
-    sum((c_i + 1) * 3^i). A partial last block is padded with zero
-    coefficients (digit 1), so the input past the vector never reaches a
-    sum whatever it holds."""
+CLS4_ROW = 16               # bytes a token's row takes in the output-major stream
+
+
+def ternary_row_blob(name, t):
+    """Ternary (out, in) in {-1, 0, 1} -> OUTPUT-major codes for the block-4
+    tables of src/cls4.asm: per output one row of CLS4_ROW bytes, byte k the
+    low address byte of block k's int16 entry, 2 * sum((c_i + 1) * 3^i) over
+    the block's four inputs, 0..160. A partial last block is padded with zero
+    coefficients (digit 1), so the input past the vector never reaches a sum
+    whatever it holds.
+
+    Odd rows carry their blocks in REVERSE order. The scan walks the sixteen
+    table pages upward on an even token and downward on the odd one that
+    follows, so the page register is already right when the next row starts
+    and never needs resetting - two cycles an output, for a byte order that
+    only this function and that scan know about."""
     out, n_in = t.shape
-    pad = (-n_in) % block
+    pad = (-n_in) % 4
     tp = np.concatenate([t, np.zeros((out, pad), dtype=t.dtype)], axis=1)
-    blocks = tp.reshape(out, -1, block)
-    data = bytearray()
-    for k in range(blocks.shape[1]):
-        for o in range(out):
-            code = 0
-            for i in range(block):
-                code += (int(blocks[o, k, i]) + 1) * 3 ** i
-            data.append(code)
-    assert len(data) <= 0x4000, f"{name}: {len(data)} bytes exceeds a bank"
-    return blob(name, bytes(data), rom0=False)
+    blocks = tp.reshape(out, -1, 4).astype(np.int64) + 1          # digits 0..2
+    assert blocks.shape[1] == CLS4_ROW, (
+        f"{name}: {blocks.shape[1]} blocks of four; the scan's token arithmetic "
+        f"and its one WRAM bank of tables assume exactly {CLS4_ROW}")
+    codes = (blocks * np.array([1, 3, 9, 27])).sum(axis=2) * 2      # (out, 16)
+    assert codes.min() >= 0 and codes.max() <= 160
+    codes[1::2] = codes[1::2, ::-1]
+    assert out % 2 == 0, f"{name}: the scan takes tokens two at a time"
+    data = codes.astype(np.uint8).tobytes()
+    assert len(data) == out * CLS4_ROW <= 0x4000, f"{name}: {len(data)} bytes exceeds a bank"
+    return blob(name, data, rom0=False)
 
 
 def sbytes(values):
@@ -292,20 +303,25 @@ def main():
         blob("lut_cls_hi", bytes(1), rom0=False)
         blob("lut_cls_lo", bytes(1), rom0=False)
     elif q.ternary_cls:
-        # Blocks of five ternary inputs against 243-entry planes in the sum
-        # bank, in parts of 512 outputs: 13 blocks x 512 codes = 6,656 bytes
-        # a part at 64 wide, 20 x 512 at 96. The sums are exact whatever the
-        # blocking, so the twin's block-5 sums equal its block-3 ones and
-        # argmax over the stored sums is unchanged; a no-repeat retry is a
-        # rescan, not a recompute.
-        per = 512
-        blocks5 = -(-c.dim // twin5.TERNARY_CLS_BLOCK)
-        assert c.vocab % per == 0 and blocks5 * per <= 0x4000 and c.vocab * 2 + 512 <= 4096
+        # Output-major over sixteen block-of-four tables (src/cls4.asm): a
+        # token is one 16-byte row of codes, a part is the 1024 rows that fill
+        # a bank, and the tables are the 16 pages of one WRAM bank. The sums
+        # are exact whatever the blocking (TERNARY_ACC_SHIFT = 0), so the
+        # twin's logits are what the scan sums in its register pair; only
+        # the argmax and the runner-up are ever kept.
+        blocks4 = -(-c.dim // 4)
+        assert blocks4 == CLS4_ROW and blocks4 * 256 <= 4096, (
+            f"dim {c.dim}: {blocks4} blocks of four need {blocks4} table pages; "
+            f"the scan is wired for {CLS4_ROW} (one WRAM bank)")
+        per = 0x4000 // CLS4_ROW
+        assert c.vocab % per == 0, (
+            f"vocab {c.vocab}: Cls4_Scan ends a part where the bank ends, so "
+            f"every part must hold exactly {per} tokens")
         nparts = c.vocab // per
         t_cls = q.weights["tok_emb"].astype(np.int8)
         for i in range(nparts):
-            ternary_plane_blob(f"cls_w_p{i}", t_cls[i * per:(i + 1) * per], twin5.TERNARY_CLS_BLOCK)
-        const("CLS_BLOCKS5", blocks5)
+            ternary_row_blob(f"cls_w_p{i}", t_cls[i * per:(i + 1) * per])
+        const("CLS_BLOCKS4", blocks4)
         blob("lut_cls_hi", bytes(1), rom0=False)   # unused; the manifest names them
         blob("lut_cls_lo", bytes(1), rom0=False)
     else:

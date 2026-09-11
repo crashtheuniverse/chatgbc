@@ -57,6 +57,11 @@ DEF OUT_MAX EQU 176
 DEF NOREPEAT_N EQU 4
 DEF NOREPEAT_TRIES EQU 8
 
+; The WRAM bank the classifier's tables live in. v0.5 has no KV cache, so
+; every switchable bank is free; 7 is kept for continuity with v0.4, where
+; claiming a KV bank by mistake once cost an afternoon.
+DEF CLS_TBL_BANK EQU 7
+
 ; The most tokens one reply may run. The newline normally ends a turn well
 ; before this; the cap is for a reply that never finds one.
 DEF CHAT_REPLY_MAX EQU 48
@@ -72,6 +77,9 @@ DEF APP_GEN_STEPS EQU 160
 ; harness fills in the prompt and step count, then writes LAB_GO.
 DEF LAB_IDLE EQU $A5
 DEF LAB_GO   EQU $C3
+; Classify wXb as the harness filled it - tables, scan, top two into
+; wClsArg / wClsArg2 - and nothing else: the classifier's unit-test entry.
+DEF LAB_GO_CLS EQU $C4
 
 ; --- Input -----------------------------------------------------------------
 ; Joy_Read returns the d-pad in the high nibble and buttons in the low one.
