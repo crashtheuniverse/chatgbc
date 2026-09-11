@@ -1,100 +1,84 @@
-# v0.5: spend the headroom
+# v0.9: the speed release
 
-v0.4.1 closed the gap the cartridge used to cause: what ships scores within 2%
-of what was trained. It did not close the gap between models. stories260K in
-float is 0.876 bits per character on the held-out stories; ours is 1.123. The
-cartridge is now seven times faster per character than it needs to be for
-the reader, so v0.5 is about turning cycles into bits.
+v0.4.1 ships 1.146 bits per character at 1.03 s a token, 0.30 s a
+character. v0.5 through v0.8 do not exist: the work that was planned for
+them - one-bit kernels, a plane classifier, the stream on the trainer's
+grid - is on this branch already, and an audit of the whole token showed
+that the biggest gain left was not a better model but a cheaper token for
+the model we have. So the version number jumps. **v0.9 is the same weights
+at about twice the speed, bit for bit**, and v1.0 is what is done with the
+time that buys.
 
-**The goal, in the numbers VERSIONS.md is measured in:** as shipped, at most
-**1.00 bits/char** (13% under v0.4.1) at no more than **0.6 s/char** on
-held-out text. The stretch is v0.3's float ceiling, 0.876, on the cartridge.
-Every candidate is priced before it is trained and scored on the twin before
-it is believed.
+## What the audit found
 
-## What the cycles buy
+Every stage of the token was read as a function: what inputs it takes,
+how many distinct outputs it can produce. Where the answer is small, the
+stage collapses into a lookup, the way three ternary weights times three
+activations became a 27-entry table in v0.4. Where the output is mostly
+one value - ReLU² is 82% zeros - the work that produces the other value
+can be skipped. Every claim was recounted by a second reader against the
+instruction timings and checked against the integer twin, and the token
+is accounted for line by line (2,194,784 census cycles, 21 stages,
+each claimed exactly once).
 
-Priced with the census model of the shipped kernel (10.5 cycles a
-block-kernel MAC, 8.3 a classifier MAC, ~203K a layer of norms, gate and
-requantization) at the tokenizer's characters per token. Pick by bits per
-character per cycle, once each has been trained and scored.
+The collapses v0.9 takes are all **exact**: the ROM produces the same
+integers as today's twin for every input, so nothing is retrained and
+the golden sequence does not change. Together they are budgeted at about
+1.1M of the 2.17M cycles, with no new table larger than 60 KB:
 
-| shape | M-cycles/tok | s/tok | s/char | params | ROM |
-|---|---|---|---|---|---|
-| v0.4.1: 3L 64d, experts of 176, vocab 1024 | 2.26 | 1.08 | 0.31 | 374K | 256 KB |
-| one-bit 3L 96d x256, v1024 - measured, twin 1.138 bits/char | 3.12 | 1.49 | 0.43 | 773K | 512 KB |
-| **one-bit 4L 96d x256, v1024 - measured, twin 1.073 bits/char** | 3.92 | 1.87 | 0.54 | 997K | 512 KB |
-| 4L 64d x176, v1024 | 2.83 | 1.35 | 0.39 | 476K | 256 KB |
-| 3L 64d x256, v1024 | 2.58 | 1.23 | 0.36 | 496K | 512 KB |
-| 3L 96d x256, v1024 | 3.86 | 1.84 | 0.53 | 772K | 512 KB |
-| 3L 96d x256, v2048 | 4.67 | 2.23 | 0.57 | 871K | 512 KB |
-| 4L 96d x256, v1024 | 4.87 | 2.32 | 0.67 | 997K | 512 KB |
-| v0.3, for scale | 12.92 | 6.16 | 2.94 | 260K | 512 KB |
+| collapse | saves / token | table |
+|---|---|---|
+| w2 walks only the nonzero (activation, weight) pairs, listed where ReLU² makes them | ~290K | weights re-encoded as column lists |
+| the block matvecs go output-major: tables resident per input vector, each row summed in registers, requantized in place | ~270K | 1.5 KB WRAM |
+| the router rides on w1's tables; wz and wh share one build; the 27-entry table built as a direct sum | ~140K | none |
+| the classifier keeps only the running best: no stored logits, no zero pass, no rescan | ~160K | 4 KB WRAM |
+| the gate as one byte table with the sigmoid folded in (saturation proved dead over all 16.6M inputs) | ~80K | 60 KB |
+| ReLU² as one page per layer; requant epilogues in registers | ~90K | 768 B |
+| the norm's shifts peeled by the byte, its sum of squares in registers | ~70K | none |
+| embedding rows stored on the stream grid; debug copies out of the app build | ~24K | none |
 
-## The order of work
+**The goal, in the numbers VERSIONS.md is measured in:** v0.4.1's
+1.146 bits per character, unchanged, at **0.5 s a token or better**
+(0.15 s a character) as shipped, on held-out text, verified by the same
+ladder every kernel has used: the twin unchanged, golden strict byte for
+byte, then the census.
 
-**0. The BitNet question - the kernels are in; the model is not yet.** One-bit weights
-with int8 activations run subset-sum tables (every sum a block of inputs
-can produce, built once per block per token, one lookup per block per
-output): measured on the lab bench, a block of 5 in HRAM costs 6.97 cycles
-a MAC at 64 outputs and a block of 8 in WRAM 3.08 on the classifier,
-against ternary's 10.70. Trained at equal seconds per character - binary
-at dim 96 with experts of 256 against the shipped ternary - binary scores
-1.086 bits per character to ternary's 1.115, with 2.1x the parameters at
-one bit each. Activation width stays at 8 bits: narrowing it cost 6% in
-bits and buys nothing under table kernels. The port is done and golden strict:
-blocks of four in HRAM for the rows, blocks of eight on planes for a
-one-bit classifier, and a ternary classifier on 243-entry planes that
-takes 120K cycles off v0.4.1 with no retraining. But as shipped - on the
-twin, not the trainer - the one-bit dim-96 model scores 1.138 against
-1.126 for v0.4.1's weights on the same tree, at 44% more cycles: the
-trainer's per-token activation scaling is a normalization the cartridge's
-static exponents cannot follow, and the one-bit model leans on it. So the
-next lever is a per-token activation exponent on the cartridge (one max
-scan a vector, the requant shift adjusted by the difference); the four-layer one-bit model already ships at 1.073 bits/char on the twin at
-0.54 s/char - the first cartridge better than v0.4.1 in bits by a margin
-the twin believes - and that gap is what stands between it and 1.046.
+## What v0.9 leaves out, and why
 
-**1. Make training cheap enough to sweep.** A 20K-step run is 3.5 hours and
-the step is launch-bound (0.37 s alone, 3 s if anything shares the GPU). The
-fused scan is in. Next: capture the whole training step as a CUDA graph, and
-a larger batch with fewer steps. Target: a 3L 64d run in under an hour, so a
-shape sweep is an evening rather than a week. Measured by seconds per step at
-identical loss.
+- **The norm as tables.** Another 280K cycles for 836 KB of planes that
+  grow with width and depth, and a 2 MB ROM header. Ruled out by the
+  table budget: v0.9 adds at most 100 KB of tables in total.
+- **A hierarchical classifier.** The argmax is linear in the vocabulary,
+  so a bigger dictionary is paid for there and nowhere else; a two-level
+  head (32 groups of 32) would take the classifier from 12% of the token
+  to 2%. It changes the model and the no-repeat rule, so it waits for
+  the decision to grow the vocabulary.
+- **Anything that changes the twin.** Every new-semantics option measured
+  was worth less than a retrain except the head above.
 
-**2. Squeeze the shape we have.** Before buying capacity, find out what the
-current shape leaves on the table, because it is free on the cartridge:
-- longer runs - the held-out curve was still falling at 20K steps as the
-  Arenas residual finished annealing; 40K and a slower anneal
-- longer training windows - the model trains on 96-token windows and runs
-  forever; train on 256 and see if the held-out (scored on 256) moves
-- the whole corpus - 59M tokens seen three times; the other 2 GB of
-  TinyStories is one download away
-- the tokenizer trained on all of it, and 2048 pieces priced against the
-  classifier it costs
+## v1.0: the model, and where it runs
 
-**3. Buy capacity where the price is right.** In the order the table
-suggests: wider experts first (parameters at half the MACs), then a fourth
-layer, then dim 96. Each is a trained run, a twin score and a census, not an
-opinion. The ROM side has to generalize with it: embedding parts of any row
-size (today's lookup assumes 256 rows a bank), the classifier in as many
-parts as the vocabulary needs, and buffers sized from DIM everywhere - the
-exporter asserts what the kernels assume, so a shape that violates one fails
-at export rather than on the cartridge.
+With the token at half its price, v1.0 spends the time on the model and
+on getting it into more hands:
 
-**4. Diet what is not a matvec.** At v0.4.1 the three norms are 319K cycles
-a token (14%), the requantizations 146K, the gate 86K. A norm that costs
-what a matvec of its size costs is worth about 8% of the token; nothing else
-on the list is worth more than 5%.
+1. **Training and output.** The whole corpus, longer windows, the
+   training curve measured instead of assumed (the 20K-step habit was a
+   habit), the 2048-piece tokenizer priced against the classifier it
+   costs. Measured as bits per character on the same 200 held-out
+   stories as every version before it.
+2. **Weights as a distribution.** Checkpoints and the corpus recipe
+   published where they can be reproduced, with the hashes the release
+   carries.
+3. **The engine outside the cartridge.** The integer twin is the
+   specification; a small C implementation of the same inference, bit
+   for bit, runs the model on a PC. An adapter for other targets is
+   priced from that.
+4. **A first conversational brain** trained and shipped on the same
+   engine, as the example of what a cartridge can hold beyond stories.
 
-**5. Ship it the way v0.4.1 shipped.** Golden strict, suite green, census,
-score5, a capture, VERSIONS.md gains a column, the release carries the ROM
-and its hash. The three doc pages get rewritten for the model that actually
-runs.
+## Not in v0.9 or v1.0
 
-## Not in v0.5
-
-Attention, in any form: the recurrent core is the point. Sampling: greedy
-with no-repeat is deterministic and testable, and sampling broke the grammar
-at this size when it was measured. Anything that cannot be scored in bits
-per character on held-out text.
+Attention, in any form: the recurrent core is the point. Sampling:
+greedy with no-repeat is deterministic and testable. Anything that cannot
+be scored in bits per character on held-out text, or verified bit for
+bit against the twin.
