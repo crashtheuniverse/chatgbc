@@ -1,6 +1,6 @@
 ; The recurrent heart, and the cheap square: what replaced attention.
 ;
-; Three row kernels. Sigmoid_Row turns wz's output into Q0.8 gates through a
+; Two row kernels. Sigmoid_Row turns wz's output into Q0.8 gates through a
 ; per-layer ROM table - the exponent is baked into the table, so the kernel
 ; never sees it. Gate_Update folds the new candidate into the layer's state:
 ;
@@ -12,9 +12,8 @@
 ; through the same Requant_Shift/Sat8 every other kernel uses - one rounding
 ; rule in the whole machine.
 ;
-; Relu2_Row is the MLP's activation: clamp, one quarter-square lookup for the
-; exact square, one per-layer shift. Where SwiGLU cost a sigmoid table read
-; AND a generic multiply per element, this costs neither.
+; The MLP's activation, ReLU^2, lives in src/relu2.asm: one page lookup per
+; element, and the list of nonzeros the sparse w2 kernel walks.
 
 INCLUDE "hardware.inc"
 INCLUDE "chatgbc.inc"
@@ -29,7 +28,6 @@ wGruSig:: dw                        ; -> this layer's sigmoid table
 
 SECTION "Gru HRAM", HRAM
 hGruCnt: db
-hGruOuter: db                       ; Relu2_Row's half-width outer count
 
 SECTION "Gru code", ROM0
 
@@ -196,87 +194,3 @@ SECTION "Gru pointers", WRAM0
 wGzPtr: dw
 wGtPtr: dw
 wGhPtr: dw
-wR2Shift:: db                       ; this layer's ReLU^2 closing shift
-
-SECTION "Gru code 2", ROM0
-
-; wH1 -> wHb: u = sat8(shr_round(relu(a)^2, r2_shift)). The square is exact:
-; tbl_qsq[2a] = a*a for 0 <= a <= 127, one lookup.
-Relu2_Row::
-    ld a, LOW(wH1)
-    ld [wGzPtr + 0], a              ; borrow the walk pointers
-    ld a, HIGH(wH1)
-    ld [wGzPtr + 1], a
-    ld a, LOW(wHb)
-    ld [wGtPtr + 0], a
-    ld a, HIGH(wHb)
-    ld [wGtPtr + 1], a
-    ; hidden can exceed an 8-bit count, so the walk runs twice at half width -
-    ; the pointers carry across, only the counter reloads. One expert's
-    ; hidden is a single pass.
-IF EXPERTS
-    ASSERT HID_EXP <= 256, "an expert's hidden must fit an 8-bit count (0 = 256)"
-    ld a, 1
-    ldh [hGruOuter], a
-.half
-    ld a, LOW(HID_EXP)              ; 256 wide counts as 0: the dec-jr loop
-    ldh [hGruCnt], a                ; below runs 256 times from zero
-ELSE
-    ld a, 2
-    ldh [hGruOuter], a
-.half
-    ld a, HIDDEN / 2
-    ldh [hGruCnt], a
-ENDC
-.elem
-    ld a, [wGzPtr + 0]
-    ld l, a
-    ld a, [wGzPtr + 1]
-    ld h, a
-    ld a, [hl]
-    bit 7, a
-    jr z, .positive
-    xor a                           ; relu: negative squares to zero
-    jr .store
-.positive
-    ld l, a                         ; a^2 = tbl_qsq[2a]; u16 entries, so the
-    ld h, 0                         ; byte offset is 4a
-    add hl, hl
-    add hl, hl
-    ld de, tbl_qsq
-    add hl, de
-    ld a, [hl+]
-    ld e, a
-    ld h, [hl]
-    ld l, e                         ; hl = a*a, at most 16,129
-    ld e, 0                         ; e:hl, non-negative
-    ld a, [wR2Shift]                ; the exporter asserts it is >= 0
-    ld b, a
-    call ShiftRound24
-    call Sat8_24
-.store
-    ld c, a
-    ld a, [wGtPtr + 0]
-    ld l, a
-    ld a, [wGtPtr + 1]
-    ld h, a
-    ld [hl], c
-    ld hl, wGzPtr
-    inc [hl]
-    jr nz, :+
-    ld hl, wGzPtr + 1
-    inc [hl]
-:   ld hl, wGtPtr
-    inc [hl]
-    jr nz, :+
-    ld hl, wGtPtr + 1
-    inc [hl]
-:   ldh a, [hGruCnt]
-    dec a
-    ldh [hGruCnt], a
-    jp nz, .elem
-    ldh a, [hGruOuter]
-    dec a
-    ldh [hGruOuter], a
-    jr nz, .half
-    ret

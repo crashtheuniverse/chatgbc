@@ -1,7 +1,7 @@
 ; Standalone matvec + requantization self-test.
 ;
 ; Runs w1 of layer 0 against an exported activation vector and leaves the result
-; in wH1, where py/tests/test_matvec.py checks it bit-for-bit against the twin.
+; in wH1, where py/tests/test_kernels.py checks it bit-for-bit against the twin.
 ; It exercises the same code the forward pass uses, but independently of it, so
 ; the kernel stays covered even while the full pass is being debugged.
 
@@ -96,4 +96,53 @@ ELSE
     ld de, w1b_sh_l0
     ld bc, wH1 + FFN_SPLIT
     jp Requant_All16
+ENDC
+
+IF EXPERTS
+; The sparse w2 kernel and its guard, on the exporter's two w1 output
+; vectors for layer 0 / expert 0: `b` has more nonzero u than W2_SPARSE_MAX
+; and must take the dense block kernel, `a` fewer and must take the sparse
+; one. Each runs the forward pass's own Relu2_Row and W2_Run; the sums, the
+; path W2_Run reports and the list count go to WRAM bank 1, beside the
+; diffstep snapshots, for py/tests/test_sparse_w2.py. `a` runs last, so wHb
+; and wSpList are its when the harness looks.
+SECTION "Sparse selftest results", WRAMX, BANK[1]
+wDbgSpAccA:: ds DIM * 2             ; wAcc after vector a, int16
+wDbgSpAccB:: ds DIM * 2             ; and after vector b
+wDbgSpPath:: ds 2                   ; W2_Run's answer for a, then b
+wDbgSpCount:: ds 2                  ; wSpCount for a, then b
+
+SECTION "Sparse selftest code", ROM0
+
+MACRO SPARSE_CASE                   ; \1 = the vector blob, \2 = 0 for a, 1 for b
+    ld a, BANK(\1)
+    ld [rROMB0], a
+    ld hl, \1
+    ld de, wH1
+    ld bc, HIDDEN
+    call CopyBytes
+    call Relu2_Row
+    call W2_Run
+    ld [wDbgSpPath + \2], a
+    ld a, [wSpCount]
+    ld [wDbgSpCount + \2], a
+    ld hl, wAcc
+    IF \2
+    ld de, wDbgSpAccB
+    ELSE
+    ld de, wDbgSpAccA
+    ENDC
+    ld bc, DIM * 2
+    call CopyBytes
+ENDM
+
+SparseSelftest::
+    ld a, 1
+    ldh [rSVBK], a
+    xor a
+    ld [wLayer], a                  ; layer 0, expert 0: matrix index 0
+    ld [wExpIdx], a
+    SPARSE_CASE test_sp_b, 1
+    SPARSE_CASE test_sp_a, 0
+    ret
 ENDC

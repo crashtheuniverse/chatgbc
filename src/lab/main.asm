@@ -44,7 +44,11 @@ Run::
     call ReportTiming
     call Console_Flush
 
-    ; Last, so the forward pass cannot overwrite the buffer it checks.
+    ; After the run, so the forward pass cannot overwrite the buffers they
+    ; check; the w1 selftest last, since the sparse one borrows wH1.
+IF EXPERTS
+    call SparseSelftest
+ENDC
     call MeasureSelftest
 
     ld a, READY_MAGIC

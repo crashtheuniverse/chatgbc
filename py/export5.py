@@ -7,8 +7,9 @@ authority this output must reproduce bit for bit on the cartridge.
 
 What is gone against the v0.4 exporter: RoPE, the exp/recip softmax tables,
 the score LUTs, every KV constant. What is new: per-layer gate tables
-(sigmoid at the layer's zl exponent, Q0.8) and the ReLU^2 shift, one signed
-byte per layer.
+(sigmoid at the layer's zl exponent, Q0.8), the ReLU^2 pages (the twin's
+activation line at all 256 inputs, one page per layer) and w2 a second
+time by input column, the lists the sparse kernel walks.
 """
 
 import os
@@ -48,17 +49,25 @@ MATS = twin5.MATS                # wz wh wo w1 w2
 _blobs = []
 
 
-def blob(name, data, rom0=True, attach=None):
+def blob(name, data, rom0=True, attach=None, align=None):
     """A blob becomes its own section - ROM0 or a bank of rgblink's choosing -
     unless `attach` names another blob, in which case it is placed inside
     THAT blob's section: the guarantee a per-row shift table needs to sit in
     the same bank as its matrix, which is the bank still mapped when the
     requant that reads it runs. ROM0 could not hold the shifts of a 96-wide
-    model with 256-wide experts; the banks can, and the code did not move."""
+    model with 256-wide experts; the banks can, and the code did not move.
+    `align` is the section's ALIGN[n]: a page table wants its low address
+    byte to be the index and nothing else."""
     data = bytes(data)
     (BLOBS / f"{name}.bin").write_bytes(data)
-    _blobs.append((name, len(data), rom0, attach))
+    _blobs.append((name, len(data), rom0, attach, align))
     return name
+
+
+def expected(name, data):
+    """A known answer for py/tests to read - written beside the blobs but not
+    linked into the ROM, which has no use for what the twin expects."""
+    (BLOBS / f"{name}.bin").write_bytes(bytes(data))
 
 
 def blob_split(name, data, rows):
@@ -166,6 +175,64 @@ def ternary_plane_blob(name, t, block=5):
     return blob(name, bytes(data), rom0=False)
 
 
+def sparse_column_blob(name, t, acc_low=0):
+    """Ternary (out, in) in {-1, 0, 1} -> per-input column lists for the
+    sparse kernel (src/matvec_sparse.asm): the weights encoded where the
+    kernel walks them, by INPUT, so a nonzero activation reaches only the
+    outputs it touches.
+
+    Layout: a table of `in` 16-bit entries, then the columns. Column i is
+    [n+] [2*o for each +1 weight] [n-] [2*o for each -1 weight]: 2*o is the
+    low address byte of output o's int16 accumulator at wAcc + 2*o, which is
+    an address only because wAcc is page-aligned and 2*out fits the page. The
+    table entry for i is the column's offset from the entry's OWN second byte,
+    so the kernel's `ld a,[hl+]; ld e,a; ld a,[hl]; ld d,a; add hl,de` lands
+    on the column with no second base load. A column list is a re-encoding
+    of the same {-1, 0, 1} matrix, not a table: decode it and you get t."""
+    out, n_in = t.shape
+    assert acc_low + 2 * out <= 0x100, f"{name}: {out} accumulators leave the page"
+    cols = []
+    for i in range(n_in):
+        plus = [acc_low + 2 * o for o in range(out) if t[o, i] == 1]
+        minus = [acc_low + 2 * o for o in range(out) if t[o, i] == -1]
+        assert len(plus) <= 255 and len(minus) <= 255
+        cols.append(bytes([len(plus)]) + bytes(plus) + bytes([len(minus)]) + bytes(minus))
+    table, pos = bytearray(), 2 * n_in
+    for i, col in enumerate(cols):
+        off = pos - (2 * i + 1)
+        assert 0 <= off < 0x10000
+        table += off.to_bytes(2, "little")
+        pos += len(col)
+    data = bytes(table) + b"".join(cols)
+    assert len(data) <= 0x4000, f"{name}: {len(data)} bytes exceeds a bank"
+    return blob(name, data, rom0=False)
+
+
+def decode_sparse_columns(data, out, n_in, acc_low=0):
+    """The inverse of sparse_column_blob, for the tests: bytes -> (out, in)."""
+    t = np.zeros((out, n_in), dtype=np.int8)
+    for i in range(n_in):
+        entry = 2 * i
+        pos = entry + 1 + int.from_bytes(data[entry:entry + 2], "little")
+        for sign in (1, -1):
+            n = data[pos]
+            for o2 in data[pos + 1:pos + 1 + n]:
+                assert t[(o2 - acc_low) // 2, i] == 0
+                t[(o2 - acc_low) // 2, i] = sign
+            pos += 1 + n
+    return t
+
+
+def relu2_page(r):
+    """T[a & $FF] = sat8(shr_round(max(a, 0)^2, r)) for every int8 a - the
+    twin's ReLU^2 line (twin5.forward_q5) evaluated at all 256 inputs, so a
+    kernel that indexes the page by the raw byte computes exactly it. Entries
+    128..255 are the negative a: zero, the clamp included."""
+    a = np.array([k if k < 128 else k - 256 for k in range(256)], dtype=np.int64)
+    u = Q.sat8(twin5.shr_round_any(np.maximum(a, 0) ** 2, r))
+    return u.astype(np.uint8).tobytes()
+
+
 def sbytes(values):
     return bytes(int(v) & 0xFF for v in values)
 
@@ -245,12 +312,15 @@ def main():
     for l in range(c.layers):
         blob(f"sig_l{l}", q.sig_tables[l].astype(np.uint8).tobytes())
 
-    # ReLU^2: u = sat8(shr_round(relu(a)^2, e_hb - 2*e_h1)), per layer. The
-    # register path shifts right only; a negative count would need the old
-    # scratch path, and is a calibration problem to see here.
+    # ReLU^2: u = sat8(shr_round(relu(a)^2, e_hb - 2*e_h1)), per layer. u is
+    # a function of one byte and one per-layer constant, so each layer's is a
+    # 256-byte page indexed by the raw int8 (src/relu2.asm); the pages are
+    # consecutive, page HIGH(relu2_tbl) + layer. A negative shift would be a
+    # left shift the table could hold too, but it is a calibration problem
+    # to see here, as it always was.
     r2 = [S("hb", l) - 2 * S("h1", l) for l in range(c.layers)]
     assert min(r2) >= 0, f"relu2 shift {min(r2)} < 0"
-    blob("r2_shift", sbytes(r2))
+    blob("relu2_tbl", b"".join(relu2_page(r) for r in r2), align=8)
 
     # --- token embedding ---
     # A part holds a power of two rows - as many as fit a bank - so EmbedToken
@@ -435,6 +505,10 @@ def main():
                 sh2 = shift_bytes("w2", l)[e]
                 blob(f"w1_sh_l{l}_e{e}", sbytes(sh1), rom0=False, attach=f"w1_l{l}_e{e}")
                 blob(f"w2_sh_l{l}_e{e}", sbytes(sh2), rom0=False, attach=f"w2_l{l}_e{e}")
+                # w2 a second time, by input column, for the sparse kernel;
+                # the dense block blob above stays as the fallback.
+                assert ternary, "the column lists encode a ternary w2"
+                sparse_column_blob(f"w2s_l{l}_e{e}", q.indices["w2"][l][e])
             continue
         idx = q.indices["w1"][l]                  # (hidden out, dim in)
         wblob(f"w1a_l{l}", idx[:half])
@@ -454,6 +528,26 @@ def main():
             weight_blob(f"w2a_l{l}", idx[:, :half])
             weight_blob(f"w2b_l{l}", idx[:, half:])
         blob(f"w2_sh_l{l}", sbytes(shift_bytes("w2", l)))
+
+    if experts:
+        # The sparse w2 kernel's guard. Both kernels are exact, so the choice
+        # only bounds the worst case: the sparse pass costs, per nonzero u,
+        # its column's overhead plus one add per nonzero weight in that
+        # column, and a token with more nonzero u than this runs the dense
+        # block kernel instead. The bound takes the model's fullest column
+        # and the kernel's carry path on every add (src/matvec_sparse.asm's
+        # counts), against the dense kernel's measured layer.
+        SPARSE_COL_CYCLES = 74          # per nonzero u: column fetch, list control
+        SPARSE_PAIR_CYCLES = 18         # per (u, weight) pair, the carry path taken
+        SPARSE_FIXED_CYCLES = 339       # zeroing the accumulators, the manifest
+        DENSE_W2_CYCLES = 344_696 // 3  # the block kernel's 8-token census, a layer
+        col_nnz = max(int((q.indices["w2"][l][e] != 0).sum(axis=0).max())
+                      for l in range(c.layers) for e in range(experts))
+        w2_sparse_max = ((DENSE_W2_CYCLES - SPARSE_FIXED_CYCLES)
+                         // (SPARSE_COL_CYCLES + SPARSE_PAIR_CYCLES * col_nnz))
+        w2_sparse_max = min(w2_sparse_max, c.hidden, 254)
+        const("W2_SPARSE_MAX", w2_sparse_max)
+        print(f"w2 sparse: fullest column {col_nnz} nonzero, guard at {w2_sparse_max} nonzero u")
 
     # --- detokenizer ---
     import reference as ref
@@ -525,18 +619,45 @@ def main():
     blob("test_gate_ht", htild.astype(np.int8).tobytes())
     blob("test_gate_out", hnew.astype(np.int8).tobytes())
 
+    if experts:
+        # Sparse w2 spot check (SparseSelftest in src/selftest.asm): two w1
+        # output vectors for layer 0 / expert 0, one with few nonzero u so
+        # the guard takes the sparse kernel, one with more than W2_SPARSE_MAX
+        # so it takes the dense one. Both carry saturated u (127) and enough
+        # mass for the accumulators' low bytes to carry. The expected sums
+        # are the twin's own matvec of the twin's own u.
+        rng = np.random.default_rng(5)
+        hid = c.hidden
+        a_few = rng.integers(-60, 6, hid)
+        live = rng.choice(hid, 30, replace=False)
+        a_few[live] = rng.integers(6, 128, 30)
+        a_many = rng.integers(6, 128, hid)
+        a_many[rng.choice(hid, 20, replace=False)] = rng.integers(-40, 6, 20)
+        r0 = S("hb", 0) - 2 * S("h1", 0)
+        for tag, a in (("a", a_few), ("b", a_many)):
+            u = Q.sat8(twin5.shr_round_any(np.maximum(a, 0) ** 2, r0))
+            acc = Q.matvec_blocks(q.weights["w2"][0][0], u, twin5.TERNARY_BLOCK,
+                                  twin5.TERNARY_ACC_SHIFT)
+            blob(f"test_sp_{tag}", a.astype(np.int8).tobytes(), rom0=False)
+            expected(f"test_sp_u_{tag}", u.astype(np.int8).tobytes())
+            expected(f"test_sp_acc_{tag}", acc.astype("<i2").tobytes())
+        n_few = int((Q.sat8(twin5.shr_round_any(np.maximum(a_few, 0) ** 2, r0)) != 0).sum())
+        n_many = int((Q.sat8(twin5.shr_round_any(np.maximum(a_many, 0) ** 2, r0)) != 0).sum())
+        assert n_few <= w2_sparse_max < n_many, (n_few, w2_sparse_max, n_many)
+
     # --- generated assembly ---
     lines.append("; Generated by py/export5.py - do not edit.")
     lines.append('INCLUDE "model.inc"')
     lines.append("")
     attached = {}
-    for name, size, rom0, attach in _blobs:
+    for name, size, rom0, attach, align in _blobs:
         if attach:
             attached.setdefault(attach, []).append((name, size))
-    for name, size, rom0, attach in _blobs:
+    for name, size, rom0, attach, align in _blobs:
         if attach:
             continue
-        lines.append(f'SECTION "{name}", {"ROM0" if rom0 else "ROMX"}')
+        lines.append(f'SECTION "{name}", {"ROM0" if rom0 else "ROMX"}'
+                     + (f", ALIGN[{align}]" if align else ""))
         lines.append(f'{name}:: INCBIN "build/blobs/{name}.bin"   ; {size} bytes')
         for aname, asize in attached.get(name, []):
             lines.append(f"{aname}:: INCBIN \"build/blobs/{aname}.bin\"   ; {asize} bytes, in the bank of {name}")
@@ -577,6 +698,10 @@ def main():
                 f"{name}_sh_l{l}_e{e}" for l, e in le))
             lines.append(f"{name}_shbanks:: db " + ", ".join(
                 f"BANK({name}_sh_l{l}_e{e})" for l, e in le))
+        lines.append("w2s_banks:: db " + ", ".join(
+            f"BANK(w2s_l{l}_e{e})" for l, e in le))
+        lines.append("w2s_addrs:: dw " + ", ".join(
+            f"w2s_l{l}_e{e}" for l, e in le))
     else:
         for name in ("w1a", "w1b", "w2a", "w2b"):
             lines.append(f"{name}_banks:: db " + ", ".join(

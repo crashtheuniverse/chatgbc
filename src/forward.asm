@@ -38,7 +38,7 @@ wRetries::  ds 2                    ; no-repeat retries this run, for telemetry
 wBlocked::  ds NOREPEAT_TRIES * 2   ; tokens the no-repeat rule has turned down
 wBlockedN:: db                      ; how many of them, this step
 wExpert::   db                      ; the expert the router chose this layer
-wExpIdx:    db                      ; layer * EXPERTS + expert: the matrix index
+wExpIdx::   db                      ; layer * EXPERTS + expert: the matrix index
 wExpHi:     db                      ; scratch for the router's 16-bit compare
 
 SECTION "Forward code", ROM0
@@ -463,14 +463,7 @@ IF EXPERTS
 :
 
     CENSUS_START
-    ld hl, r2_shift
-    ld a, [wLayer]
-    ld c, a
-    ld b, 0
-    add hl, bc
-    ld a, [hl]
-    ld [wR2Shift], a
-    call Relu2_Row                  ; HID_EXP elements under EXPERTS
+    call Relu2_Row                  ; the activation, and its list of nonzeros
     CENSUS_END 13
     ld a, [wLayer]
     or a
@@ -482,17 +475,7 @@ IF EXPERTS
 :
 
     CENSUS_START
-    ld hl, wHb
-    call SetXPtr
-    ld a, BLOCKS_HID_EXP
-    ld [wMvIn], a
-    ld hl, w2_banks
-    ld de, w2_addrs
-    ld a, [wExpIdx]
-    call SetMatrix
-    ld hl, DIM
-    call Matvec_SetOut
-    BLOCK_RUN
+    call W2_Run                     ; sparse over the list, or dense over wHb
     CENSUS_END 14
     CENSUS_START
     ld hl, w2_shifts
@@ -597,14 +580,7 @@ ENDC
     call CopyBytes
 :
     CENSUS_START
-    ld hl, r2_shift                 ; the activation: clamp, square, shift
-    ld a, [wLayer]
-    ld c, a
-    ld b, 0
-    add hl, bc
-    ld a, [hl]
-    ld [wR2Shift], a
-    call Relu2_Row
+    call Relu2_Row                  ; the activation: one page lookup each
     CENSUS_END 13
     ld a, [wLayer]
     or a
@@ -739,6 +715,50 @@ ELSE
 ENDC
 ENDC
 ENDC                                ; EXPERTS
+
+IF EXPERTS
+; The routed expert's w2 into wAcc, by whichever exact kernel is cheaper for
+; this token: the sparse one over the (i, u) list src/relu2.asm just wrote,
+; or - past W2_SPARSE_MAX nonzero u, where the sparse pass could cost more
+; than the dense one - the block kernel over the whole of wHb. Both leave
+; the same integers in wAcc, so the choice only bounds the worst case. The
+; requant that follows counts rows by wMvOut and reads its shift table from
+; the dense blob's bank: the block kernel sets both on its way, the sparse
+; one neither (it leaves its column blob's bank mapped), so set them here.
+; Returns a = 0 for the sparse path, 1 for the dense - the lab's selftest
+; checks the guard by it; the forward pass ignores it.
+W2_Run::
+    ld a, [wSpCount]
+    cp W2_SPARSE_MAX + 1
+    jr nc, .dense
+    ld a, [wExpIdx]
+    call MatvecSparse_Run
+    ld hl, DIM                      ; w1 left wMvOut at HID_EXP
+    call Matvec_SetOut
+    ld hl, w2_shbanks
+    ld a, [wExpIdx]
+    ld c, a
+    ld b, 0
+    add hl, bc
+    ld a, [hl]
+    ld [rROMB0], a
+    xor a
+    ret
+.dense
+    ld hl, wHb
+    call SetXPtr
+    ld a, BLOCKS_HID_EXP
+    ld [wMvIn], a
+    ld hl, w2_banks
+    ld de, w2_addrs
+    ld a, [wExpIdx]
+    call SetMatrix
+    ld hl, DIM
+    call Matvec_SetOut
+    BLOCK_RUN
+    ld a, 1
+    ret
+ENDC
 
 SetRnSrc:
     ld a, l

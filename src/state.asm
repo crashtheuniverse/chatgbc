@@ -26,12 +26,13 @@ REDEF ACC_SLOTS EQU HID_EXP
 ENDC
 ENDC
 
-SECTION "Model state", WRAM0, ALIGN[4]
+; Page-aligned for the sparse w2 kernel (src/matvec_sparse.asm), whose
+; weight lists are the low address bytes of the first DIM accumulators.
+; wH1 and wHb live in src/relu2.asm, page-positioned for its loop.
+SECTION "Model state", WRAM0, ALIGN[8]
 wAcc::   ds ACC_SLOTS * ACC_BYTES   ; reused by every matvec
 wX::     ds DIM                     ; residual stream
 wXb::    ds DIM                     ; post-rmsnorm activations
-wH1::    ds HIDDEN
-wHb::    ds HIDDEN
 wCbBuf:: ds CB_LEVELS               ; working copy of the active codebook
 wBias::  ds 3                       ; nIn * MV_BIAS, removed once per matvec
 
