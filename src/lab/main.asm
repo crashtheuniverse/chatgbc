@@ -32,7 +32,24 @@ Run::
 .wait
     ld a, [wLabGo]
     cp LAB_GO
+    jr z, .run
+IF CLS_TERNARY
+    cp LAB_GO_CLS
+    jr z, .cls
+    cp LAB_GO_PICK
     jr nz, .wait
+    xor a
+    ld [wLabState], a
+    call Cls4_Classify          ; wXb through the no-repeat retry, against
+    jr .done                    ; the wOutTokens / wGenCount the harness set
+.cls
+    xor a
+    ld [wLabState], a
+    call Cls4_Probe             ; classifies the wXb the harness planted
+    jr .done
+ENDC
+    jr .wait
+.run
     xor a
     ld [wLabState], a           ; running; wGenSteps and the prompt are set
 
@@ -51,12 +68,13 @@ IF EXPERTS
 ENDC
     call MeasureSelftest
 
+.done
     ld a, READY_MAGIC
     ld [wReady], a
 .held
     ld a, [wLabGo]              ; hold the result until the harness clears it
-    cp LAB_GO
-    jr z, .held
+    or a                        ; (whichever entry it asked for)
+    jr nz, .held
     jr .idle
 
 Lab_DefaultPrompt:

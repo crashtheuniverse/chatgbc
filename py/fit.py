@@ -53,10 +53,11 @@ CYC_PER_MAC, CYC_PER_CLS_MAC, CYC_PER_LAYER = 10.5, 8.3, 203_000
 # at every width above two bits.
 BIN_MAC_64, BIN_MAC_176 = 7.22, 5.48   # block 4 in HRAM, from the bench (tiles 64/96/176/256)
 # The classifiers, from the census of the real kernels at 1024 outputs and
-# 64 inputs: one-bit planes 295,808 cycles, ternary planes (3^5 entries,
-# a block of five) 423,477 - loops and zeroing included, so a little above
-# the bench's 3.08 for the bare block-8 body.
-BIN_MAC_CLS, TERN_MAC_CLS = 4.51, 6.46
+# 64 inputs: one-bit planes 295,808 cycles (loops and zeroing included, so a
+# little above the bench's 3.08 for the bare block-8 body); the ternary
+# output-major block-4 tables (src/cls4.asm, v0.9) 246,712 - the build, the
+# fused-argmax scan and the top-two bookkeeping, nothing stored.
+BIN_MAC_CLS, TERN_MAC_CLS = 4.51, 3.76
 MAC_BIT = 2.23       # DIRECT: src/bitbench.asm, one-bit weights, per activation bit plane
 
 

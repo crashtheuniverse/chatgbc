@@ -33,10 +33,12 @@ wToken::    dw
 wStep::     db
 wMatIdx:    db
 wBestTok::  dw
-wClsPart::  db
 wRetries::  ds 2                    ; no-repeat retries this run, for telemetry
-wBlocked::  ds NOREPEAT_TRIES * 2   ; tokens the no-repeat rule has turned down
-wBlockedN:: db                      ; how many of them, this step
+wBlockedN:: db                      ; candidates the no-repeat rule turned down this step
+IF !CLS_TERNARY
+wClsPart::  db
+wBlocked::  ds NOREPEAT_TRIES * 2   ; those candidates, as tokens (cls4.asm keeps its own)
+ENDC
 wExpert::   db                      ; the expert the router chose this layer
 wExpIdx::   db                      ; layer * EXPERTS + expert: the matrix index
 wExpHi:     db                      ; scratch for the router's 16-bit compare
@@ -870,11 +872,15 @@ ENDC
     ; fall through
 
 ; Greedy decode needs argmax and nothing else - no softmax, no stored logits,
-; and now no stored accumulators either. src/classifier.asm builds every
-; input's product table into a WRAM bank once, then walks the vocabulary
-; output-major: each logit is summed in a register pair, compared against the
-; best so far, and forgotten.
+; and now no stored accumulators either. The kernel builds its tables into a
+; WRAM bank once, then walks the vocabulary output-major: each logit is summed
+; in a register pair, compared against the best so far, and forgotten.
 Classify::
+IF CLS_TERNARY
+    ; src/cls4.asm: the block-4 tables, the fused-argmax scan and the
+    ; no-repeat retry over its top-two list, all in one place.
+    jp Cls4_Classify
+ELSE
     call Cls_BuildTables
 
     ; Rank-walk the vocabulary until a token turns up that does not complete a
@@ -908,13 +914,14 @@ Classify::
     ld hl, wRetries + 1
     inc [hl]
 :   jr .retry
+ENDC
 
 ; Z set when wBestTok would complete a 4-gram this run has already emitted,
 ; Z clear when it is safe to take.
 ;
 ; Searches every earlier position rather than only the recent ones: the loops
 ; worth breaking are the ones that come back to a phrase from a while ago.
-NoRepeat_Ok:
+NoRepeat_Ok::
     ld a, [wGenCount]
     cp OUT_MAX                      ; the history buffer is the whole record
     jr c, :+
