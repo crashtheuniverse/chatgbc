@@ -35,11 +35,14 @@
 ; rescan runs about once in 440 tokens.
 ;
 ; Cycles, counted here per token (CGB double speed):
-;   build   16 blocks x 1,111 (Cls4_Build below) + 16 x 14 loop + 25 = ~18.0K
+;   build   16 blocks x 1,114 (Cls4_Build below, call included) + 16 x 14 loop
+;           + 24 = ~18.1K
 ;   scan    1024 outputs x 221 (CLS4_ROW below: 11 + 14 x 13 + 12 + 13 + 3)
-;           + ~21 equal-high-byte compares x 7 + ~14 takes x ~50 + 40 = ~227.5K
+;           + ~21 equal-high-byte compares x 7 + ~14 takes x ~70 (Cls4_Take:
+;           87 for a new best, 53 for a new runner-up) + ~70 setup = ~227.5K
 ;   glue    two token conversions ~130, the probe record ~20
-;   total   ~245.6K before NoRepeat_Ok, against the old path's 423.8K.
+;   total   ~245.7K before NoRepeat_Ok, against the old path's 423.8K;
+;           the census (8 tokens) measures 246,712 for the whole stage.
 
 INCLUDE "hardware.inc"
 INCLUDE "chatgbc.inc"
@@ -87,8 +90,9 @@ wClsArg2:: dw
 ; reads WRAM0 and writes the table bank only, so it lives in a ROM bank and the
 ; caller maps it. Its bank is mapped by Cls4_Tables, not left mapped.
 ;
-; Cycles: sum 4 x 15 = 60; save hl, page, entry 0 = 18; four digits x (7 load
-; + 2 + 4 + 2) = 60; 80 entries x 12 = 960; pop, ret 7 -> 1,105 + call 6.
+; Cycles: ld de 3; sum 4 x 15 = 60; save hl, page, entry 0 = 18; four digits
+; x (7 load + 2 + 4 + 2) = 60; 80 entries x 12 = 960; pop, ret 7 -> 1,108
+; + call 6 = 1,114.
 SECTION "Cls4 build", ROMX
 
 ; hl -> the block's four activations; on return hl is past them.

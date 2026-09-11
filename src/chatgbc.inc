@@ -46,7 +46,9 @@ DEF TITLE_COL EQU 1                       ; against the corner; the title's
 ;
 ; So the decoder refuses to complete a 4-gram it has already emitted, taking the
 ; next-best token instead. Deterministic, which keeps the golden-token contract
-; intact, and it costs about six extra classifier scans across a 160-token run.
+; intact, and it costs about six retries across a 160-token run - each a read
+; of the runner-up the classifier already keeps (src/cls4.asm), a rescan only
+; past the second reject.
 ; Sampling was measured too and is worse: it breaks the grammar outright at this
 ; model size.
 ; Long enough to cover APP_GEN_STEPS. The decoder searches this for repeated
@@ -80,6 +82,10 @@ DEF LAB_GO   EQU $C3
 ; Classify wXb as the harness filled it - tables, scan, top two into
 ; wClsArg / wClsArg2 - and nothing else: the classifier's unit-test entry.
 DEF LAB_GO_CLS EQU $C4
+; The same, then the no-repeat retry against the history the harness planted
+; in wOutTokens / wGenCount, the answer in wBestTok: the retry path's entry,
+; which the golden run reaches only once and never past its first reject.
+DEF LAB_GO_PICK EQU $C5
 
 ; --- Input -----------------------------------------------------------------
 ; Joy_Read returns the d-pad in the high nibble and buttons in the low one.

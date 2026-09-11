@@ -35,7 +35,14 @@ Run::
     jr z, .run
 IF CLS_TERNARY
     cp LAB_GO_CLS
+    jr z, .cls
+    cp LAB_GO_PICK
     jr nz, .wait
+    xor a
+    ld [wLabState], a
+    call Cls4_Classify          ; wXb through the no-repeat retry, against
+    jr .done                    ; the wOutTokens / wGenCount the harness set
+.cls
     xor a
     ld [wLabState], a
     call Cls4_Probe             ; classifies the wXb the harness planted
