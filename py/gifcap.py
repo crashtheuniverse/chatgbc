@@ -36,6 +36,8 @@ OUT = ROOT / "build" / "chatgbc.gif"
 # any other one - or the keyboard itself.
 TYPE = ""
 CAP = 200                    # tokens to record before pressing SELECT - past the old cap of 160
+TICK = 2                     # frames per poll: the teletype releases a character every 2 to 18 frames
+                             # depending on its backlog, and v0.9's model keeps it at the fast end
 SCALE = 2
 
 OPEN_MS = 1800               # hold on the entry screen before anything happens
@@ -143,7 +145,7 @@ def capture():
     gentok = rom.addr("wGenTok")
     seen, last = screen(), 0
     while True:
-        rom.pyboy.tick(18, False)             # one teletype character per tick, so one frame per character
+        rom.pyboy.tick(TICK, False)           # at most one teletype character per tick, so one frame per character
         if rom.pyboy.memory[ready] == magic:
             print("  ROM finished generating", flush=True)
             break
