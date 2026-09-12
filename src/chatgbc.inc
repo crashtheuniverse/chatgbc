@@ -86,6 +86,13 @@ DEF LAB_GO_CLS EQU $C4
 ; in wOutTokens / wGenCount, the answer in wBestTok: the retry path's entry,
 ; which the golden run reaches only once and never past its first reject.
 DEF LAB_GO_PICK EQU $C5
+; A lab op: RmsNorm alone, on wX as the harness filled it with wRnGain and
+; wRnShift as set, into wXb - the kernel by itself for py/tests/test_rmsnorm.py.
+DEF LAB_GO_NORM EQU $D2
+; Another: ShiftRound24 on the signed 24-bit value at wX+0..2 by the count at
+; wX+3, result to wXb+0..2 - the byte peel has no caller on this model's own
+; shifts, so py/tests/test_regmath.py exercises every count this way.
+DEF LAB_GO_SHIFT EQU $E1
 
 ; --- Input -----------------------------------------------------------------
 ; Joy_Read returns the d-pad in the high nibble and buttons in the low one.

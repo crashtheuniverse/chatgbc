@@ -4,7 +4,7 @@ INCLUDE "model.inc"
 SECTION "tbl_rsqrt", ROM0
 tbl_rsqrt:: INCBIN "build/blobs/tbl_rsqrt.bin"   ; 512 bytes
 
-SECTION "tbl_qsq", ROM0
+SECTION "tbl_qsq", ROM0, ALIGN[8]
 tbl_qsq:: INCBIN "build/blobs/tbl_qsq.bin"   ; 514 bytes
 
 SECTION "gate_rows_p0", ROMX, BANK[1]
@@ -52,13 +52,13 @@ lut_cls_hi:: INCBIN "build/blobs/lut_cls_hi.bin"   ; 1 bytes
 SECTION "lut_cls_lo", ROMX
 lut_cls_lo:: INCBIN "build/blobs/lut_cls_lo.bin"   ; 1 bytes
 
-SECTION "rms_att", ROM0
+SECTION "rms_att", ROM0, ALIGN[6]
 rms_att:: INCBIN "build/blobs/rms_att.bin"   ; 192 bytes
 
-SECTION "rms_ffn", ROM0
+SECTION "rms_ffn", ROM0, ALIGN[6]
 rms_ffn:: INCBIN "build/blobs/rms_ffn.bin"   ; 192 bytes
 
-SECTION "rms_final", ROM0
+SECTION "rms_final", ROM0, ALIGN[6]
 rms_final:: INCBIN "build/blobs/rms_final.bin"   ; 64 bytes
 
 SECTION "rmsatt_shift", ROM0

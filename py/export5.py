@@ -363,8 +363,10 @@ def main():
 
     # --- lookup tables ---
     blob("tbl_rsqrt", Q.TABLES["rsqrt"].astype("<u2").tobytes())
+    # Page-aligned: the norm's sum of squares forms the entry offset 4|x| as
+    # a byte plus a page carry instead of a 16-bit add.
     qsq = (np.arange(257, dtype=np.int64) ** 2) // 4
-    blob("tbl_qsq", qsq.astype("<u2").tobytes())
+    blob("tbl_qsq", qsq.astype("<u2").tobytes(), align=8)
 
     # The gate as one byte table, the sigmoid folded in (src/gate.asm). The
     # twin's line is h_new = sat8(shr_round(zg*ht + (256-zg)*h, 8)) with
@@ -471,15 +473,32 @@ def main():
     const("CLS_OUTPUTS_PER_PART", per)
 
     # --- rmsnorm gains and shifts ---
-    blob("rms_att", q.weights["rms_att"].astype(np.int8).tobytes())
-    blob("rms_ffn", q.weights["rms_ffn"].astype(np.int8).tobytes())
-    blob("rms_final", q.weights["rms_final"].astype(np.int8).tobytes())
+    # The kernel (src/rmsnorm.asm) walks a gain row through its low address
+    # byte, so a row must not cross a 256-byte page: 64-aligned blobs keep
+    # every DIM-wide row inside one. It multiplies by the gain as an unsigned
+    # 7-bit number, and lands the gain product on 16 bits before saturating,
+    # which needs the closing shift to be at least 7 (|xh * g| < 2^22).
+    # Both are properties of this checkpoint's calibration, checked here so
+    # a model that breaks them fails at export, not by a wrong integer.
+    row_align = int(np.log2(c.dim))
+    assert (1 << row_align) == c.dim <= 256, "gain rows must be a power of two wide"
+    for name in ("rms_att", "rms_ffn", "rms_final"):
+        g = q.weights[name].astype(np.int64)
+        assert g.min() >= 0 and g.max() <= 127, f"{name} gains outside 0..127"
+        blob(name, q.weights[name].astype(np.int8).tobytes(), align=row_align)
     const("RMS_ROOTN", int(np.log2(c.dim)) // 2)
-    blob("rmsatt_shift", sbytes(S("xb_att", l) - (-11 + q.wexp["rms_att"])
-                                for l in range(c.layers)))
-    blob("rmsffn_shift", sbytes(S("xb_ffn", l) - (-11 + q.wexp["rms_ffn"])
-                                for l in range(c.layers)))
-    const("RMSFINAL_SHIFT", S("xb_final") - (-11 + q.wexp["rms_final"]))
+    rms_shifts = {
+        "rmsatt_shift": [S("xb_att", l) - (-11 + q.wexp["rms_att"])
+                         for l in range(c.layers)],
+        "rmsffn_shift": [S("xb_ffn", l) - (-11 + q.wexp["rms_ffn"])
+                         for l in range(c.layers)],
+        "RMSFINAL_SHIFT": [S("xb_final") - (-11 + q.wexp["rms_final"])],
+    }
+    for name, shifts in rms_shifts.items():
+        assert min(shifts) >= 7 and max(shifts) <= 24, f"{name} {shifts} outside 7..24"
+    blob("rmsatt_shift", sbytes(rms_shifts["rmsatt_shift"]))
+    blob("rmsffn_shift", sbytes(rms_shifts["rmsffn_shift"]))
+    const("RMSFINAL_SHIFT", rms_shifts["RMSFINAL_SHIFT"][0])
 
     # --- matrices: codebook product tables, weights, per-row requant shifts ---
     # wo lands directly on the stream's exponent, exactly as v0.4's did: the
