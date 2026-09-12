@@ -41,9 +41,18 @@
 ;   sat8, in range: ld a,e 1; add a,a 1; sbc a,a 1; cp d 1; jr nz 2;
 ;   ld a,e 1; cp $80 2; jr nz 3                                  = 12
 ;   pop bc 3; ld [bc],a 2; inc bc 2; push bc 4; jp 4              = 15
-;   = 302 + 8s: 318 at s = 2, 342 at s = 5. The group end costs 9.
+;   = 302 + 8s: 318 at s = 2, 342 at s = 5 - the shipped streams' shifts
+;   are 2..5 (every group decoded from build/blobs; nothing below 2, nothing
+;   above 5). The group end costs 9.
 ; Per token at 1,104 rows and the model's shifts (sum ~3,450): ~361K,
 ; against 817K for the input-major kernels and their requants it replaces.
+;
+; SWEEP_ROW is instantiated twice, in Sweep_Rows and in Sweep_Route, ~205 B
+; of ROM0 each. Sharing one copy as a subroutine would cost the call and the
+; ret - 6 + 4 = 10 cycles a row (the group-end test stays where it is) - on
+; 1,104 rows a token: ~11K cycles, 1.1% of the 973K token, to recover ~205 B
+; that nothing needs (the app map shows 1,988 B of ROM0 free). It stays
+; unrolled twice; take the 205 B back the day ROM0 is short, not before.
 
 INCLUDE "hardware.inc"
 INCLUDE "chatgbc.inc"
