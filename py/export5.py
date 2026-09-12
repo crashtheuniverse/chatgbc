@@ -9,8 +9,9 @@ What is gone against the v0.4 exporter: RoPE, the exp/recip softmax tables,
 the score LUTs, every KV constant. What is new: the gate as one shared byte
 table with each layer's sigmoid folded into a pair of side pages, the
 ReLU^2 pages (the twin's activation line at all 256 inputs, one page per
-layer) and w2 a second time by input column, the lists the sparse kernel
-walks.
+layer), w2 a second time by input column, the lists the sparse kernel
+walks, and wz, wh, wo, w1 and the router as output-major sweep streams
+(sweep_rows): a row's block codes then its shift, no shift tables.
 """
 
 import os
@@ -89,23 +90,91 @@ def weight_blob(name, idx):
     return blob(name, offsets.astype(np.uint8).tobytes(), rom0=False)
 
 
-# The ternary block kernel's code space: the 27 coefficient triples in the
-# order src/matvec3.asm walks them - the snake from (-1,-1,-1), one
-# coefficient step at a time. py/tests/test_blockbench.py is the reference.
-_BK3_STEPS = ([0, 0, 4, 2, 2, 4, 0, 0] + [8] + [2, 2, 6, 0, 0, 6, 2, 2] + [8]
-              + [0, 0, 4, 2, 2, 4, 0, 0])
-_STEP_DELTA = {0: (0, +1), 2: (0, -1), 4: (1, +1), 6: (1, -1),
-               8: (2, +1), 10: (2, -1)}
+# The ternary block kernel's code space: the 27 coefficient triples as
+# mixed-radix digits, code = d(c0) + 3 d(c1) + 9 d(c2) with d(0) = 0,
+# d(-1) = 1, d(+1) = 2. That is the order src/matvec3.asm's derivation
+# build writes the table in: entries 0..2 are (0, -x0, +x0), entries 3..5
+# are entries 0..2 minus x1, 6..8 plus x1, 9..17 entries 0..8 minus x2 and
+# 18..26 plus x2 - every entry one 16-bit add from an earlier one. A pad
+# position carries coefficient 0, digit 0, so a padded block only ever
+# selects entries that do not depend on what lies past the vector.
+# py/tests/test_sweep.py decodes every blob back through this table.
+_BK3_DIGIT = {0: 0, -1: 1, 1: 2}
 
 
 def block_codes():
-    coef, order = [-1, -1, -1], [(-1, -1, -1)]
-    for step in _BK3_STEPS:
-        i, d = _STEP_DELTA[step]
-        coef[i] += d
-        order.append(tuple(coef))
-    assert len(set(order)) == 27
-    return {trip: k for k, trip in enumerate(order)}
+    codes = {(c0, c1, c2): _BK3_DIGIT[c0] + 3 * _BK3_DIGIT[c1] + 9 * _BK3_DIGIT[c2]
+             for c2 in (-1, 0, 1) for c1 in (-1, 0, 1) for c0 in (-1, 0, 1)}
+    assert sorted(codes.values()) == list(range(27))
+    return codes
+
+
+SWEEP_END = 0xFF            # ends a group of rows in a sweep stream
+SWEEP_SLOT = 64             # bytes a block's 27-entry table takes, four a page
+
+
+def sweep_rows(t, shifts=None):
+    """Ternary (out, in) in {-1, 0, 1} -> OUTPUT-major rows for the sweep
+    (src/sweep.asm): per row one byte per block of three inputs, then the
+    row's requant shift if `shifts` is given (the router has none), and a
+    SWEEP_END byte after the last row. Byte k of a row is the complete low
+    address byte of block k's int16 entry inside its 256-byte table page,
+    ((k & 3) << 6) | (code << 1): the slot inside the page and the entry
+    inside the slot, so the weight byte IS the table index. Page k >> 2 is
+    the sweep's own arithmetic (inc b every four blocks). A partial last
+    block is padded with zero coefficients (digit 0).
+
+    The rows are the same {-1, 0, 1} matrix written where the kernel reads
+    it, not a table: decode_sweep_rows gets t back."""
+    codes = block_codes()
+    out, n_in = t.shape
+    pad = (-n_in) % 3
+    tp = np.concatenate([t, np.zeros((out, pad), dtype=t.dtype)], axis=1)
+    blocks = tp.reshape(out, -1, 3)
+    nblk = blocks.shape[1]
+    assert nblk * SWEEP_SLOT <= 4096, f"{nblk} blocks of tables exceed a WRAM bank"
+    if shifts is not None:
+        shifts = np.asarray(shifts, dtype=np.int64)
+        assert shifts.shape == (out,)
+        # The epilogue shifts right s times and rounds on the last bit out:
+        # exact for every s >= 1 (a left shift or none would be a different
+        # kernel, and this model never asks for one here - w2 does, on its
+        # own path). The loop counts s in a byte; 15 is far past any real s.
+        assert int(shifts.min()) >= 1, f"sweep shift {int(shifts.min())} < 1"
+        assert int(shifts.max()) <= 15, f"sweep shift {int(shifts.max())} > 15"
+    data = bytearray()
+    for o in range(out):
+        for k in range(nblk):
+            code = codes[tuple(int(v) for v in blocks[o, k])]
+            byte = ((k & 3) << 6) | (code << 1)
+            assert byte != SWEEP_END
+            data.append(byte)
+        if shifts is not None:
+            data.append(int(shifts[o]))
+    data.append(SWEEP_END)
+    return bytes(data)
+
+
+def decode_sweep_rows(data, n_in, with_shift=True):
+    """The inverse of sweep_rows, for the tests: one group of rows from the
+    start of `data` -> (t as (out, in) int8, shifts or None, bytes used)."""
+    codes = {v: k for k, v in block_codes().items()}
+    nblk = -(-n_in // 3)
+    rows, shifts, pos = [], [], 0
+    while data[pos] != SWEEP_END:
+        row = []
+        for k in range(nblk):
+            byte = data[pos + k]
+            assert byte >> 6 == (k & 3), (k, byte)
+            row.extend(codes[(byte & 0x3F) >> 1])
+        pos += nblk
+        rows.append(row[:n_in])
+        assert all(c == 0 for c in row[n_in:]), "a pad position must carry 0"
+        if with_shift:
+            shifts.append(data[pos])
+            pos += 1
+    t = np.array(rows, dtype=np.int8).reshape(-1, n_in)
+    return t, (np.array(shifts, dtype=np.int64) if with_shift else None), pos + 1
 
 
 def block_weight_blob(name, t):
@@ -565,8 +634,24 @@ def main():
         for name in MATS:
             blob(f"lut_{name}", product_lut(q.codebooks[name]), rom0=False)
     banked = ternary or binary          # block kernels leave the matrix's bank mapped
-    for name in ("wz", "wh", "wo"):
-        for l in range(c.layers):
+    # Ternary rows run the output-major sweep (src/sweep.asm): the row's
+    # codes then its shift, requantized in the sweep's epilogue, so there is
+    # no shift table and no Requant_All16 for these. wz and wh read the same
+    # xb, so they share one blob per layer - two groups of rows, one table
+    # build - and the router's rows ride on w1's tables the same way: they
+    # open every expert's w1 blob, so the bank that holds the chosen expert
+    # already held the rows that chose it. The sweep is wired for the
+    # experts' forward pass (src/forward.asm); a ternary model without
+    # experts keeps the input-major block kernel.
+    sweep = ternary and bool(experts)
+    const("SWEEP", int(sweep))
+    for l in range(c.layers):
+        if sweep:
+            blob(f"wzh_l{l}", sweep_rows(q.indices["wz"][l], shift_bytes("wz", l))
+                 + sweep_rows(q.indices["wh"][l], shift_bytes("wh", l)), rom0=False)
+            blob(f"wo_l{l}", sweep_rows(q.indices["wo"][l], shift_bytes("wo", l)), rom0=False)
+            continue
+        for name in ("wz", "wh", "wo"):
             wblob(f"{name}_l{l}", q.indices[name][l])
             blob(f"{name}_sh_l{l}", sbytes(shift_bytes(name, l)),
                  rom0=not banked, attach=f"{name}_l{l}" if banked else None)
@@ -575,13 +660,26 @@ def main():
             # Expert-major, one blob per (layer, expert); the manifest indexes
             # them as layer * EXPERTS + expert, which is what SetMatrix's
             # 8-bit index carries.
-            block_weight_blob(f"router_l{l}", q.router_t[l].astype(np.int8))
+            if sweep:
+                # The router's rows first, without shifts (only their argmax
+                # is used), then the expert's; the ROM skips the router group
+                # by W1_ROUTER_BYTES once it knows the expert.
+                router = sweep_rows(q.router_t[l].astype(np.int8))
+                assert len(router) == experts * -(-c.dim // twin5.TERNARY_BLOCK) + 1
+                if l == 0:
+                    const("W1_ROUTER_BYTES", len(router))
+            else:
+                block_weight_blob(f"router_l{l}", q.router_t[l].astype(np.int8))
             for e in range(experts):
-                wblob(f"w1_l{l}_e{e}", q.indices["w1"][l][e])
-                wblob(f"w2_l{l}_e{e}", q.indices["w2"][l][e])
                 sh1 = shift_bytes("w1", l)[e]
                 sh2 = shift_bytes("w2", l)[e]
-                blob(f"w1_sh_l{l}_e{e}", sbytes(sh1), rom0=False, attach=f"w1_l{l}_e{e}")
+                if sweep:
+                    blob(f"w1_l{l}_e{e}", router + sweep_rows(q.indices["w1"][l][e], sh1),
+                         rom0=False)
+                else:
+                    wblob(f"w1_l{l}_e{e}", q.indices["w1"][l][e])
+                    blob(f"w1_sh_l{l}_e{e}", sbytes(sh1), rom0=False, attach=f"w1_l{l}_e{e}")
+                wblob(f"w2_l{l}_e{e}", q.indices["w2"][l][e])
                 blob(f"w2_sh_l{l}_e{e}", sbytes(sh2), rom0=False, attach=f"w2_l{l}_e{e}")
                 # w2 a second time, by input column, for the sparse kernel;
                 # the dense block blob above stays as the fallback.
@@ -685,6 +783,31 @@ def main():
     blob("test_h1", want.astype(np.int8).tobytes())
     print(f"test matvec w1[0]: h1 range {want.min()}..{want.max()}")
 
+    if sweep and experts:
+        # The sweep's epilogue on shifts the model never asks for: the same
+        # w1 rows (layer 0, expert 0) over the same test_x, but a third of
+        # them at s = 1 - the one-shift path, where most rows saturate both
+        # ways - and a third at s = 2, next to the real shifts. The ROM
+        # sweeps this stream after the real one (src/selftest.asm) and
+        # py/tests/test_sweep.py compares against the twin's requant of the
+        # twin's own sums. The selftest also routes test_x through layer 0's
+        # router rows; the twin's answer is the expected expert.
+        t = q.indices["w1"][0][0]
+        acc = Q.matvec_blocks(t, tx, twin5.TERNARY_BLOCK, twin5.TERNARY_ACC_SHIFT)
+        sw_sh = np.array(shift_bytes("w1", 0)[0], dtype=np.int64)
+        third = c.hidden // 3
+        sw_sh[third:2 * third] = 1
+        sw_sh[2 * third:] = 2
+        sw_out = Q.requant_rows(acc, 0, -sw_sh, 0)
+        n_sat = int((np.abs(sw_out) == 127).sum())
+        assert n_sat >= 8 and (sw_out == 127).any() and (sw_out == -127).any(), (
+            "the synthetic shifts must saturate rows both ways")
+        assert (sw_sh[third:2 * third] == 1).all()
+        blob("test_sw", sweep_rows(t, sw_sh), rom0=False)
+        expected("test_sw_out", sw_out.astype(np.int8).tobytes())
+        expected("test_sw_expert", bytes([twin5.route(q, 0, tx)]))
+        print(f"test sweep: {n_sat} of {c.hidden} rows saturate at the synthetic shifts")
+
     # Gate spot check: one full gate step on layer 0, from the twin.
     zl = np.clip(np.arange(-32, 32), -128, 127).astype(np.int64)
     zl = np.resize(zl, c.dim)
@@ -757,26 +880,32 @@ def main():
         f"cls_w_p{i}" for i in range(nparts)))
     # w2a and w2b share w2's one shift table - both halves land in the same
     # output rows, requantized once after the second accumulating pass.
-    for name in ("wz", "wh", "wo"):
+    # A sweep stream carries its shifts inline, so it has no shift table.
+    for name in (("wzh", "wo") if sweep else ("wz", "wh", "wo")):
         lines.append(f"{name}_banks:: db " + ", ".join(
             f"BANK({name}_l{l})" for l in range(c.layers)))
         lines.append(f"{name}_addrs:: dw " + ", ".join(
             f"{name}_l{l}" for l in range(c.layers)))
+        if sweep:
+            continue
         lines.append(f"{name}_shifts:: dw " + ", ".join(
             f"{name}_sh_l{l}" for l in range(c.layers)))
         lines.append(f"{name}_shbanks:: db " + ", ".join(
             f"BANK({name}_sh_l{l})" for l in range(c.layers)))
     if experts:
         le = [(l, e) for l in range(c.layers) for e in range(experts)]
-        lines.append("router_banks:: db " + ", ".join(
-            f"BANK(router_l{l})" for l in range(c.layers)))
-        lines.append("router_addrs:: dw " + ", ".join(
-            f"router_l{l}" for l in range(c.layers)))
+        if not sweep:                   # the sweep's router rows open each w1 blob
+            lines.append("router_banks:: db " + ", ".join(
+                f"BANK(router_l{l})" for l in range(c.layers)))
+            lines.append("router_addrs:: dw " + ", ".join(
+                f"router_l{l}" for l in range(c.layers)))
         for name in ("w1", "w2"):
             lines.append(f"{name}_banks:: db " + ", ".join(
                 f"BANK({name}_l{l}_e{e})" for l, e in le))
             lines.append(f"{name}_addrs:: dw " + ", ".join(
                 f"{name}_l{l}_e{e}" for l, e in le))
+            if sweep and name == "w1":
+                continue
             lines.append(f"{name}_shifts:: dw " + ", ".join(
                 f"{name}_sh_l{l}_e{e}" for l, e in le))
             lines.append(f"{name}_shbanks:: db " + ", ".join(

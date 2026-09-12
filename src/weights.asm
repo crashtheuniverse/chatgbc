@@ -67,48 +67,26 @@ rmsatt_shift:: INCBIN "build/blobs/rmsatt_shift.bin"   ; 3 bytes
 SECTION "rmsffn_shift", ROM0
 rmsffn_shift:: INCBIN "build/blobs/rmsffn_shift.bin"   ; 3 bytes
 
-SECTION "wz_l0", ROMX
-wz_l0:: INCBIN "build/blobs/wz_l0.bin"   ; 1408 bytes
-wz_sh_l0:: INCBIN "build/blobs/wz_sh_l0.bin"   ; 64 bytes, in the bank of wz_l0
-
-SECTION "wz_l1", ROMX
-wz_l1:: INCBIN "build/blobs/wz_l1.bin"   ; 1408 bytes
-wz_sh_l1:: INCBIN "build/blobs/wz_sh_l1.bin"   ; 64 bytes, in the bank of wz_l1
-
-SECTION "wz_l2", ROMX
-wz_l2:: INCBIN "build/blobs/wz_l2.bin"   ; 1408 bytes
-wz_sh_l2:: INCBIN "build/blobs/wz_sh_l2.bin"   ; 64 bytes, in the bank of wz_l2
-
-SECTION "wh_l0", ROMX
-wh_l0:: INCBIN "build/blobs/wh_l0.bin"   ; 1408 bytes
-wh_sh_l0:: INCBIN "build/blobs/wh_sh_l0.bin"   ; 64 bytes, in the bank of wh_l0
-
-SECTION "wh_l1", ROMX
-wh_l1:: INCBIN "build/blobs/wh_l1.bin"   ; 1408 bytes
-wh_sh_l1:: INCBIN "build/blobs/wh_sh_l1.bin"   ; 64 bytes, in the bank of wh_l1
-
-SECTION "wh_l2", ROMX
-wh_l2:: INCBIN "build/blobs/wh_l2.bin"   ; 1408 bytes
-wh_sh_l2:: INCBIN "build/blobs/wh_sh_l2.bin"   ; 64 bytes, in the bank of wh_l2
+SECTION "wzh_l0", ROMX
+wzh_l0:: INCBIN "build/blobs/wzh_l0.bin"   ; 2946 bytes
 
 SECTION "wo_l0", ROMX
-wo_l0:: INCBIN "build/blobs/wo_l0.bin"   ; 1408 bytes
-wo_sh_l0:: INCBIN "build/blobs/wo_sh_l0.bin"   ; 64 bytes, in the bank of wo_l0
+wo_l0:: INCBIN "build/blobs/wo_l0.bin"   ; 1473 bytes
+
+SECTION "wzh_l1", ROMX
+wzh_l1:: INCBIN "build/blobs/wzh_l1.bin"   ; 2946 bytes
 
 SECTION "wo_l1", ROMX
-wo_l1:: INCBIN "build/blobs/wo_l1.bin"   ; 1408 bytes
-wo_sh_l1:: INCBIN "build/blobs/wo_sh_l1.bin"   ; 64 bytes, in the bank of wo_l1
+wo_l1:: INCBIN "build/blobs/wo_l1.bin"   ; 1473 bytes
+
+SECTION "wzh_l2", ROMX
+wzh_l2:: INCBIN "build/blobs/wzh_l2.bin"   ; 2946 bytes
 
 SECTION "wo_l2", ROMX
-wo_l2:: INCBIN "build/blobs/wo_l2.bin"   ; 1408 bytes
-wo_sh_l2:: INCBIN "build/blobs/wo_sh_l2.bin"   ; 64 bytes, in the bank of wo_l2
-
-SECTION "router_l0", ROMX
-router_l0:: INCBIN "build/blobs/router_l0.bin"   ; 88 bytes
+wo_l2:: INCBIN "build/blobs/wo_l2.bin"   ; 1473 bytes
 
 SECTION "w1_l0_e0", ROMX
-w1_l0_e0:: INCBIN "build/blobs/w1_l0_e0.bin"   ; 3872 bytes
-w1_sh_l0_e0:: INCBIN "build/blobs/w1_sh_l0_e0.bin"   ; 176 bytes, in the bank of w1_l0_e0
+w1_l0_e0:: INCBIN "build/blobs/w1_l0_e0.bin"   ; 4138 bytes
 
 SECTION "w2_l0_e0", ROMX
 w2_l0_e0:: INCBIN "build/blobs/w2_l0_e0.bin"   ; 3776 bytes
@@ -118,8 +96,7 @@ SECTION "w2s_l0_e0", ROMX
 w2s_l0_e0:: INCBIN "build/blobs/w2s_l0_e0.bin"   ; 8115 bytes
 
 SECTION "w1_l0_e1", ROMX
-w1_l0_e1:: INCBIN "build/blobs/w1_l0_e1.bin"   ; 3872 bytes
-w1_sh_l0_e1:: INCBIN "build/blobs/w1_sh_l0_e1.bin"   ; 176 bytes, in the bank of w1_l0_e1
+w1_l0_e1:: INCBIN "build/blobs/w1_l0_e1.bin"   ; 4138 bytes
 
 SECTION "w2_l0_e1", ROMX
 w2_l0_e1:: INCBIN "build/blobs/w2_l0_e1.bin"   ; 3776 bytes
@@ -129,8 +106,7 @@ SECTION "w2s_l0_e1", ROMX
 w2s_l0_e1:: INCBIN "build/blobs/w2s_l0_e1.bin"   ; 8044 bytes
 
 SECTION "w1_l0_e2", ROMX
-w1_l0_e2:: INCBIN "build/blobs/w1_l0_e2.bin"   ; 3872 bytes
-w1_sh_l0_e2:: INCBIN "build/blobs/w1_sh_l0_e2.bin"   ; 176 bytes, in the bank of w1_l0_e2
+w1_l0_e2:: INCBIN "build/blobs/w1_l0_e2.bin"   ; 4138 bytes
 
 SECTION "w2_l0_e2", ROMX
 w2_l0_e2:: INCBIN "build/blobs/w2_l0_e2.bin"   ; 3776 bytes
@@ -140,8 +116,7 @@ SECTION "w2s_l0_e2", ROMX
 w2s_l0_e2:: INCBIN "build/blobs/w2s_l0_e2.bin"   ; 8023 bytes
 
 SECTION "w1_l0_e3", ROMX
-w1_l0_e3:: INCBIN "build/blobs/w1_l0_e3.bin"   ; 3872 bytes
-w1_sh_l0_e3:: INCBIN "build/blobs/w1_sh_l0_e3.bin"   ; 176 bytes, in the bank of w1_l0_e3
+w1_l0_e3:: INCBIN "build/blobs/w1_l0_e3.bin"   ; 4138 bytes
 
 SECTION "w2_l0_e3", ROMX
 w2_l0_e3:: INCBIN "build/blobs/w2_l0_e3.bin"   ; 3776 bytes
@@ -150,12 +125,8 @@ w2_sh_l0_e3:: INCBIN "build/blobs/w2_sh_l0_e3.bin"   ; 64 bytes, in the bank of 
 SECTION "w2s_l0_e3", ROMX
 w2s_l0_e3:: INCBIN "build/blobs/w2s_l0_e3.bin"   ; 8133 bytes
 
-SECTION "router_l1", ROMX
-router_l1:: INCBIN "build/blobs/router_l1.bin"   ; 88 bytes
-
 SECTION "w1_l1_e0", ROMX
-w1_l1_e0:: INCBIN "build/blobs/w1_l1_e0.bin"   ; 3872 bytes
-w1_sh_l1_e0:: INCBIN "build/blobs/w1_sh_l1_e0.bin"   ; 176 bytes, in the bank of w1_l1_e0
+w1_l1_e0:: INCBIN "build/blobs/w1_l1_e0.bin"   ; 4138 bytes
 
 SECTION "w2_l1_e0", ROMX
 w2_l1_e0:: INCBIN "build/blobs/w2_l1_e0.bin"   ; 3776 bytes
@@ -165,8 +136,7 @@ SECTION "w2s_l1_e0", ROMX
 w2s_l1_e0:: INCBIN "build/blobs/w2s_l1_e0.bin"   ; 7932 bytes
 
 SECTION "w1_l1_e1", ROMX
-w1_l1_e1:: INCBIN "build/blobs/w1_l1_e1.bin"   ; 3872 bytes
-w1_sh_l1_e1:: INCBIN "build/blobs/w1_sh_l1_e1.bin"   ; 176 bytes, in the bank of w1_l1_e1
+w1_l1_e1:: INCBIN "build/blobs/w1_l1_e1.bin"   ; 4138 bytes
 
 SECTION "w2_l1_e1", ROMX
 w2_l1_e1:: INCBIN "build/blobs/w2_l1_e1.bin"   ; 3776 bytes
@@ -176,8 +146,7 @@ SECTION "w2s_l1_e1", ROMX
 w2s_l1_e1:: INCBIN "build/blobs/w2s_l1_e1.bin"   ; 7941 bytes
 
 SECTION "w1_l1_e2", ROMX
-w1_l1_e2:: INCBIN "build/blobs/w1_l1_e2.bin"   ; 3872 bytes
-w1_sh_l1_e2:: INCBIN "build/blobs/w1_sh_l1_e2.bin"   ; 176 bytes, in the bank of w1_l1_e2
+w1_l1_e2:: INCBIN "build/blobs/w1_l1_e2.bin"   ; 4138 bytes
 
 SECTION "w2_l1_e2", ROMX
 w2_l1_e2:: INCBIN "build/blobs/w2_l1_e2.bin"   ; 3776 bytes
@@ -187,8 +156,7 @@ SECTION "w2s_l1_e2", ROMX
 w2s_l1_e2:: INCBIN "build/blobs/w2s_l1_e2.bin"   ; 7886 bytes
 
 SECTION "w1_l1_e3", ROMX
-w1_l1_e3:: INCBIN "build/blobs/w1_l1_e3.bin"   ; 3872 bytes
-w1_sh_l1_e3:: INCBIN "build/blobs/w1_sh_l1_e3.bin"   ; 176 bytes, in the bank of w1_l1_e3
+w1_l1_e3:: INCBIN "build/blobs/w1_l1_e3.bin"   ; 4138 bytes
 
 SECTION "w2_l1_e3", ROMX
 w2_l1_e3:: INCBIN "build/blobs/w2_l1_e3.bin"   ; 3776 bytes
@@ -197,12 +165,8 @@ w2_sh_l1_e3:: INCBIN "build/blobs/w2_sh_l1_e3.bin"   ; 64 bytes, in the bank of 
 SECTION "w2s_l1_e3", ROMX
 w2s_l1_e3:: INCBIN "build/blobs/w2s_l1_e3.bin"   ; 7997 bytes
 
-SECTION "router_l2", ROMX
-router_l2:: INCBIN "build/blobs/router_l2.bin"   ; 88 bytes
-
 SECTION "w1_l2_e0", ROMX
-w1_l2_e0:: INCBIN "build/blobs/w1_l2_e0.bin"   ; 3872 bytes
-w1_sh_l2_e0:: INCBIN "build/blobs/w1_sh_l2_e0.bin"   ; 176 bytes, in the bank of w1_l2_e0
+w1_l2_e0:: INCBIN "build/blobs/w1_l2_e0.bin"   ; 4138 bytes
 
 SECTION "w2_l2_e0", ROMX
 w2_l2_e0:: INCBIN "build/blobs/w2_l2_e0.bin"   ; 3776 bytes
@@ -212,8 +176,7 @@ SECTION "w2s_l2_e0", ROMX
 w2s_l2_e0:: INCBIN "build/blobs/w2s_l2_e0.bin"   ; 7670 bytes
 
 SECTION "w1_l2_e1", ROMX
-w1_l2_e1:: INCBIN "build/blobs/w1_l2_e1.bin"   ; 3872 bytes
-w1_sh_l2_e1:: INCBIN "build/blobs/w1_sh_l2_e1.bin"   ; 176 bytes, in the bank of w1_l2_e1
+w1_l2_e1:: INCBIN "build/blobs/w1_l2_e1.bin"   ; 4138 bytes
 
 SECTION "w2_l2_e1", ROMX
 w2_l2_e1:: INCBIN "build/blobs/w2_l2_e1.bin"   ; 3776 bytes
@@ -223,8 +186,7 @@ SECTION "w2s_l2_e1", ROMX
 w2s_l2_e1:: INCBIN "build/blobs/w2s_l2_e1.bin"   ; 7767 bytes
 
 SECTION "w1_l2_e2", ROMX
-w1_l2_e2:: INCBIN "build/blobs/w1_l2_e2.bin"   ; 3872 bytes
-w1_sh_l2_e2:: INCBIN "build/blobs/w1_sh_l2_e2.bin"   ; 176 bytes, in the bank of w1_l2_e2
+w1_l2_e2:: INCBIN "build/blobs/w1_l2_e2.bin"   ; 4138 bytes
 
 SECTION "w2_l2_e2", ROMX
 w2_l2_e2:: INCBIN "build/blobs/w2_l2_e2.bin"   ; 3776 bytes
@@ -234,8 +196,7 @@ SECTION "w2s_l2_e2", ROMX
 w2s_l2_e2:: INCBIN "build/blobs/w2s_l2_e2.bin"   ; 7888 bytes
 
 SECTION "w1_l2_e3", ROMX
-w1_l2_e3:: INCBIN "build/blobs/w1_l2_e3.bin"   ; 3872 bytes
-w1_sh_l2_e3:: INCBIN "build/blobs/w1_sh_l2_e3.bin"   ; 176 bytes, in the bank of w1_l2_e3
+w1_l2_e3:: INCBIN "build/blobs/w1_l2_e3.bin"   ; 4138 bytes
 
 SECTION "w2_l2_e3", ROMX
 w2_l2_e3:: INCBIN "build/blobs/w2_l2_e3.bin"   ; 3776 bytes
@@ -258,6 +219,9 @@ test_x:: INCBIN "build/blobs/test_x.bin"   ; 64 bytes
 
 SECTION "test_h1", ROM0
 test_h1:: INCBIN "build/blobs/test_h1.bin"   ; 176 bytes
+
+SECTION "test_sw", ROMX
+test_sw:: INCBIN "build/blobs/test_sw.bin"   ; 4049 bytes
 
 SECTION "test_gate_zl", ROM0
 test_gate_zl:: INCBIN "build/blobs/test_gate_zl.bin"   ; 64 bytes
@@ -282,24 +246,12 @@ emb_banks:: db BANK(emb_rows_p0), BANK(emb_rows_p1), BANK(emb_rows_p2), BANK(emb
 emb_addrs:: dw emb_rows_p0, emb_rows_p1, emb_rows_p2, emb_rows_p3
 cls_banks:: db BANK(cls_w_p0)
 cls_addrs:: dw cls_w_p0
-wz_banks:: db BANK(wz_l0), BANK(wz_l1), BANK(wz_l2)
-wz_addrs:: dw wz_l0, wz_l1, wz_l2
-wz_shifts:: dw wz_sh_l0, wz_sh_l1, wz_sh_l2
-wz_shbanks:: db BANK(wz_sh_l0), BANK(wz_sh_l1), BANK(wz_sh_l2)
-wh_banks:: db BANK(wh_l0), BANK(wh_l1), BANK(wh_l2)
-wh_addrs:: dw wh_l0, wh_l1, wh_l2
-wh_shifts:: dw wh_sh_l0, wh_sh_l1, wh_sh_l2
-wh_shbanks:: db BANK(wh_sh_l0), BANK(wh_sh_l1), BANK(wh_sh_l2)
+wzh_banks:: db BANK(wzh_l0), BANK(wzh_l1), BANK(wzh_l2)
+wzh_addrs:: dw wzh_l0, wzh_l1, wzh_l2
 wo_banks:: db BANK(wo_l0), BANK(wo_l1), BANK(wo_l2)
 wo_addrs:: dw wo_l0, wo_l1, wo_l2
-wo_shifts:: dw wo_sh_l0, wo_sh_l1, wo_sh_l2
-wo_shbanks:: db BANK(wo_sh_l0), BANK(wo_sh_l1), BANK(wo_sh_l2)
-router_banks:: db BANK(router_l0), BANK(router_l1), BANK(router_l2)
-router_addrs:: dw router_l0, router_l1, router_l2
 w1_banks:: db BANK(w1_l0_e0), BANK(w1_l0_e1), BANK(w1_l0_e2), BANK(w1_l0_e3), BANK(w1_l1_e0), BANK(w1_l1_e1), BANK(w1_l1_e2), BANK(w1_l1_e3), BANK(w1_l2_e0), BANK(w1_l2_e1), BANK(w1_l2_e2), BANK(w1_l2_e3)
 w1_addrs:: dw w1_l0_e0, w1_l0_e1, w1_l0_e2, w1_l0_e3, w1_l1_e0, w1_l1_e1, w1_l1_e2, w1_l1_e3, w1_l2_e0, w1_l2_e1, w1_l2_e2, w1_l2_e3
-w1_shifts:: dw w1_sh_l0_e0, w1_sh_l0_e1, w1_sh_l0_e2, w1_sh_l0_e3, w1_sh_l1_e0, w1_sh_l1_e1, w1_sh_l1_e2, w1_sh_l1_e3, w1_sh_l2_e0, w1_sh_l2_e1, w1_sh_l2_e2, w1_sh_l2_e3
-w1_shbanks:: db BANK(w1_sh_l0_e0), BANK(w1_sh_l0_e1), BANK(w1_sh_l0_e2), BANK(w1_sh_l0_e3), BANK(w1_sh_l1_e0), BANK(w1_sh_l1_e1), BANK(w1_sh_l1_e2), BANK(w1_sh_l1_e3), BANK(w1_sh_l2_e0), BANK(w1_sh_l2_e1), BANK(w1_sh_l2_e2), BANK(w1_sh_l2_e3)
 w2_banks:: db BANK(w2_l0_e0), BANK(w2_l0_e1), BANK(w2_l0_e2), BANK(w2_l0_e3), BANK(w2_l1_e0), BANK(w2_l1_e1), BANK(w2_l1_e2), BANK(w2_l1_e3), BANK(w2_l2_e0), BANK(w2_l2_e1), BANK(w2_l2_e2), BANK(w2_l2_e3)
 w2_addrs:: dw w2_l0_e0, w2_l0_e1, w2_l0_e2, w2_l0_e3, w2_l1_e0, w2_l1_e1, w2_l1_e2, w2_l1_e3, w2_l2_e0, w2_l2_e1, w2_l2_e2, w2_l2_e3
 w2_shifts:: dw w2_sh_l0_e0, w2_sh_l0_e1, w2_sh_l0_e2, w2_sh_l0_e3, w2_sh_l1_e0, w2_sh_l1_e1, w2_sh_l1_e2, w2_sh_l1_e3, w2_sh_l2_e0, w2_sh_l2_e1, w2_sh_l2_e2, w2_sh_l2_e3
