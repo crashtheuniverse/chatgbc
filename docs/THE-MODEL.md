@@ -132,13 +132,15 @@ below is that line divided by three, rounded to the ten.
 | **one layer** | **~234,000** | |
 
 Then the token: three layers 702,100, the final norm 23,720, the classifier
-246,712, the embed 448 — 973,032 with the census's own timers. A quarter of
+246,712, the embed 448 — 972,980; the staged total reads 973,032, the
+difference being the census's own timers. A quarter of
 the token is the classifier, and the classifier is linear in the vocabulary:
 1,024 rows at 226 cycles each, plus 18K to build its 16 tables. A bigger
 dictionary is paid for there and nowhere else.
 
 What a row costs is the number to hold on to. A row of 64 ternary inputs
-through the sweep is `302 + 8s` cycles, `s` its shift (1 to 5): 22 lookups
+through the sweep is `302 + 8s` cycles, `s` its shift (3 to 5 for this
+model's rows): 22 lookups
 at 12 cycles, the shift, the saturation. The classifier's row, blocks of
 four and no requant, is 226. A table build is 381 cycles a block, 22 blocks
 per input vector.

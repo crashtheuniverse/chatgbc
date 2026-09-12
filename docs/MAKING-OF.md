@@ -81,7 +81,9 @@ came out nonzero, so it writes the list; w2's weights are stored per input
 column as lists of the +1 outputs and the −1 outputs; and the kernel does
 one 16-bit add or subtract per nonzero (activation, weight) pair. About
 1,100 to 1,650 pairs a layer where the matrix has 11,264
-multiply-accumulates. 76K cycles a token from 345K, and it is exact because
+multiply-accumulates. About 68K cycles a token for the three layers on the
+8-token census (67,624) where the dense kernel took 344,696, and it is
+exact because
 integer addition commutes. A guard falls back to the dense kernel above
 111 nonzero activations; the measured maximum is 88.
 
@@ -130,10 +132,10 @@ and the output-major classifier (independent of everything); the gate
 table; the norm; the output-major sweep for the four block matvecs; the
 small exact ones last.
 
-Three things the builders wrote down that I want kept. The census's
+Three things from the build notes worth keeping. The census's
 arithmetic is the thing to trust over anyone's count: the wh line reads
 63,408 for 192 rows, and 302 + 8s at the mean shift the export reports
-lands within a percent of it, which is how you know the counts are honest. A path with no
+lands on it to the cycle, which is how you know the counts are honest. A path with no
 witness is a path the next change breaks silently: the classifier's retry
 path had been correct and untested, so the lab gained a planted-history
 entry and the suite checks it at 0 to 9 rejects. And the tree's own
@@ -152,7 +154,8 @@ tens of cycles of themselves.
 | **v0.9 shipped** — the same model, the token audited | **963,792** | **0.46** |
 
 v0.1 to v0.3 averaged over 96 tokens, v0.9 over 100 with the teletype
-running; all on the cartridge's own DIV/TIMA counter.
+running, v0.4.1 with the teletype off (2,271,104 with it); all on the
+cartridge's own DIV/TIMA counter.
 
 Inside v0.9, the 8-token census as the collapses merged, on the tree the
 release started from (2,164,704 staged cycles - the v0.4.1 weights with the
@@ -190,9 +193,9 @@ The **twin IS** the secret weapon.
   no-repeat rule's stable order over 1,024 tokens stops existing. It waits
   for the decision to grow the vocabulary.
 - **A top-9 candidate list for the retry** (v0.9). An insert costs about
-  230 cycles and the scan takes about 47 a token: a loss against simply
-  keeping the top two and rescanning on the third reject, once in 440
-  tokens.
+  230 cycles and a token makes about 47 of them, 10.8K cycles: a loss
+  against simply keeping the top two and rescanning on the third reject,
+  once in 440 tokens.
 - **8-bit accumulation with a carry plane** (v0.9). Exact, it was argued;
   counted, the carry add *is* the high plane, and 22 blocks of ±381 need
   14 bits with the requant rounding on every low bit. Zero cycles saved.

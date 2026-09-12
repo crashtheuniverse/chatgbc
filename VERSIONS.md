@@ -75,7 +75,8 @@ until SELECT: the recurrent state has no window to fall off, and the
 no-repeat history slides along the last 176 tokens.
 
 **v0.9** - the same weights at 2.3x, bit for bit. The number jumps because
-the work planned for v0.5 to v0.8 - other codebooks, wider models - landed
+the work planned for v0.5 to v0.8 - one-bit kernels, a plane classifier,
+the stream on the trainer's grid - landed
 on the tree as options, and an audit of the whole token showed that the
 biggest gain left was not a better model but a cheaper token for the model
 we had. The audit read every stage of the token by its codomain (how many
@@ -88,8 +89,8 @@ from 2,164,704 cycles to 973,032, 55% off. The block matvecs (wz, wh, wo, w1 and
 output-major over 22 tables of 27 sums built once per input vector, the
 row summed and requantized in registers - 12 cycles per three MACs, no
 accumulator array. w2 walks only the nonzero (activation, weight) pairs,
-listed by the ReLU² loop as it finds them, 76K cycles a token where the
-dense kernel took 345K. The classifier keeps only the running best in a
+listed by the ReLU² loop as it finds them, about 68K cycles a token on
+the 8-token census (67,624) where the dense kernel took 344,696. The classifier keeps only the running best in a
 register pair over 16 tables of 81 sums, 226 cycles a row, no logits
 stored. The minGRU gate is one byte table with the sigmoid folded in, after
 a proof over all 16,646,400 inputs that its saturation never fires. The
@@ -124,7 +125,8 @@ took.
 ## How the numbers were taken
 
 - **Cycles per token**: the ROM's own `CYC/TOK` counter (DIV/TIMA), averaged
-  over a run - 96 tokens for v0.1 to v0.3, 100 for v0.9. The staged census
+  over a run - 96 tokens for v0.1 to v0.3, 100 for v0.9 with the teletype
+  running; v0.4.1's 2,259,829 is with the teletype off. The staged census
   (`py/census5.py`, 8 tokens, one timer per stage) agrees with it to within a
   percent: 973,032 against 963,792 for v0.9. From v0.9 the token is
   data-dependent, because the sparse w2 kernel does one add per nonzero

@@ -147,8 +147,9 @@ not listed). For each nonzero activation the kernel fetches its column and
 adds the activation into the accumulators on the + list and subtracts it on
 the − list: 11 cycles a pair when the add does not carry, 16 when it does.
 Integer addition commutes, so the 64 sums are the same integers the dense
-matvec would have produced. About 1,100 to 1,650 pairs a layer, 76K cycles
-a token for the three layers, where the dense kernel took 345K. If a token
+matvec would have produced. About 1,100 to 1,650 pairs a layer, about 68K
+cycles a token for the three layers on the 8-token census (67,624), where
+the dense kernel took 344,696. If a token
 ever had more than 111 nonzero activations the dense kernel would run
 instead; the most measured is 88.
 

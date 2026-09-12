@@ -115,8 +115,8 @@ writes the list. w2's weights are stored per input column as lists of output
 offsets, the +1 set and the −1 set, and the kernel does one 16-bit add or
 subtract per nonzero (activation, weight) pair - about 1,100 to 1,650 pairs
 a layer, since 82% of the activations and 34-40% of the weights are zero.
-76K cycles a token for the three layers where the dense block kernel took
-345K. A guard falls back to the dense kernel above 111 nonzero activations;
+About 68K cycles a token for the three layers on the 8-token census
+(67,624) where the dense block kernel took 344,696. A guard falls back to the dense kernel above 111 nonzero activations;
 the measured maximum is 88.
 
 **The classifier keeps only the running best.** Greedy decode needs the
@@ -162,7 +162,8 @@ calibrated it four times coarser), and the norm's width factor is folded
 into its gains. The first moves the score at dim 64 from 1.146 to 1.126;
 the second is exact at this width. Both are in the twin, so the tree v0.9
 started from already had them, at 2,164,704 cycles a token on the 8-token
-census (the v0.4.1 release measures 2,259,829 on the app counter).
+census (the v0.4.1 release measured 2,259,829 with the teletype off,
+2,271,104 with it).
 
 On that census the token went from 2,164,704 cycles to 973,032:
 classifier 423,496 → 246,712; w1 with the router 332,680 → 202,728; w2
@@ -243,8 +244,9 @@ I expressly chose tools that can work this way.
 ## Twin and testing
 
 `py/twin5.py` is a **bit-exact integer twin** of the assembly: same
-quantization, rounding, saturation, order and widths. It did not change
-during v0.9; every kernel was rewritten to reproduce it. The tests boot the
+quantization, rounding, saturation, order and widths. No rule in it changed
+during v0.9 - one constant that names the classifier's blocking moved, and
+it changes no integer; every kernel was rewritten to reproduce it. The tests boot the
 lab ROM headlessly and assert it emits an identical token sequence.
 
 31 tests: the golden run, strict; each kernel against the twin's own
