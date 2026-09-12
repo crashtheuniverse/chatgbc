@@ -8,13 +8,17 @@ INCLUDE "hardware.inc"
 INCLUDE "chatgbc.inc"
 INCLUDE "model.inc"
 
-; Bank 1 is free in v0.5 - there is no KV cache - so the diffstep snapshots
-; live there and cost WRAM0 nothing. The probe sets SVBK before reading.
+; Layer-0 snapshots, so a wrong kernel is located by layer, not by staring
+; at text (py/tests/test_module_f.py checks every one against the twin).
+; Lab builds only: build.ps1 -Lab defines PROBES, and the app and census
+; ROMs assemble neither the buffers nor the copies - the copies cost the
+; shipping ROM 4,560 cycles a token for nothing until v0.9. Bank 1 is free
+; (there is no KV cache), so they cost WRAM0 nothing; ForwardLayer maps it.
+IF DEF(PROBES)
 SECTION "Forward debug", WRAMX[$D000], BANK[1]
-; Layer 0 snapshots, so py/diffstep.py can tell an attention bug from an FFN one.
-wDbgAtt::   ds DIM
-wDbgFfn::   ds DIM
-wDbgRes::   ds DIM
+wDbgAtt::   ds DIM              ; layer 0: the state after the gate
+wDbgFfn::   ds DIM              ; layer 0: w2's output after requant, before the add
+wDbgRes::   ds DIM              ; layer 0: x after the recurrent residual
 wDbgXb::    ds DIM              ; layer 0: post-rmsnorm input to wz/wh
 wDbgZl::    ds DIM              ; layer 0: gate logits
 wDbgHt::    ds DIM              ; layer 0: candidate state
@@ -24,6 +28,22 @@ wDbgXf::    ds DIM              ; layer 0: the FFN's input, after rms_ffn
 wDbgRoute:: ds 8                ; layer 0: the router's four sums, int16
 wDbgAo::    ds DIM              ; layer 0: wo's output after requant, before the add
 wDbgAccWo:: ds DIM * 2          ; layer 0: wo's raw int16 accumulators
+ENDC
+
+; A layer-0 snapshot: \1 = source, \2 = probe, \3 = bytes. Nothing outside
+; a PROBES build, so the app's forward pass has no trace of it.
+MACRO SNAPSHOT_L0
+IF DEF(PROBES)
+    ld a, [wLayer]
+    or a
+    jr nz, :+
+    ld hl, \1
+    ld de, \2
+    ld bc, \3
+    call CopyBytes
+:
+ENDC
+ENDM
 
 INCLUDE "census.inc"
 
@@ -98,8 +118,8 @@ SetXPtr:
 
 ; Runs layer wLayer over wX.
 ForwardLayer::
-    ld a, 1                         ; the diffstep snapshots live in bank 1,
-    ldh [rSVBK], a                  ; and nothing else banked runs mid-layer
+    ld a, 1                         ; the lab's snapshots and the census live
+    ldh [rSVBK], a                  ; in bank 1; nothing else banked runs mid-layer
     ; --- recurrent block: rmsnorm, gates, state, project ---
     ld hl, rms_att
     ld a, [wLayer]
@@ -163,20 +183,8 @@ ENDC
     call Requant_All16
     CENSUS_END 2
 
-    CENSUS_START
-    ld a, [wLayer]                  ; snapshot the logits for diffstep
-    or a
-    jr nz, :+
-    ld hl, wXb
-    ld de, wDbgXb
-    ld bc, DIM
-    call CopyBytes
-    ld hl, wZl
-    ld de, wDbgZl
-    ld bc, DIM
-    call CopyBytes
-:
-    CENSUS_END 17
+    SNAPSHOT_L0 wXb, wDbgXb, DIM
+    SNAPSHOT_L0 wZl, wDbgZl, DIM
 
     ; No sigmoid pass: the gate reads its logits raw, through side pages
     ; that fold the layer's sigmoid into the table row (src/gate.asm).
@@ -219,30 +227,12 @@ ENDC
     call Requant_All16
     CENSUS_END 5
 
-    CENSUS_START
-    ld a, [wLayer]
-    or a
-    jr nz, :+
-    ld hl, wHt                      ; layer 0's slice is the buffer's start
-    ld de, wDbgHt
-    ld bc, DIM
-    call CopyBytes
-:
-    CENSUS_END 17
+    SNAPSHOT_L0 wHt, wDbgHt, DIM    ; layer 0's slice is the buffer's start
     CENSUS_START
     call Gate_Update                ; h += z * (h~ - h), in place
     CENSUS_END 6
 
-    CENSUS_START
-    ld a, [wLayer]                  ; snapshot layer 0's state for diffstep
-    or a
-    jr nz, :+
-    ld hl, wH
-    ld de, wDbgAtt
-    ld bc, DIM
-    call CopyBytes
-:
-    CENSUS_END 17
+    SNAPSHOT_L0 wH, wDbgAtt, DIM
     CENSUS_START
     ld hl, wH                       ; project the state back into the stream
     ld a, [wLayer]
@@ -270,14 +260,7 @@ ELSE
     call Matvec_Run
 ENDC
     CENSUS_END 7
-    ld a, [wLayer]                  ; snapshot wo's raw accumulators
-    or a
-    jr nz, :+
-    ld hl, wAcc
-    ld de, wDbgAccWo
-    ld bc, DIM * 2
-    call CopyBytes
-:
+    SNAPSHOT_L0 wAcc, wDbgAccWo, DIM * 2
     CENSUS_START
     ld hl, wo_shifts
     ld a, [wLayer]
@@ -287,30 +270,11 @@ ENDC
     ld bc, wXb
     call Requant_All16
     CENSUS_END 8
-    ld a, [wLayer]                  ; snapshot wo's output before the add
-    or a
-    jr nz, :+
-    ld hl, wXb
-    ld de, wDbgAo
-    ld bc, DIM
-    call CopyBytes
-:
+    SNAPSHOT_L0 wXb, wDbgAo, DIM
     CENSUS_START
-    ld hl, wXb                      ; residual: both sides already share X_EXP
-    ld de, wX
-    ld b, DIM
-    call AddSaturating
+    call AddSat_Stream              ; residual: both sides already share X_EXP
     CENSUS_END 9
-    CENSUS_START
-    ld a, [wLayer]                  ; snapshot x after the recurrent residual
-    or a
-    jr nz, :+
-    ld hl, wX
-    ld de, wDbgRes
-    ld bc, DIM
-    call CopyBytes
-:
-    CENSUS_END 17
+    SNAPSHOT_L0 wX, wDbgRes, DIM
 
     ; --- feed-forward block: rmsnorm, w1, relu^2, w2 ---
     CENSUS_START
@@ -355,18 +319,8 @@ IF EXPERTS
     ld hl, EXPERTS
     call Matvec_SetOut
     call Matvec3_Run                ; the router stays on the ternary kernel
-    ld a, [wLayer]                  ; layer-0 snapshots: the FFN input and
-    or a                            ; the router's sums, for the twin to check
-    jr nz, :+
-    ld hl, wXb
-    ld de, wDbgXf
-    ld bc, DIM
-    call CopyBytes
-    ld hl, wAcc
-    ld de, wDbgRoute
-    ld bc, 8
-    call CopyBytes
-:
+    SNAPSHOT_L0 wXb, wDbgXf, DIM    ; the FFN input and the router's sums
+    SNAPSHOT_L0 wAcc, wDbgRoute, EXPERTS * 2
 
     ld hl, wAcc
     ld de, 0                        ; best so far: -32768, high byte pre-flipped
@@ -427,26 +381,12 @@ IF EXPERTS
     ld bc, wH1
     call Requant_All16
     CENSUS_END 12
-    ld a, [wLayer]                  ; layer-0 snapshots, as the dense path keeps
-    or a
-    jr nz, :+
-    ld hl, wH1
-    ld de, wDbgH1
-    ld bc, HID_EXP
-    call CopyBytes
-:
+    SNAPSHOT_L0 wH1, wDbgH1, HID_EXP
 
     CENSUS_START
     call Relu2_Row                  ; the activation, and its list of nonzeros
     CENSUS_END 13
-    ld a, [wLayer]
-    or a
-    jr nz, :+
-    ld hl, wHb
-    ld de, wDbgHb
-    ld bc, HID_EXP
-    call CopyBytes
-:
+    SNAPSHOT_L0 wHb, wDbgHb, HID_EXP
 
     CENSUS_START
     call W2_Run                     ; sparse over the list, or dense over wHb
@@ -460,27 +400,14 @@ IF EXPERTS
     ld bc, wXb
     call Requant_All16
     CENSUS_END 15
-    ld a, [wLayer]
-    or a
-    jr nz, :+
-    ld hl, wXb
-    ld de, wDbgFfn
-    ld bc, DIM
-    call CopyBytes
-:
+    SNAPSHOT_L0 wXb, wDbgFfn, DIM
 IF DEF(CENSUS)
     CENSUS_START
-    ld hl, wXb
-    ld de, wX
-    ld b, DIM
-    call AddSaturating
+    call AddSat_Stream
     CENSUS_END 16
     ret
 ELSE
-    ld hl, wXb
-    ld de, wX
-    ld b, DIM
-    jp AddSaturating
+    jp AddSat_Stream
 ENDC
 ELSE
 
@@ -545,25 +472,11 @@ ENDC
     call Requant_All16
     CENSUS_END 12
 
-    ld a, [wLayer]
-    or a
-    jr nz, :+
-    ld hl, wH1
-    ld de, wDbgH1
-    ld bc, HIDDEN
-    call CopyBytes
-:
+    SNAPSHOT_L0 wH1, wDbgH1, HIDDEN
     CENSUS_START
     call Relu2_Row                  ; the activation: one page lookup each
     CENSUS_END 13
-    ld a, [wLayer]
-    or a
-    jr nz, :+
-    ld hl, wHb
-    ld de, wDbgHb
-    ld bc, HIDDEN
-    call CopyBytes
-:
+    SNAPSHOT_L0 wHb, wDbgHb, HIDDEN
 
     ; w2 runs as two input halves into the same accumulators - RunAccum after
     ; Run, same order as one pass, so the sums are bit-identical. The signed
@@ -618,22 +531,10 @@ ENDC
     ld bc, wXb
     call Requant_All16
     CENSUS_END 15
-    CENSUS_START
-    ld a, [wLayer]                  ; snapshot layer 0's FFN output
-    or a
-    jr nz, :+
-    ld hl, wXb
-    ld de, wDbgFfn
-    ld bc, DIM
-    call CopyBytes
-:
-    CENSUS_END 17
+    SNAPSHOT_L0 wXb, wDbgFfn, DIM   ; layer 0's FFN output
 IF TERNARY || BINARY
     CENSUS_START
-    ld hl, wXb
-    ld de, wX
-    ld b, DIM
-    call AddSaturating              ; the first half joins the stream
+    call AddSat_Stream              ; the first half joins the stream
     CENSUS_END 16
     ; the second half: inputs from W2_SPLIT_IN, same rows, same shifts
     CENSUS_START
@@ -660,32 +561,20 @@ IF TERNARY || BINARY
     CENSUS_END 15
 IF DEF(CENSUS)
     CENSUS_START
-    ld hl, wXb
-    ld de, wX
-    ld b, DIM
-    call AddSaturating
+    call AddSat_Stream
     CENSUS_END 16
     ret
 ELSE
-    ld hl, wXb
-    ld de, wX
-    ld b, DIM
-    jp AddSaturating
+    jp AddSat_Stream
 ENDC
 ELSE
 IF DEF(CENSUS)
     CENSUS_START
-    ld hl, wXb
-    ld de, wX
-    ld b, DIM
-    call AddSaturating
+    call AddSat_Stream
     CENSUS_END 16
     ret
 ELSE
-    ld hl, wXb
-    ld de, wX
-    ld b, DIM
-    jp AddSaturating
+    jp AddSat_Stream
 ENDC
 ENDC
 ENDC                                ; EXPERTS
@@ -763,52 +652,6 @@ OffsetByLayer:
 LayerSlice:
     ld de, DIM
     jr OffsetByLayer
-
-; de[i] = sat8(de[i] + hl[i]) for b elements.
-;
-; Two int8s sum inside int16, so the whole element lives in registers: both
-; sign-extended, added as 16-bit, and saturated to [-127, 127] by the same
-; rule as Requant_Sat8. The census put the previous version - both operands
-; extended into the 32-bit scratch, added there, saturated back out - at
-; 440 cycles an element for one add.
-AddSaturating::
-.elem
-    push bc
-    ld a, [hl+]
-    ld c, a
-    add a, a
-    sbc a, a
-    ld b, a                         ; bc = hl[i], sign-extended
-    ld a, [de]
-    push hl
-    ld l, a
-    add a, a
-    sbc a, a
-    ld h, a                         ; hl = de[i], sign-extended
-    add hl, bc                      ; the sum, in [-256, 254]
-    ld a, l
-    add a, a
-    sbc a, a
-    cp h                            ; h is the sign extension of l: it fits
-    jr nz, .sat
-    ld a, l
-    cp $80
-    jr nz, .store
-    ld a, -127                      ; -128 is outside the symmetric range
-    jr .store
-.sat
-    bit 7, h
-    ld a, 127
-    jr z, .store
-    ld a, -127
-.store
-    pop hl
-    pop bc
-    ld [de], a
-    inc de
-    dec b
-    jr nz, .elem
-    ret
 
 ; wToken -> the argmax token, left in wBestTok.
 Forward::
@@ -963,9 +806,14 @@ NoRepeat_Ok::
     or 1                            ; NZ: safe
     ret
 
-; wX = requantized embedding row for wToken. The table is 32 KB, so it spans two
-; banks of 256 tokens each.
-EmbedToken:
+; wX = the embedding row for wToken. The rows ship already requantized to the
+; stream grid (py/export5.py evaluates the twin's Q.requant line per row), so
+; this is a bank switch, a row multiply and a 64-byte copy: no shift and no
+; saturation per element. The table is 64 KB, four banks of 256 tokens.
+; Counted: the token and part arithmetic 61 (EMB_ROW_BITS 8, DIM 64), the copy
+; ld de 3 + ld b 2 + 8 x (8 x 5 + 4) - 1 = 356, ret 4, call 6 = 427 a token,
+; against 13,368 on the census for the copy plus a Requant_Shift / Sat8 pass.
+EmbedToken::
     ; A part holds 2^EMB_ROW_BITS rows (the exporter sizes it to the bank):
     ; the part is the token shifted right by that many bits, the row the
     ; remainder. 64 wide: 256 rows, the high byte and the low byte. 96 wide:
@@ -1021,38 +869,21 @@ ENDR
 ELSE
     FAIL "EmbedToken: no row multiply for this DIM"
 ENDC
-    add hl, de
+    add hl, de                      ; hl -> the row, in its bank
 
+    ; wX starts a page (src/state.asm), so the destination advances by its
+    ; low byte alone: 5 cycles a byte, eight a turn.
     ld de, wX
-    ld bc, DIM
-    push hl
-    call CopyBytes
-    pop hl
-
-    ; One shift for every token: the embedding has a single exponent, so the
-    ; 512-byte per-token table the exporter used to write was 512 copies of
-    ; this constant. ROM0 needed the room.
-    ld a, EMB_SHIFT
-    ld [wRnShift], a
-
-    ld hl, wX                       ; rescale in place
-    ld b, DIM
-.scale
-    ld a, [hl]
-    push hl
-    push bc                         ; Requant_Shift and Requant_Sat8 both use b
-    ldh [wTmp32 + 0], a
-    add a, a
-    sbc a, a
-    ldh [wTmp32 + 1], a
-    ldh [wTmp32 + 2], a
-    ldh [wTmp32 + 3], a
-    ld a, [wRnShift]
-    call Requant_Shift
-    call Requant_Sat8
-    pop bc
-    pop hl
-    ld [hl+], a
+    ld b, DIM / 8
+.copy
+REPT 8
+    ld a, [hl+]
+    ld [de], a
+    inc e
+ENDR
     dec b
-    jp nz, .scale
+    jr nz, .copy
     ret
+
+ASSERT LOW(wX) == 0, "EmbedToken: the copy advances e alone"
+ASSERT DIM % 8 == 0, "EmbedToken: the copy runs eight bytes a turn"

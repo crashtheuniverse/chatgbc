@@ -271,6 +271,12 @@ test_gate_ht:: INCBIN "build/blobs/test_gate_ht.bin"   ; 64 bytes
 SECTION "test_gate_out", ROM0
 test_gate_out:: INCBIN "build/blobs/test_gate_out.bin"   ; 64 bytes
 
+SECTION "test_add_x", ROMX
+test_add_x:: INCBIN "build/blobs/test_add_x.bin"   ; 512 bytes
+
+SECTION "test_add_y", ROMX
+test_add_y:: INCBIN "build/blobs/test_add_y.bin"   ; 512 bytes
+
 SECTION "test_sp_a", ROMX
 test_sp_a:: INCBIN "build/blobs/test_sp_a.bin"   ; 176 bytes
 

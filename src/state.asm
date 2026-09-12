@@ -31,10 +31,15 @@ ENDC
 ; wH1 and wHb live in src/relu2.asm, page-positioned for its loop.
 SECTION "Model state", WRAM0, ALIGN[8]
 wAcc::   ds ACC_SLOTS * ACC_BYTES   ; reused by every matvec
-wX::     ds DIM                     ; residual stream
-wXb::    ds DIM                     ; post-rmsnorm activations
 wCbBuf:: ds CB_LEVELS               ; working copy of the active codebook
 wBias::  ds 3                       ; nIn * MV_BIAS, removed once per matvec
+
+; The stream and the block output share one page at offsets 0 and DIM, so
+; the residual add (src/addsat.asm) reaches both from one index with a `set`
+; on the low byte, and EmbedToken's copy advances with `inc e`.
+SECTION "Residual stream", WRAM0, ALIGN[8]
+wX::     ds DIM                     ; residual stream
+wXb::    ds DIM                     ; post-rmsnorm activations; a block's requantized output
 
 ; The shared 32-bit scratch lives in HRAM, not WRAM. Every kernel funnels
 ; through it, and absolute access to $FF00-$FFFE assembles as `ldh` - a two-byte
