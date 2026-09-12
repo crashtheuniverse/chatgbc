@@ -134,8 +134,10 @@ small exact ones last.
 
 Three things from the build notes worth keeping. The census's
 arithmetic is the thing to trust over anyone's count: the wh line reads
-63,408 for 192 rows, and 302 + 8s at the mean shift the export reports
-lands on it to the cycle, which is how you know the counts are honest. A path with no
+63,408 for 192 rows, 330 a row; 302 + 8s at the mean shift the export
+reports (3.25) counts to 328, and the two cycles a row left over are the
+group ends, the call and the census's own timers - which is how you know
+the counts are honest. A path with no
 witness is a path the next change breaks silently: the classifier's retry
 path had been correct and untested, so the lab gained a planted-history
 entry and the suite checks it at 0 to 9 rejects. And the tree's own
