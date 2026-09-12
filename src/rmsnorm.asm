@@ -87,10 +87,14 @@ DEF hRnLo  EQU hRnTbl               ; TL[n] = n * r,               n = x & 15
 DEF hRnHi  EQU hRnTbl + 48          ; TH[m] = (16m - 256[m>=8]) * r, m = x >> 4
 ASSERT CB_LEVELS * 3 * 2 >= 96, "the norm's tables need the matvec's 96 HRAM bytes"
 
-; The walk touches wX, wXb and the gain row through one low byte each.
+; The walk touches wX, wXb and the gain row through one low byte each. Both
+; loops end on the low byte of the address one past wX, LOW(wX + DIM): the
+; same byte as LOW(wX) + DIM except when wX ends its page, where that sum is
+; 256 and LOW() of the address is the 0 the incremented byte actually holds.
 ASSERT wXb == wX + DIM, "RmsNorm writes wXb at wX's offset plus DIM"
 ASSERT LOW(wX) + DIM <= 256, "wX must not cross a 256-byte page"
 ASSERT LOW(wXb) + DIM <= 256, "wXb must not cross a 256-byte page"
+ASSERT DIM % 4 == 0, "RmsNorm's sum of squares takes four elements a turn"
 ASSERT LOW(tbl_qsq) == 0, "tbl_qsq must be page-aligned (export5 aligns it)"
 ASSERT LOW(rms_att) % DIM == 0, "rms_att rows must not cross a page (export5 aligns them)"
 ASSERT LOW(rms_ffn) % DIM == 0, "rms_ffn rows must not cross a page (export5 aligns them)"
@@ -168,7 +172,7 @@ REPT 4
 :
 ENDR
     ld a, e
-    cp LOW(wX) + DIM
+    cp LOW(wX + DIM)                ; e after the last element, mod 256
     jp nz, .sumsq                   ; four bodies put the top out of jr's reach
 
     ; --- e, p and idx from the top byte of ss ---
@@ -396,7 +400,7 @@ ENDR
     ld [hl], c
     sub a, DIM - 1                  ; the next source byte
     ldh [hRnIdx], a
-    cp LOW(wX) + DIM
+    cp LOW(wX + DIM)
     jr nz, .elem
     ret
 

@@ -37,7 +37,8 @@
 ;
 ; Guard: W2_Run (src/forward.asm) runs the dense block kernel instead when
 ; wSpCount exceeds W2_SPARSE_MAX, which the exporter derives from these
-; counts, the model's fullest column and the dense kernel's census.
+; counts, the model's fullest column and the dense kernel's own counted
+; listing (src/matvec3.asm, src/matvec.asm) - never from a census figure.
 
 INCLUDE "hardware.inc"
 INCLUDE "chatgbc.inc"
@@ -45,6 +46,11 @@ INCLUDE "model.inc"
 
 ASSERT (DIM * 2) % 16 == 0, "matvec_sparse: the zero loop clears 16 bytes a turn"
 ASSERT DIM * 2 <= 256, "matvec_sparse: the accumulators must stay in wAcc's page"
+; A list byte is 2*o and nothing else - the kernel loads it straight into e
+; with d = HIGH(wAcc) - so accumulator o must sit at LOW(wAcc) + 2*o = 2*o.
+; state.asm aligns the section; the exporter writes the lists on the same
+; assumption (sparse_column_blob, acc_low = 0).
+ASSERT LOW(wAcc) == 0, "matvec_sparse: wAcc must start its page - the list bytes are 2*o alone"
 
 SECTION "Sparse HRAM", HRAM
 hSpBase: dw                         ; the routed expert's column table

@@ -6,7 +6,11 @@ argmax it picked equal what the twin computes from the same activations.
 The probe view: the lab ROM classifies any vector the harness plants (the
 twin's xb_final of the first steps, then vectors built to tie), and its top
 two must be the twin's stable argsort - ties to the lowest index. The retry
-path is covered by golden strict, whose run has no-repeat retries in it.
+view: the lab entry LAB_GO_PICK runs the classifier through the no-repeat
+retry against a history the harness plants, and with the top k blocked for
+k = 0..9 the token it settles on is quant.pick_token's order[min(k, tries)]
+every time - both slots, the rescans and the give-up. (Golden strict sees
+one reject in its whole run, never a rescan; it does not cover this.)
 """
 import json
 
