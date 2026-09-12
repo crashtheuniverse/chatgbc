@@ -274,6 +274,11 @@ def sparse_column_blob(name, t, acc_low=0):
     on the column with no second base load. A column list is a re-encoding
     of the same {-1, 0, 1} matrix, not a table: decode it and you get t."""
     out, n_in = t.shape
+    # The kernel forms an accumulator address as d = HIGH(wAcc), e = the list
+    # byte, so the list byte must be the WHOLE low address byte: acc_low is
+    # LOW(wAcc), which src/matvec_sparse.asm asserts is 0 (state.asm aligns
+    # the section). Anything else here would need the kernel to add it.
+    assert acc_low == 0, f"{name}: the kernel assumes LOW(wAcc) == 0 (src/matvec_sparse.asm)"
     assert acc_low + 2 * out <= 0x100, f"{name}: {out} accumulators leave the page"
     cols = []
     for i in range(n_in):
@@ -742,18 +747,42 @@ def main():
         # column, and a token with more nonzero u than this runs the dense
         # block kernel instead. The bound takes the model's fullest column
         # and the kernel's carry path on every add (src/matvec_sparse.asm's
-        # counts), against the dense kernel's measured layer.
+        # counts), against the dense kernel's cost counted from ITS listing
+        # - not from a census figure, which would go stale the day either
+        # kernel changed and nobody would notice.
+        #
+        # The dense block kernel, per block of three inputs (Matvec3_Blocks in
+        # src/matvec3.asm, Matvec_AddRowHL in src/matvec.asm):
+        #   the walk pointer out of HRAM 8, ld hl 3, Matvec3_Build 381 (call
+        #   and ret included, the file header's count), the pointer back 8,
+        #   the accumulator base 8, the row pass: call 6 + entry 15 + 19 an
+        #   output (four a group: 4 x 18 + dec/jr 4 = 76) - 1 + exit 14, then
+        #   the block count 10. So 37 + 381 + 34 + 19 x outputs a block.
+        # What this leaves out - Matvec_Zero, SetXPtr / SetMatrix /
+        # Matvec_SetOut, the ret - is real dense cost (the 8-token census put
+        # a dense layer at ~114.9K against the 98.4K counted here), so the
+        # guard errs toward the dense path: conservative, as a worst-case
+        # bound should be. The sparse side takes the carry path on every add.
+        DENSE_BLOCK_FIXED = 37 + 381 + 34   # per block, outputs aside
+        DENSE_PER_OUTPUT = 19               # Matvec_AddRowHL, per accumulator
         SPARSE_COL_CYCLES = 74          # per nonzero u: column fetch, list control
         SPARSE_PAIR_CYCLES = 18         # per (u, weight) pair, the carry path taken
         SPARSE_FIXED_CYCLES = 339       # zeroing the accumulators, the manifest
-        DENSE_W2_CYCLES = 344_696 // 3  # the block kernel's 8-token census, a layer
+        hid_blocks = -(-c.hidden // twin5.TERNARY_BLOCK)
+        dense_w2_cycles = hid_blocks * (DENSE_BLOCK_FIXED + DENSE_PER_OUTPUT * c.dim)
         col_nnz = max(int((q.indices["w2"][l][e] != 0).sum(axis=0).max())
                       for l in range(c.layers) for e in range(experts))
-        w2_sparse_max = ((DENSE_W2_CYCLES - SPARSE_FIXED_CYCLES)
+        w2_sparse_max = ((dense_w2_cycles - SPARSE_FIXED_CYCLES)
                          // (SPARSE_COL_CYCLES + SPARSE_PAIR_CYCLES * col_nnz))
         w2_sparse_max = min(w2_sparse_max, c.hidden, 254)
+        # The guard must leave every real token on the sparse path: the
+        # measured maximum on 6,291 tokens is 88 nonzero u (docs/audit
+        # measure_sparse_w2.py), and it must be a real bound - below the
+        # width, or the dense path is dead code.
+        assert 88 < w2_sparse_max < c.hidden, f"W2_SPARSE_MAX {w2_sparse_max} is out of range"
         const("W2_SPARSE_MAX", w2_sparse_max)
-        print(f"w2 sparse: fullest column {col_nnz} nonzero, guard at {w2_sparse_max} nonzero u")
+        print(f"w2 sparse: fullest column {col_nnz} nonzero, dense layer counted at "
+              f"{dense_w2_cycles:,} cycles, guard at {w2_sparse_max} nonzero u")
 
     # --- detokenizer ---
     import reference as ref

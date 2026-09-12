@@ -163,14 +163,11 @@ def test_layer0_probes_are_the_twins_intermediates(q, after_run):
     zg = q.sig_tables[0][zl.astype(np.int64) + 128]
     ht = twin5.mv(q, "wh", 0, xb, exb, eh)
     h = Q.sat8(Q.shr_round(zg * ht.astype(np.int64) + (256 - zg) * h_prev, 8))
-    acc_wo = Q.matvec_blocks(q.weights["wo"][0], h, twin5.TERNARY_BLOCK,
-                             twin5.TERNARY_ACC_SHIFT)
     ao = twin5.mv(q, "wo", 0, h, eh, ex)
     res = Q.add_requant(x, ex, ao, ex, ex)
     exf = q.site("xb_ffn", 0)
     xf = Q.rmsnorm(res, q.weights["rms_ffn"][0], q.wexp["rms_ffn"], exf)
-    route = Q.matvec_blocks(q.router_t[0], xf, twin5.TERNARY_BLOCK, 0)
-    e = int(np.argmax(route))
+    e = twin5.route(q, 0, xf)               # the twin's argmax, ties low
     e1, ehb = q.site("h1", 0), q.site("hb", 0)
     a = twin5.mv(q, "w1", 0, xf, exf, e1, e=e)
     u = Q.sat8(twin5.shr_round_any(np.maximum(a.astype(np.int64), 0) ** 2, ehb - 2 * e1))
