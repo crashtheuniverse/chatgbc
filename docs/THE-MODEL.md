@@ -1,120 +1,185 @@
 # The model
 
-> **v0.4 note.** This page describes the v0.3 model - karpathy's stories260K transformer, 4-bit tables, a 24-token attention window. v0.4 runs a different model trained here: a minGRU core, four ternary experts per layer, a block-sum kernel. The README's *What changed since v0.3* has the short version; this page will follow.
-
-What ChatGBC actually runs. 
-If you want the implementation instead, that is [CONCEPTS.md](CONCEPTS.md).
+What ChatGBC actually runs, as of v0.9. If you want the implementation
+instead, that is [CONCEPTS.md](CONCEPTS.md).
 
 ```
-Config(dim=64, hidden_dim=172, n_layers=5, n_heads=8, n_kv_heads=4, vocab=512)
+DIM 64   HIDDEN 176   EXPERTS 4   N_LAYERS 3   VOCAB 1024      (src/model.inc)
 ```
 
-This is exactly from `stories260K` as it was trained with those numbers.
+Those constants are written by `py/export5.py` from the checkpoint,
+`models/ts3L_v1024.bin`: the model v0.4 trained, and the one v0.4.1 and v0.9
+both ship. v0.9 changed the kernels, not the model, so every number on this
+page about the shape is v0.4's and every number about cycles is v0.9's.
 
 ## The shape
 
 | | | |
 |---|---|---|
 | **dim** | 64 | the *residual stream* — one vector, the width of the whole model |
-| **hidden** | 172 | the feed-forward block's inner width, ~2.7× dim |
-| **layers** | 5 | how many times the block runs, one after another |
-| **heads** | 8 | attention heads, 8 numbers each (8 × 8 = dim) |
-| **kv_heads** | 4 | each key/value head is shared by two query heads |
-| **vocab** | 512 | tokens, BPE, ~2.6 characters each |
+| **state** | 64 per layer | the minGRU's `h`: what persists from one token to the next |
+| **experts** | 4 × 176 | the MLP's inner width; one expert of the four runs per token |
+| **layers** | 3 | how many times the block runs, one after another |
+| **vocab** | 1024 | tokens, BPE, 3.46 characters each on held-out text |
 
-## One vector, updated ten times
+## One vector, updated six times
 
-There is a single 64-number vector. It is the whole state of the model for the
-token being generated, and it is never replaced — each block **adds** to it:
+There is a single 64-number vector. It is the whole working state of the
+model for the token being generated, and it is never replaced — each block
+**adds** to it. Three layers, two adds each: six updates, then a final norm
+and the classifier.
 
-```
-after embedding   |x| = 2.348
-after layer 0     |x| = 5.672     changed by 4.069
-after layer 1     |x| = 6.926     changed by 2.536
-after layer 2     |x| = 7.311     changed by 2.337
-after layer 3     |x| = 9.059     changed by 4.232
-after layer 4     |x| = 9.644     changed by 4.905
-```
+Each layer does this:
 
-Same 64 slots throughout. That is why it is called a *stream*: information is
-written into it and later layers read what earlier ones left. Layer 2 cannot
-start before layer 1 finishes, because it reads layer 1's output.
-
-Each layer does this, twice adding into the stream:
-
-1. normalise the stream, run attention over it, **add the result back**
-2. normalise again, run the feed-forward block, **add that back**
+1. normalise the stream; read it through `wz` and `wh`; let the gate mix the
+   candidate into the state `h`; read `h` through `wo`; **add the result back**
+2. normalise again; let the router pick an expert; `w1`, ReLU², `w2`; **add
+   that back**
 
 ## Two things move, in different directions
 
-This is the distinction worth getting straight.
+**Down, within one token:** the residual stream, through 3 layers. 64 bytes,
+updated six times, then discarded. It exists for one token only.
 
-**Down, within one token:** the residual stream, through 5 layers. 64 numbers,
-updated 10 times, then discarded. It exists for one token only.
+**Sideways, across tokens:** the state `h`, 64 bytes per layer, 192 in all.
+The gate rewrites it in place every token. It has no length, no slots and
+no ring; nothing wraps, so nothing is forgotten by falling off an edge.
+v0.3's sideways object was a KV cache of 24 positions per layer, and the
+story lost the thread when the ring came round. The trade is that `h` is
+all the model has of the past: whatever it did not write into 192 bytes is
+gone.
 
-**Sideways, across tokens:** the **KV cache**. Each layer stores the key and
-value it computed for this position so the *next* token can attend to it. That
-is what persists, and that is what the ring buffer manages — 24 slots per layer,
-overwritten in place once full.
+## The minGRU update
 
-The residual stream is vertical and temporary. The KV cache is horizontal and
-persistent. Only the KV cache has a length limit and wraps.
-
-## What one layer costs
-
-| | shape | MACs | |
-|---|---|---|---|
-| wq | 64 → 64 | 4,096 | query projection |
-| wk | 64 → 32 | 2,048 | key — 4 KV heads, not 8 |
-| wv | 64 → 32 | 2,048 | value |
-| wo | 64 → 64 | 4,096 | merge the heads back |
-| **w1** | 64 → 172 | **11,008** | feed-forward up, value path |
-| **w3** | 64 → 172 | **11,008** | feed-forward up, gate path |
-| **w2** | 172 → 64 | **11,008** | feed-forward down |
-| | | **45,312** | per layer |
-
-Multiply that by five layers and add the classifier:
+From the normalised stream `xb`, two 64×64 matvecs:
 
 ```
-layer weights   226,560
-embedding        32,768   (reused as the classifier)
-                ────────
-                259,328   parameters
-
-MACs per token: 259,328
+zl = wz · xb          gate logits
+ht = wh · xb          the candidate state
+zg = sigmoid(zl)      as a byte, 0..255 for 0..1
+h  = sat8((zg·ht + (256 − zg)·h + 128) >> 8)
+out = wo · h          added into the stream
 ```
 
-One token is one pass over the model weights — every parameter is multiplied once. So
-`MACs = parameters`. 
-This means in a basic transformer you are mostly bound by the amount of weights you have.
+The gate reads the input, not the previous state, which is what lets `wz`
+and `wh` run on the same vector and share one table build. On the cartridge the update line is
+computed as `h + ((zg·(ht − h) + 128) >> 8)`, which was proved equal to the
+twin's line for every one of the 16,646,400 inputs and never leaves
+`[min(h, ht), max(h, ht)]`, so the `sat8` is dead and the whole line is one
+table read (see [CONCEPTS.md](CONCEPTS.md), section 4).
 
-After trickeries it got down to 19 cycles per multiply-accumulate: that is 4.93M cycles.
-Means that **2.35 seconds per token** are just this part. 
+## The MoE ReLU² MLP
 
-**loophole** 
-At lower bit precisions, some weights quantize to 0.
-However the codebook chosen thanks to the AI assisting here (didn't even remotely think of it), 
-is the Lloyd-Max where 0 is still meaningful. Means we can't skip them. 
+From the second norm's output `xf`:
 
-(The attention *weights* are a different story — those come from a
-softmax, and 46% of them are exactly zero. The ROM skips those.)
+```
+e  = argmax(router · xf)      four ternary rows, ties to the lowest index
+a  = w1[e] · xf               176 outputs
+u  = sat8(relu(a)² >> r)      r one constant per layer
+x += w2[e] · u                back to 64
+```
 
-## Depth vs Width
+Four experts, one runs: half the multiply-accumulates of a dense 352-wide
+MLP for twice the parameters. Choosing an expert is one MBC5 bank register
+write, because each expert's matrices live in their own ROM bank.
 
-Sharing weights between layers — some architectures do — would cut the ROM by
-five. **It would not save a single cycle**, because you still run five passes.
+## MACs and parameters
 
-But depth does cost, just not in multiplies. Every layer pays again for
-normalisation, RoPE, softmax and requantisation: about 3.09M cycles a token
-across 5,316 such operations. A model with the same parameter count but two
-layers instead of five pays that overhead **twice, not five times**.
+| | shape | MACs run | parameters | |
+|---|---|---|---|---|
+| wz | 64 → 64 | 4,096 | 4,096 | gate logits |
+| wh | 64 → 64 | 4,096 | 4,096 | candidate |
+| wo | 64 → 64 | 4,096 | 4,096 | state back to the stream |
+| router | 64 → 4 | 256 | 256 | which expert |
+| **w1** | 64 → 176 | **11,264** | 45,056 | one expert runs, four are stored |
+| **w2** | 176 → 64 | **11,264** | 45,056 | one expert runs, four are stored |
+| | | **35,072** | **102,656** | per layer |
 
-> **Depth costs time. Width costs parameters.**
+Three layers and the classifier:
 
-Which is why the measured rule for anything trained later is *wide beats deep*:
-at a constant parameter count, dim 96 with 2 layers is 1.44× the parameters per
-cycle of dim 64 with 5.
+```
+layers          105,216 MACs     307,968 parameters
+classifier       65,536 MACs      65,536 parameters   (the embedding, tied)
+norm gains                            448
+                ─────────────    ───────────────────
+                170,752 MACs     373,952 parameters
+```
+
+v0.3's rule was `MACs = parameters`: one token multiplied every weight once.
+Here a token multiplies 46% of them, because three experts of four sit in
+ROM and cost nothing. And v0.9's `w2` does not even do that: it adds only
+where both the activation and the weight are nonzero, about 1,100 to 1,650
+adds a layer where the matrix has 11,264 multiply-accumulates. The
+multiply-accumulate stopped being the unit of cost. The row is.
+
+## What one layer costs, in v0.9 cycles
+
+The 8-token census (`py/census5.py`) times each stage over the three layers;
+below is that line divided by three, rounded to the ten.
+
+| stage | cycles | what it is |
+|---|---|---|
+| norm, before the core | 22,960 | sum of squares, rsqrt lookup, x·r, gain, all in registers |
+| wz and wh | 50,890 | one build of 22 tables (8.4K), then 128 rows swept |
+| gate | 3,060 | 64 table reads, 47 cycles each |
+| wo | 29,690 | one build, 64 rows |
+| residual add | 2,210 | 64 saturating adds, 34 cycles each |
+| norm, before the MLP | 23,370 | |
+| router and w1 | 67,580 | one build, 4 router rows, an argmax, 176 expert rows |
+| ReLU² | 2,920 | 176 page reads, and the list of the nonzero ones |
+| w2, sparse, with its requant | 29,140 | one add per nonzero (activation, weight) pair |
+| residual add | 2,210 | |
+| **one layer** | **~234,000** | |
+
+Then the token: three layers 702,100, the final norm 23,720, the classifier
+246,712, the embed 448 — 973,032 with the census's own timers. A quarter of
+the token is the classifier, and the classifier is linear in the vocabulary:
+1,024 rows at 226 cycles each, plus 18K to build its 16 tables. A bigger
+dictionary is paid for there and nowhere else.
+
+What a row costs is the number to hold on to. A row of 64 ternary inputs
+through the sweep is `302 + 8s` cycles, `s` its shift (1 to 5): 22 lookups
+at 12 cycles, the shift, the saturation. The classifier's row, blocks of
+four and no requant, is 226. A table build is 381 cycles a block, 22 blocks
+per input vector.
+
+## Depth vs width
+
+The v0.3 page said *depth costs time, width costs parameters*: every layer
+paid again for normalisation, RoPE, softmax and requantisation, about 620K
+cycles a layer over and above its multiplies, so a two-layer model of the
+same size would have paid that overhead twice instead of five times.
+
+v0.9 shrank the overhead. The part of a layer that does not scale with rows -
+two norms, the gate, ReLU², two adds - is about 57K cycles, a quarter of the
+layer. The other three quarters are rows: 372 of them a layer at roughly
+330 cycles, and `w2`'s pairs. So the accounting changed shape:
+
+- **Depth** costs the whole layer again, 234K, three quarters of it rows.
+- **Width** costs rows too. A wider stream adds 12 cycles per three inputs
+  to every row and 381 cycles per block to every build; more state or more
+  hidden units add whole rows at 302 + 8s each.
+- **What is free** is what does not run: the three experts the router did
+  not pick, the 82% of ReLU² that is zero, and the logits the classifier
+  never stores.
+
+> Rows cost time. Experts cost ROM.
+
+At this kernel, wide against deep is not a rule of thumb any more; it is a
+question of bits per character per cycle, and the answer has to be measured
+per shape on the twin and the census. `py/fit.py` still prices a shape with
+v0.4's costs (10.5 cycles a multiply-accumulate, 203K a layer of overhead);
+it has not been refitted to v0.9, which is why the numbers on this page are
+the census's and not the price model's.
 
 ## Where the numbers come from
-Look at `py/census.py`, `py/profile_all.py` and `py/arch.py`.
-This last one is particularly interesting to predict what a different shape would cost before even attempting it.
+
+- `py/census5.py` — the staged census: the census ROM, one timer per stage,
+  8 tokens. The source of every cycle figure above.
+- the app ROM's own `CYC/TOK` counter (DIV/TIMA) — the authority for
+  seconds per token; 963,792 over 100 tokens with the teletype running.
+- `py/score5.py` on `py/twin5.py` — bits per character of what ships.
+- `src/sweep.asm`, `src/cls4.asm`, `src/gate.asm`, `src/relu2.asm`,
+  `src/rmsnorm.asm`, `src/addsat.asm`, `src/matvec3.asm`,
+  `src/matvec_sparse.asm` — each header counts its own loop in M-cycles and
+  says how the count squares with the census.
