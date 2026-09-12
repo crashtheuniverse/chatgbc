@@ -1,20 +1,29 @@
 # How the model works
 
-> **v0.4 note.** This page describes the v0.3 model - karpathy's stories260K transformer, 4-bit tables, a 24-token attention window. v0.4 runs a different model trained here: a minGRU core, four ternary experts per layer, a block-sum kernel. The README's *What changed since v0.3* has the short version; this page will follow.
-
 No machine-learning background assumed. If you know what a dot product is, you
 have enough.
 
-**The shape of this model.** 512-word vocabulary, 5 layers, working vectors of
-64 numbers, 8 attention heads of 8 numbers each, 4 key/value heads, a 24-position
-memory. About 260,000 parameters. Everything below is that size.
+**The shape of this model.** 1024-piece vocabulary, 3 layers, working vectors
+of 64 numbers, a 64-number state per layer that persists from token to
+token, four experts of 176 per layer of which one runs. 374K parameters.
+Everything below is that size, and everything below is what the v0.9
+cartridge executes: a stage is described the way it actually runs, not the
+way the textbook draws it.
+
+**What v0.3 was.** The first three versions ran karpathy's stories260K
+transformer: five layers, eight attention heads over a 24-position KV cache
+kept in a ring, SwiGLU, 4-bit weights multiplied through product tables.
+That page is in the v0.3 tag's docs. v0.4 replaced the model - a recurrent
+core instead of attention, ternary experts instead of a dense MLP - and v0.9
+replaced the kernels under it. What survived from v0.3 is the tokenizer's
+shape, the no-repeat rule and the bit-exact twin.
 
 ---
 
 ## 1. Text becomes numbers — `encoder.asm`
 
-The model has no idea what letters are. It knows 512 *tokens*, and a token is a
-common chunk of text: sometimes a whole word, sometimes a fragment.
+The model has no idea what letters are. It knows 1,024 *tokens*, and a token
+is a common chunk of text: sometimes a whole word, sometimes a fragment.
 
 The tokenizer builds them by merging. Start with single characters. Then look
 for the adjacent pair the vocabulary most prefers to merge, and merge it. Repeat
@@ -30,22 +39,25 @@ The order matters, which is why each merge carries a **rank** and the lowest
 rank wins. That is byte-pair encoding, and it is the same on the cartridge as in
 Python — it has to be, or the model sees different input than it was trained on.
 
-`"Once upon a time"` comes out as roughly five tokens. That ratio matters more
-than it looks: **the model's speed is per token, but you read characters**, so
-a tokenizer that packs more characters per token makes the whole thing feel
-faster for free.
+On held-out text a token is 3.46 characters. That ratio matters more than it
+looks: **the model's speed is per token, but you read characters**, so a
+tokenizer that packs more characters per token makes the whole thing feel
+faster for free. v0.3's 512-piece vocabulary gave 2.10.
 
-## 2. A token becomes a vector — `forward.asm`
+## 2. A token becomes a vector, on the stream's grid — `forward.asm`
 
-Each of the 512 tokens has a learned row of 64 numbers. Token 42 means "take
-row 42".
+Each of the 1,024 tokens has a learned row of 64 numbers. Token 42 means
+"take row 42".
 
-That vector is the only thing that travels through the model. Everything after
-this is transforming those 64 numbers, five times over, and then asking which
-token should come next.
+That vector is the *residual stream*: the one thing that travels through the
+model. Each layer **adds** to it rather than replacing it; three layers, six
+adds, and then the question of which token comes next.
 
-The vector is often called the *residual stream*, because each layer **adds** to
-it rather than replacing it. So each layer "enriches" this stream that is nothing but your "temp" vector. 
+The stream is int8 on a fixed grid - steps of 1/8, saturating at 15.875,
+the same clamp the trainer used. The rows are stored in ROM already on
+that grid, so the embed is a copy: 448 cycles. The add that each layer does
+into the stream saturates too (`addsat.asm`): 34 cycles an element, with
+the overflow read from the sign bits of the operands and the result.
 
 ## 3. Normalise — `rmsnorm.asm`
 
@@ -57,143 +69,197 @@ The point is stability. Without it some layers get numbers ten times bigger than
 others and the arithmetic — especially in fixed point — falls apart.
 
 This needs one over a square root, which the SM83 cannot compute. It is a table
-lookup. Most of the "hard maths" in this implementation is a table lookup.
+lookup. Everything around the lookup is registers in v0.9: the sum of
+squares accumulates in a register pair and one high byte (33 cycles an
+element); the rounding shifts throw away whole bytes before they shift bits;
+and x·r, where r is the one reciprocal shared by all 64 elements, is two
+reads from a pair of 16-entry tables the norm builds for itself - x is
+16·hi + lo, so x·r is TH[hi] + TL[lo]. About 23K cycles a norm, seven norms
+a token.
 
-## 4. Attention, and what a head actually is — `attention.asm`
+## 4. The recurrent core: a gate, not attention — `sweep.asm`, `gate.asm`
 
-**Three projections.** From the 64-number vector, three more are made by matrix
-multiplication:
+Each layer keeps a **state**: 64 numbers that survive from one token to the
+next. That state is the model's memory of the story so far. There is no list
+of previous tokens, no positions, no window: 192 bytes across the three
+layers is all it has, and it is rewritten every token.
 
-- **Q**, the *query* — what this token is looking for
-- **K**, the *key* — what this token offers to anyone looking
-- **V**, the *value* — what this token passes on if chosen
+From the normalised stream, two vectors are made by 64×64 matrix
+multiplications: `zl`, the gate logits (through `wz`), and `ht`, the
+*candidate* state (through `wh`). The gate turns each `zl` into a number
+between 0 and 1 (a sigmoid; as a byte, 0 to 255) and interpolates, element
+by element:
 
-**Scoring.** The current token's Q is dotted (you do a dot product) with the K of every token so far.
-A big dot product means "these two are relevant to each other". Those scores go
-through a softmax, which turns them into weights that sum to one.
+```
+h = h + z · (ht − h)
+```
 
-**Mixing.** The output is the V of every previous token, weighted by those
-scores. So a token literally pulls information out of the tokens it found
-relevant.
+z near 1 means "take the candidate", z near 0 means "keep what you had". Then
+a third matrix, `wo`, reads the new state and the result is added into the
+stream. That is a minGRU. Nothing grows with the length of the story, so the
+story does not have to end.
 
-**Heads.** Doing that once with all 64 numbers would force one notion of
-relevance. Instead the vector is split into **8 heads of 8 numbers**, and each
-head scores and mixes independently. One head might track the subject of the
-sentence, another the token immediately before, another matching punctuation.
-Nobody assigns them those jobs — they fall out of training. The eight results
-are concatenated back into 64 numbers.
+In v0.9 the gate is one table read per element. The audit proved two things
+about the update line, over every one of its 16,646,400 possible inputs:
+that it equals `h + ((zg·(ht − h) + 128) >> 8)`, and that the result never
+leaves the interval between `h` and `ht`, so the saturation the twin writes
+can never fire. A byte sum is the whole answer. The table is indexed by the
+sigmoid's value and by `ht − h`; across the three layers only 118 sigmoid
+values ever occur, so the rows are shared: 118 rows of 512 bytes, 60,416
+bytes in four ROM banks. The sigmoid itself is never computed - two small
+side pages per layer turn the raw `zl` byte into the bank and the address
+of its row. 47 cycles an element, from 446 plus a 33-cycle sigmoid pass.
 
-Heads are cheap because splitting is free: 8 heads × 8 numbers is the same 64
-numbers, just scored in eight separate groups.
+## 5. Experts and the router — `sweep.asm`
 
-**Grouped queries.** There are 8 query heads but only **4 key/value heads** —
-each K/V head is shared by two Q heads. This is grouped-query attention, and it
-halves the amount of K and V that has to be stored. 
-There are various possible permutations here. But grouping is necessary for 32KB of RAM.
+The other half of a layer is a feed-forward block: widen 64 numbers to 176,
+apply a non-linearity, project back to 64. The widening is where most of the
+parameters live.
 
-**Position, by rotation** — `rope.asm`. Nothing so far knows word order; a dot
-product does not care which token came first. So before scoring, Q and K are
-*rotated* by an angle proportional to the token's position. Two tokens close
-together end up rotated similarly and still score well against each other; far
-apart, less so. That is rotary position embedding, and the useful property is
-that it encodes *relative* distance while only ever being applied to one token
-at a time.
+There are four copies of that block per layer, the **experts**, and a
+**router** - four rows of weights - scores the normalised stream and the
+highest score picks. One expert runs; the other three sit in ROM and cost
+nothing. Half the multiplies of one block twice as wide, and twice the
+parameters. Choosing an expert is one bank register write, because each
+expert lives in its own ROM bank.
 
-## 5. The KV cache, and why generation is not quadratic
+The router's four rows read the same vector as the expert's `w1`, so they
+use the same tables (section 10) and the argmax is taken in registers before
+the chosen expert's 176 rows are swept.
 
-Here is the problem. To generate token 100, attention needs the K and V of all
-99 tokens before it. Recomputing them every step would mean the whole passage is
-re-processed for every new word 😭 — quadratic work, and hopeless on this hardware.
+## 6. ReLU² and the sparse w2 — `relu2.asm`, `matvec_sparse.asm`
 
-So they are computed once and kept. That is the **KV cache**: for every position,
-the K and V that position produced. Generating a token is then one new K and V,
-plus a scan over the stored ones.
+The non-linearity is ReLU squared: negative numbers become zero, positive
+ones are squared. As a function of one int8 input and one per-layer
+constant it has 256 possible inputs, so it is a 256-byte page per layer -
+the twin's own line evaluated at every input, saturation included - and the
+kernel reads the page. 12 cycles an element.
 
-This is the single reason interactive generation is possible at all, on any
-machine. **not just the GBC**
+Half of int8 is negative, and on held-out text 82% of the outputs are zero.
+The loop that reads the page is the one place that knows which came out
+nonzero, so it writes them down as it goes: (index, value), then a
+sentinel.
 
-**The cost that remains.** The scan still grows with context. In this ROM you can
-watch it happen — the cycle counter in the status bar climbs steadily as the
-passage gets longer, then flattens. It flattens because of the next part.
+`w2` is then never multiplied as a matrix. Its weights are stored per
+*input* column as two lists: the outputs where the weight is +1 and the
+outputs where it is −1 (34 to 40% of the weights are zero and are simply
+not listed). For each nonzero activation the kernel fetches its column and
+adds the activation into the accumulators on the + list and subtracts it on
+the − list: 11 cycles a pair when the add does not carry, 16 when it does.
+Integer addition commutes, so the 64 sums are the same integers the dense
+matvec would have produced. About 1,100 to 1,650 pairs a layer, about 68K
+cycles a token for the three layers on the 8-token census (67,624), where
+the dense kernel took 344,696. If a token
+ever had more than 111 nonzero activations the dense kernel would run
+instead; the most measured is 88.
 
-**The ring.** The cache has a fixed number of slots — 24 in this ROM. Position
-24 has nowhere to go — unless you let it overwrite slot 0. The slot for position
-`p` is `p mod 24`, while the positional rotation keeps using the *absolute* `p`.
+## 7. Three layers, then a choice — `cls4.asm`, `forward.asm`
 
-Those two had been the same number by accident. 
-**Separating them is the whole trick**: 
-I only needed to notice that storage can be completely independent since we are really 
-generating a new KV pair per token! 
-The model attends to the last 24 positions, forever, and never notices anything wrapped.
-Generation stops having a length limit.
+A layer is: normalise, gate, add back; normalise, expert, add back. Three of
+those, then a final norm.
 
-**why 24?** Tests and tests. Ended up being ok paying for a mod instead of a 32 context window. 
-It's more expensive than a power of two, but below 24 the loss climbs fast. 
-I will try to make it back to 16 at some point, but likely with a freshly trained set of weights.
- 
+Then one matrix would turn the 64 numbers into **1,024 scores**, one per
+token, and the highest would win. That is greedy decoding — **no sampling, no
+temperature, which is also why this ROM produces the same story from the
+same prompt every time**.
 
-## 6. The feed-forward block — `swiglu.asm`
+But greedy decoding needs only the winner, so the 1,024 scores are never
+written anywhere. Per token the classifier builds 16 tables of 81 sums in a
+WRAM bank (four ternary weights times four activations, 3⁴ = 81 possible
+sums). Each token's row of the classifier is 16 bytes, each byte already the
+address of its entry in the matching table; the 16 lookups are summed in a
+register pair, compared against the best so far, and the best is kept -
+ties to the lowest index, exactly the twin's stable argmax. 226 cycles a
+row, no zero pass, no rescan.
 
-Attention moves information *between* tokens. The feed-forward block does the
-thinking *within* one.
+## 8. Refusing to repeat — `forward.asm`, `generate.asm`
 
-It widens 64 numbers to 172, applies a non-linearity, and projects back down to
-64. The widening is where most of the model's parameters live.
+Greedy argmax is a fixed point: once the state drifts back near one it has
+visited, the model re-enters the same loop and stays. Sampling would break
+it and ruin the grammar. Instead the decoder skips any token that would
+complete a 4-gram it already emitted in this run, up to eight rejects,
+over a history of the last 176 tokens. Deterministic, never loops, and
+the twin implements the same rule (`pick_token` in `py/quant.py`).
 
-The non-linearity here is **SwiGLU**, which is two projections rather than one: a
-*value* path and a *gate* path. The gate is squashed through a smooth
-S-shaped curve and then multiplied into the value, so the block can learn to
-suppress its own outputs. A plain non-linearity cannot do that.
+Since the classifier stores no scores, a reject needs a plan: the scan
+keeps the runner-up as well as the best. The first two rejects are slot
+reads; only the third costs a rescan that skips the blocked tokens, and
+that happens about once in 440 tokens.
 
-Both the squash and the reciprocal it needs are, again, tables.
+## 9. The teletype — `teletype.asm`
 
-## 7. Five layers, then a choice — `forward.asm`, `generate.asm`
+A token is three or four characters, and they used to land on the screen in
+one burst followed by a second of nothing. Now they go into a queue, and the
+VBlank interrupt handler releases one every 18 frames - 0.3 s a character -
+while the forward pass is busy with the next token. The handler is the only
+thing that touches video memory during a story: a character is one tile
+write, a scroll moves a shadow buffer and asks for its DMA on the next
+frame. The model never waits for the screen, and the screen never waits for
+the model. Press SELECT and the story stops; nothing else would stop it.
 
-A layer is: normalise, attend, add back; normalise, feed-forward, add back. Five
-of those.
+## 10. Numbers, on a machine with no multiplier — `matvec3.asm`, `sweep.asm`, `state.asm`, `addsat.asm`
 
-Then one final matrix turns the 64 numbers into **512 scores**, one per token in
-the vocabulary. The highest score wins and becomes the next token. That is greedy
-decoding — **no sampling, no temperature, which is also why this ROM produces the
-same story from the same prompt every time**. 
+The SM83 has no multiply and no divide. The v0.9 answer to that is one
+question asked of every stage: **how many distinct outputs can it
+produce?** A stage whose outputs are few is a table. A stage whose output is
+mostly one value is a skip. Everything else is a shift.
 
-The new token is appended and the whole thing runs again.
+**Activations are int8** — the 64 numbers are single signed bytes, and so is
+the state.
 
-## 8. Numbers, on a machine with no multiplier — `matvec.asm`, `state.asm`
+**Weights are −1, 0 or +1.** Ternary, trained that way, with one power-of-two
+scale per row so the scale is a shift.
 
-The model was trained in floating point.
+**Three weights times three activations is one of 27 sums.** A block of
+three ternary weights applied to three activations can only produce
+`{0, −x0, +x0} + {0, −x1, +x1} + {0, −x2, +x2}`: 27 values. So for each block
+of three inputs the kernel builds those 27 sums once - by derivation, each
+entry one 16-bit add from an earlier one, 381 cycles a block, 22 blocks for
+a 64-wide vector - and a weight triple is stored as one byte that *is* the
+address of its sum. v0.4 walked this input-major, adding each block's entry
+into an array of accumulators and requantizing the array afterwards. v0.9
+turns it round: the tables are built once per input vector and stay
+resident, each output row is a stream of 22 bytes, the row's sum lives in a
+register pair at 12 cycles a lookup (three multiply-accumulates), and the
+requant - shift, round half up, saturate - happens in registers before the
+byte is stored. 302 + 8s cycles a row. No accumulator array, no zeroing,
+no second pass. The classifier does the same with blocks of four (81 sums)
+because it has 1,024 rows to amortise the bigger build over.
 
-**Activations are int8** — the 64 numbers are single signed bytes.
+**A stage with few outputs is a table.** ReLU² has 256 inputs: a page. The
+gate's update, once proved to be a function of the sigmoid value and
+`ht − h`: 118 rows of 512 bytes. The requantized embedding rows: 1,024 of
+them, so they are stored requantized. The norm's x·r: 16 entries for the
+high nibble, 16 for the low, rebuilt per norm because r changes per norm.
 
-**Weights are 4-bit.** Not "the value rounded to 4 bits": each matrix has its own
-**codebook** of 16 representative values, fitted to that matrix's actual
-distribution, and a weight stores which of the 16 it is. Rare large values still
-get represented because the codebook can place a level out there.
+**A stage whose output is mostly one value is a skip.** ReLU² is 82% zeros,
+and the place that knows which is the loop that made them. `w2` therefore
+touches only the pairs where both the activation and the weight are
+nonzero.
 
-**Scales are powers of two.** Every quantised tensor has a scale that says what
-"1" means. Constraining those to powers of two means converting between tensors
-is an arithmetic shift instead of a division — and the SM83 has no divide either.
+**Everything is exact.** Every table is the twin's own function evaluated
+at every input it can receive, and the proofs are exhaustive where the
+domain allows: all 16,646,400 gate inputs, all 255 × 255 pairs of the
+saturating add. The golden token sequence is byte-identical to the one the
+tree started with, and that is the test.
 
-**And so the multiply disappears.** Sixteen possible weight values, 256 possible
-activation bytes: every product the model could ever need is 4,096 numbers, small
-enough to precompute into ROM. At runtime the kernel copies the 32 bytes for the
-current activation into high RAM, and multiplying becomes a single load
-instruction.
-
-That is the whole reason this runs at a usable speed. The model is not doing less
-work — it is doing the same work by looking up answers computed years' worth of
-cycles in advance, at export time.
+The model is not doing less arithmetic than the twin. It is doing the same
+arithmetic by looking up answers that were computed at export time, or once
+per token for the tables that depend on the input, and skipping the terms
+that were zero before anyone multiplied them.
 
 ---
 
 ## Reading order in the source
 
 1. `encoder.asm` — text to tokens
-2. `forward.asm` — the layer loop, and where everything else is called from
-3. `rmsnorm.asm`, `rope.asm`, `attention.asm`, `swiglu.asm` — one idea each
-4. `matvec.asm` — the kernel the whole budget is spent in
-5. `state.asm` — requantisation, the glue between every stage
-6. `generate.asm` — decode and detokenise
+2. `forward.asm` — the layer loop, the no-repeat rule, and where everything else is called from
+3. `rmsnorm.asm`, `gate.asm`, `relu2.asm` — one idea each
+4. `matvec3.asm` — the 27-sum table build; `sweep.asm` — the output-major row every block matvec runs; `matvec_sparse.asm` — w2 over the nonzero pairs
+5. `cls4.asm` — the classifier's running best; `classifier.asm` — the WRAM bank it works in, and the two older kernels that share it
+6. `state.asm` — the buffers and the requant w2 still uses; `addsat.asm` — the residual add
+7. `generate.asm` — decode and detokenise; `teletype.asm` — the screen
 
-`py/quant.py` is the same model in Python, bit-for-bit identical to the assembly.
-If a section above is unclear, that file is the readable version of it.
+`py/twin5.py` is the same model in Python, bit-for-bit identical to the
+assembly; `py/quant.py` holds the integer primitives it shares with v0.4. If
+a section above is unclear, those files are the readable version of it.

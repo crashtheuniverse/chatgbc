@@ -1,13 +1,14 @@
 # v0.9: the speed release
 
-v0.4.1 ships 1.146 bits per character at 1.03 s a token, 0.30 s a
-character. v0.5 through v0.8 do not exist: the work that was planned for
-them - one-bit kernels, a plane classifier, the stream on the trainer's
-grid - is on this branch already, and an audit of the whole token showed
-that the biggest gain left was not a better model but a cheaper token for
-the model we have. So the version number jumps. **v0.9 is the same weights
-at about twice the speed, bit for bit**, and v1.0 is what is done with the
-time that buys.
+v0.4.1 shipped 1.146 bits per character at 1.08 s a token, 0.31 s a
+character. v0.5 through v0.8 do not exist as releases: the work that was
+planned for them - one-bit kernels, a plane classifier, the stream on the
+trainer's grid - landed on the tree as options, and an audit of the whole
+token showed that the biggest gain left was not a better model but a
+cheaper token for the model we had. So the version number jumped. **v0.9
+is the same weights at 2.3x the speed, bit for bit**: 0.46 s a token,
+0.133 s a character, 1.126 bits per character, 61 KB of new tables. v1.0
+is what is done with the time that buys.
 
 ## What the audit found
 
@@ -18,41 +19,61 @@ activations became a 27-entry table in v0.4. Where the output is mostly
 one value - ReLU² is 82% zeros - the work that produces the other value
 can be skipped. Every claim was recounted by a second reader against the
 instruction timings and checked against the integer twin, and the token
-is accounted for line by line (2,194,784 census cycles, 21 stages,
-each claimed exactly once).
+was accounted for line by line, each census stage claimed by exactly one
+collapse.
 
-The collapses v0.9 takes are all **exact**: the ROM produces the same
-integers as today's twin for every input, so nothing is retrained and
-the golden sequence does not change. Together they are budgeted at about
-1.1M of the 2.17M cycles, with no new table larger than 60 KB:
+The collapses v0.9 took are all **exact**: the ROM produces the same
+integers as the twin for every input, so nothing was retrained and the
+golden sequence did not change. Measured on the 8-token census
+(`py/census5.py`), on the tree the release started from and on the release,
+cycles a token:
 
-| collapse | saves / token | table |
-|---|---|---|
-| w2 walks only the nonzero (activation, weight) pairs, listed where ReLU² makes them | ~290K | weights re-encoded as column lists |
-| the block matvecs go output-major: tables resident per input vector, each row summed in registers, requantized in place | ~270K | 1.5 KB WRAM |
-| the router rides on w1's tables; wz and wh share one build; the 27-entry table built as a direct sum | ~140K | none |
-| the classifier keeps only the running best: no stored logits, no zero pass, no rescan | ~160K | 4 KB WRAM |
-| the gate as one byte table with the sigmoid folded in (saturation proved dead over all 16.6M inputs) | ~80K | 60 KB |
-| ReLU² as one page per layer; requant epilogues in registers | ~90K | 768 B |
-| the norm's shifts peeled by the byte, its sum of squares in registers | ~70K | none |
-| embedding rows stored on the stream grid; debug copies out of the app build | ~24K | none |
+| stage | before | after | what changed |
+|---|---|---|---|
+| classifier | 423,496 | 246,712 | output-major over 16 tables of 81 sums, the best kept in registers, no logits stored, no zero pass, no rescan |
+| w1 matvec, with the router | 332,680 | 202,728 | output-major sweep over 22 resident tables; the router rides on the same tables |
+| w2 matvec | 344,696 | 67,624 | only the nonzero (activation, weight) pairs, listed by the ReLU² loop |
+| wz | 131,264 | 89,248 | output-major sweep (this line carries the table build shared with wh) |
+| wh | 131,312 | 63,408 | output-major sweep over wz's build |
+| wo | 131,312 | 89,072 | output-major sweep |
+| w1 requant | 63,632 | 0 | folded into the sweep's epilogue |
+| wz, wh, wo requants | ~72K | 0 | folded into the sweep's epilogue |
+| w2 requant | 19,840 | 19,800 | unchanged |
+| rms_att | 137,456 | 68,888 | sum of squares in registers, shifts peeled by the byte, x·r through nibble tables |
+| rms_ffn | 140,016 | 70,112 | the same |
+| rms_final | 48,552 | 23,720 | the same |
+| gate | 86,120 | 9,192 | one byte table, indexed by the sigmoid value and ht−h |
+| sigmoid | 6,368 | 0 | folded into the gate table's side pages |
+| ReLU² | 59,032 | 8,752 | one 256-byte page per layer |
+| embed | 13,368 | 448 | rows stored on the stream's grid; the embed is a copy |
+| residual adds | 18,632 | 13,272 | page-form loop, overflow from the sign bits |
+| debug snapshots | 5,624 | 0 | lab build only |
+| **staged total** | **2,164,704** | **973,032** | |
 
-**The goal, in the numbers VERSIONS.md is measured in:** v0.4.1's
-1.146 bits per character, unchanged, at **0.5 s a token or better**
-(0.15 s a character) as shipped, on held-out text, verified by the same
-ladder every kernel has used: the twin unchanged, golden strict byte for
-byte, then the census.
+New tables in ROM: 60,416 B for the gate and 768 B for ReLU², about 61 KB
+against the audit's rule of at most 100 KB. Everything else is re-encoded
+weights or tables rebuilt per token in WRAM. The ROM file is 512 KB, about
+370 KB of it content.
+
+**In the numbers VERSIONS.md is measured in:** the app ROM's own counter,
+963,792 cycles a token over 100 tokens with the teletype running, **0.46 s
+a token** and 0.133 s a character; **1.126 bits per character** as shipped
+on the 200 held-out stories, 1.123 for the same checkpoint in fp32. The
+release goal had been 0.5 s a token or better at v0.4.1's quality. The
+ladder every kernel passed: the twin unchanged, golden strict byte for byte,
+then the census.
 
 ## What v0.9 leaves out, and why
 
 - **The norm as tables.** Another 280K cycles for 836 KB of planes that
   grow with width and depth, and a 2 MB ROM header. Ruled out by the
-  table budget: v0.9 adds at most 100 KB of tables in total.
+  table budget: v0.9 adds at most 100 KB of tables in total. The norm went
+  to registers instead and halved.
 - **A hierarchical classifier.** The argmax is linear in the vocabulary,
   so a bigger dictionary is paid for there and nowhere else; a two-level
-  head (32 groups of 32) would take the classifier from 12% of the token
-  to 2%. It changes the model and the no-repeat rule, so it waits for
-  the decision to grow the vocabulary.
+  head (32 groups of 32) would take the classifier from a quarter of the
+  token to a few percent. It changes the model and the no-repeat rule, so
+  it waits for the decision to grow the vocabulary.
 - **Anything that changes the twin.** Every new-semantics option measured
   was worth less than a retrain except the head above.
 
