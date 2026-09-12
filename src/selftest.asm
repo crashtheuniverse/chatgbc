@@ -15,7 +15,18 @@ INCLUDE "model.inc"
 
 SECTION "Selftest code", ROM0
 
+; The test vector into wXb; then, for the input-major kernels only, their
+; configuration cells. The sweep (EXPERTS && SWEEP) takes its input pointer
+; and its rows as arguments and reads none of wMvBank / wMvW / wMvIn /
+; wMvXPtr / wMvOut, so on that build the copy is the whole setup.
 Selftest_Setup::
+    ld hl, test_x
+    ld de, wXb
+    ld bc, DIM
+    call CopyBytes
+IF EXPERTS && SWEEP
+    ret
+ELSE
 IF !(TERNARY || BINARY)
     ld a, BANK(lut_w1)
     ld [wMvLutBank], a
@@ -24,11 +35,6 @@ IF !(TERNARY || BINARY)
     ld a, HIGH(lut_w1)
     ld [wMvLutAddr + 1], a
 ENDC
-
-    ld hl, test_x
-    ld de, wXb
-    ld bc, DIM
-    call CopyBytes
 
 IF EXPERTS
     ld a, BANK(w1_l0_e0)            ; expert 0 of layer 0, whole
@@ -64,6 +70,7 @@ ENDC
     ld a, HIGH(wXb)
     ld [wMvXPtr + 1], a
     ret
+ENDC                                ; EXPERTS && SWEEP
 
 ; Both halves, exactly as the forward pass runs them, so the split path is the
 ; covered path and test_h1 stays the full row.

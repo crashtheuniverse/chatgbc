@@ -13,59 +13,9 @@ INCLUDE "chatgbc.inc"
 
 SECTION "Register math", ROM0
 
-; a (signed 8-bit) * bc (signed 16-bit) -> e:hl, signed 24-bit.
-; The loop is MulS8xS16's; only the operand and result traffic is gone.
-MulS8xS16_Reg::
-    ld d, a
-    xor b                           ; sign of the product = signA xor signB
-    push af
-    ld a, d
-    bit 7, a
-    jr z, :+
-    cpl
-    inc a
-:   ld d, a                         ; |A|, the multiplier
-    bit 7, b
-    jr z, :+
-    ld a, c
-    cpl
-    ld c, a
-    ld a, b
-    cpl
-    ld b, a
-    inc bc                          ; |B|, the multiplicand
-:
-    ld hl, 0
-    ld e, 0
-REPT 8
-    add hl, hl
-    rl e
-    sla d
-    jr nc, :+
-    add hl, bc
-    ld a, e
-    adc a, 0
-    ld e, a
-:
-ENDR
-    pop af
-    bit 7, a
-    ret z
-    ld a, l                         ; negate the 24-bit result in place
-    cpl
-    ld l, a
-    ld a, h
-    cpl
-    ld h, a
-    ld a, e
-    cpl
-    ld e, a
-    inc hl
-    ld a, h
-    or l
-    ret nz
-    inc e
-    ret
+; (MulS8xS16_Reg, the signed 8 x 16 shift-and-add multiply that the norm's
+; gain step first used, left with the nibble tables and MulS16xU8 below; it
+; had no caller and is gone.)
 
 ; e:hl >>= b, arithmetic, round-half-up on the last bit out. b = 0 leaves
 ; the value untouched, as Requant_Shift does. Exact for every b in 0..24.
@@ -112,8 +62,25 @@ ShiftRound24::
     ld e, a
     ret
 
-; hl = shr_round(e:hl, b) for a result that fits in signed 16 bits - i.e.
-; |e:hl| < 2^(b+15), which the caller guarantees. b in 0..24. Clobbers a, b, e.
+; hl = shr_round(e:hl, b) for a result that fits in signed 16 bits, which
+; the caller guarantees: with v = e:hl,
+;     -2^(b+15) - 2^(b-1) <= v < 2^(b+15) - 2^(b-1)      (b >= 1)
+;     -2^15 <= v < 2^15                                  (b = 0)
+; i.e. v + 2^(b-1), the value the floor sees, lies in [-2^(b+15), 2^(b+15)).
+; NOT |v| < 2^(b+15): v = 2^(b+15) - 1 meets that and rounds to 2^15, which
+; is -32768 in hl. The bound is tight both ways (a bit model of this routine
+; against Q.shr_round, every b in 0..24, both edges and the first value past
+; each). On 24-bit input the lower edge exists only for b <= 7; above that
+; every representable v is inside. b in 0..24. Clobbers a, b, e.
+;
+; Why the norm (src/rmsnorm.asm, the only caller) never reaches an edge:
+; its first shift is x * r by p with |x| <= 2^p - 1 (x^2 <= ss < 2^2p) and
+; r <= 32641 (tbl_rsqrt over idx 64..255), so |x r| <= (2^p - 1) 32641 <
+; 2^(p-1) x 65282, under the bound 2^(p-1) x 65535 with 253 x 2^(p-1) to
+; spare; its second is xh * g by s with |xh| <= 32641 (the first result's
+; own bound) and g <= 127 (exporter-asserted), so |xh g| <= 4,145,407 <
+; 2^22 - 2^6 = 4,194,240, the bound at s = 7, the smallest closing shift
+; the exporter allows.
 ;
 ; The result has 16 bits, so only the two bytes above the rounding bit are
 ; wanted, plus the rounding bit itself:
@@ -121,8 +88,11 @@ ShiftRound24::
 ;          times, truncating; the last bit out is the rounding bit (the
 ;          nested-floor argument ShiftRound24 gives, with the peel first).
 ;   b = 8: the rounding bit is bit 7 of the low byte; the result is e:h.
-;   b < 8: shift the 24 bits left 8 - b times - no overflow, since the
-;          bound above puts the shifted value under 2^23 - then as b = 8.
+;   b < 8: shift the 24 bits left 8 - b times, then as b = 8. The shifted
+;          value is v x 2^(8-b), under 2^23 by the bound; if the lower edge
+;          takes it past -2^23 it wraps mod 2^24, and the answer is still
+;          right: every step from here is arithmetic mod 2^16 on a result
+;          that fits, and the rounding bit (bit b-1 of v) is untouched.
 ; Then add the carry into the 16-bit result.
 ;
 ; Cycles with the call: b = 6: 50, 7: 42, 8: 32, 9: 36, 10: 44, 11: 52,
@@ -182,7 +152,7 @@ ShrRound24to16::
 ; negate of the result with a 16-bit negate of one byte.
 ;
 ; ~103 cycles with the call at a typical gain (72 + 4.5 per set bit + setup),
-; against ~135 for MulS8xS16_Reg.
+; against ~135 for the signed 8 x 16 shift-and-add it replaced.
 MulS16xU8::
     ld d, a
     ld l, 0

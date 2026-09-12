@@ -19,6 +19,16 @@ INCLUDE "model.inc"
 ; ROMs assemble neither the buffers nor the copies - the copies cost the
 ; shipping ROM 4,560 cycles a token for nothing until v0.9. Bank 1 is free
 ; (there is no KV cache), so they cost WRAM0 nothing; ForwardLayer maps it.
+; The hidden vector a snapshot copies: an expert's slice with experts (the
+; forward pass runs one expert's w1, HID_EXP outputs), the whole row without.
+; Declared once here and used by both the buffers and their SNAPSHOT_L0
+; calls, so a probe cannot be smaller than the copy into it.
+IF EXPERTS
+DEF DBG_HID EQU HID_EXP
+ELSE
+DEF DBG_HID EQU HIDDEN
+ENDC
+
 IF DEF(PROBES)
 SECTION "Forward debug", WRAMX[$D000], BANK[1]
 wDbgAtt::   ds DIM              ; layer 0: the state after the gate
@@ -27,10 +37,10 @@ wDbgRes::   ds DIM              ; layer 0: x after the recurrent residual
 wDbgXb::    ds DIM              ; layer 0: post-rmsnorm input to wz/wh
 wDbgZl::    ds DIM              ; layer 0: gate logits
 wDbgHt::    ds DIM              ; layer 0: candidate state
-wDbgH1::    ds HIDDEN           ; layer 0: w1 output
-wDbgHb::    ds HIDDEN           ; layer 0: after relu^2
+wDbgH1::    ds DBG_HID          ; layer 0: w1 output
+wDbgHb::    ds DBG_HID          ; layer 0: after relu^2
 wDbgXf::    ds DIM              ; layer 0: the FFN's input, after rms_ffn
-wDbgExpert:: db                 ; layer 0: the expert the router chose
+wDbgExpert:: db                 ; layer 0: the expert the router chose (one byte, stored, not copied)
 wDbgAo::    ds DIM              ; layer 0: wo's output after requant, before the add
 ENDC
 
@@ -64,7 +74,10 @@ wBlocked::  ds NOREPEAT_TRIES * 2   ; those candidates, as tokens (cls4.asm keep
 ENDC
 wExpert::   db                      ; the expert the router chose this layer
 wExpIdx::   db                      ; layer * EXPERTS + expert: the matrix index
+IF !SWEEP
 wExpHi:     db                      ; scratch for the router's 16-bit compare
+                                    ; (the sweep's router compares in registers)
+ENDC
 
 SECTION "Forward code", ROM0
 
@@ -412,7 +425,7 @@ IF DEF(PROBES)
     ld [wDbgExpert], a
 :
 ENDC
-    SNAPSHOT_L0 wH1, wDbgH1, HID_EXP
+    SNAPSHOT_L0 wH1, wDbgH1, DBG_HID
     CENSUS_END 17
 ELSE
     CENSUS_START
@@ -432,7 +445,8 @@ ELSE
     ld hl, wAcc
     ld de, 0                        ; best so far: -32768, high byte pre-flipped
     ld b, 0                         ; the index being examined
-    ld [wExpert], a                 ; a is 0 here: expert 0 unless beaten
+    xor a                           ; expert 0 unless beaten (a arrives as
+    ld [wExpert], a                 ; whatever the matvec or a probe left)
 .route
     ld a, [hl+]
     ld c, a                         ; low
@@ -488,13 +502,13 @@ ELSE
     ld bc, wH1
     call Requant_All16
     CENSUS_END 12
-    SNAPSHOT_L0 wH1, wDbgH1, HID_EXP
+    SNAPSHOT_L0 wH1, wDbgH1, DBG_HID
 ENDC                                ; SWEEP
 
     CENSUS_START
     call Relu2_Row                  ; the activation, and its list of nonzeros
     CENSUS_END 13
-    SNAPSHOT_L0 wHb, wDbgHb, HID_EXP
+    SNAPSHOT_L0 wHb, wDbgHb, DBG_HID
 
     CENSUS_START
     call W2_Run                     ; sparse over the list, or dense over wHb
@@ -580,11 +594,11 @@ ENDC
     call Requant_All16
     CENSUS_END 12
 
-    SNAPSHOT_L0 wH1, wDbgH1, HIDDEN
+    SNAPSHOT_L0 wH1, wDbgH1, DBG_HID
     CENSUS_START
     call Relu2_Row                  ; the activation: one page lookup each
     CENSUS_END 13
-    SNAPSHOT_L0 wHb, wDbgHb, HIDDEN
+    SNAPSHOT_L0 wHb, wDbgHb, DBG_HID
 
     ; w2 runs as two input halves into the same accumulators - RunAccum after
     ; Run, same order as one pass, so the sums are bit-identical. The signed
