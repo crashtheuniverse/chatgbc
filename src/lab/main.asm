@@ -66,9 +66,14 @@ ENDC
     call Console_Flush
 
     ; After the run, so the forward pass cannot overwrite the buffers they
-    ; check; the w1 selftest last, since the sparse one borrows wH1.
+    ; check; the w1 selftest last, since the sparse one borrows wH1 and the
+    ; embed and add ones borrow wX / wXb.
 IF EXPERTS
     call SparseSelftest
+ENDC
+IF DEF(PROBES)
+    call EmbedSelftest
+    call AddSelftest
 ENDC
     call MeasureSelftest
     jr .done

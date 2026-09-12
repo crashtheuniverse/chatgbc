@@ -21,6 +21,10 @@ sys.path.insert(0, str(ROOT / "py"))
 from harness import Rom          # noqa: E402
 import export5                   # noqa: E402
 
+# Stages 3 (sigmoid) and 17 (debug snapshots) keep their names so the tables
+# line up across versions: the sigmoid is folded into the gate table, and
+# the layer-0 snapshots assemble only into the lab ROM (build.ps1 -Lab), so
+# the census - the shipping path with timers - reads 0 for both.
 STAGES = [
     "rms_att", "wz matvec", "wz requant", "sigmoid", "wh matvec",
     "wh requant", "gate", "wo matvec", "wo requant", "add (att)",

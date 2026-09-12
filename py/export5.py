@@ -474,7 +474,16 @@ def main():
     while (2 << emb_bits) * c.dim <= 0x4000 and (2 << emb_bits) <= c.vocab:
         emb_bits += 1
     emb_per = 1 << emb_bits
-    emb_rows = q.weights["tok_emb"].astype(np.int8)
+    # The rows ship already on the stream grid: the twin's first line is
+    # x = Q.requant(tok_emb[token], wexp, S("x")), a function of each weight
+    # alone, so evaluating it here for every row and copying the row in the
+    # ROM is the same function - EmbedToken (src/forward.asm) is a plain
+    # copy, and the per-element Requant_Shift / Sat8 pass it ran is gone.
+    # The classifier is untouched: it reads q.weights["tok_emb"] itself.
+    emb_rows = Q.requant(q.weights["tok_emb"].astype(np.int64),
+                         q.wexp["tok_emb"], S("x"))
+    assert emb_rows.dtype == np.int8 and emb_rows.shape == (c.vocab, c.dim)
+    assert int(np.abs(emb_rows).max()) <= 127
     emb_parts = -(-c.vocab // emb_per)
     for i in range(emb_parts):
         blob(f"emb_rows_p{i}", emb_rows[i * emb_per:(i + 1) * emb_per].tobytes(), rom0=False)
@@ -482,9 +491,11 @@ def main():
     const("EMB_PARTS", emb_parts)
     const("EMB_PER_PART", emb_per)
     const("EMB_ROW_BITS", emb_bits)
-    # The embedding has one exponent, so its shift is one constant - not a
-    # 512-byte table of the same byte, which is what used to live in ROM0.
-    const("EMB_SHIFT", S("x") - q.wexp["tok_emb"])
+    # A known answer for the lab's EmbedSelftest (src/selftest.asm): the
+    # densest row, so a copy that dropped or shifted a byte cannot pass.
+    emb_test_tok = int(np.argmax((emb_rows != 0).sum(axis=1)))
+    const("TEST_EMB_TOKEN", emb_test_tok)
+    expected("test_emb_out", emb_rows[emb_test_tok].tobytes())
 
     # --- classifier ---
     assert int(np.abs(q.rowexp["tok_emb"]).max()) == 0
@@ -838,6 +849,32 @@ def main():
     blob("test_gate_h", hprev.astype(np.int8).tobytes())
     blob("test_gate_ht", htild.astype(np.int8).tobytes())
     blob("test_gate_out", hnew.astype(np.int8).tobytes())
+
+    # Residual add spot check (AddSelftest in src/selftest.asm): TEST_ADD_ROWS
+    # pairs of DIM-wide vectors through AddSat_Stream, against the twin's
+    # Q.add_requant at one exponent - sat8(x + y). The first row is the edge
+    # cases by hand: both saturations by one, the exact -128 that must come
+    # out -127, the extremes, zero sums; the rest is uniform over the int8
+    # range the stream can hold ([-127, 127]: every value is a sat8 output).
+    add_rows = 8
+    edge = [(127, 127), (-127, -127), (127, 1), (-127, -1), (100, 27), (100, 28),
+            (-100, -27), (-100, -28), (127, -127), (-127, 127), (0, 0), (1, -1),
+            (-1, -127), (-127, -1), (-64, -64), (64, 64), (63, 64), (-64, -63),
+            (127, 0), (0, -127), (-127, 0), (0, 127), (126, 1), (-126, -1),
+            (126, 2), (-126, -2), (-2, -126), (77, -77), (-77, 77), (1, 1),
+            (-1, -1), (0, 1)]
+    rng = np.random.default_rng(9)
+    ax = rng.integers(-127, 128, (add_rows, c.dim)).astype(np.int64)
+    ay = rng.integers(-127, 128, (add_rows, c.dim)).astype(np.int64)
+    for i, (xv, yv) in enumerate(edge):
+        ax[0, i], ay[0, i] = xv, yv
+    aout = np.stack([Q.add_requant(ax[i].astype(np.int8), S("x"), ay[i].astype(np.int8),
+                                   S("x"), S("x")) for i in range(add_rows)])
+    assert (aout == Q.sat8(ax + ay)).all()
+    const("TEST_ADD_ROWS", add_rows)
+    blob("test_add_x", ax.astype(np.int8).tobytes(), rom0=False)
+    blob("test_add_y", ay.astype(np.int8).tobytes(), rom0=False)
+    expected("test_add_out", aout.astype(np.int8).tobytes())
 
     if experts:
         # Sparse w2 spot check (SparseSelftest in src/selftest.asm): two w1

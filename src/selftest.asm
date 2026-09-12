@@ -126,7 +126,7 @@ IF EXPERTS
 ; and must take the dense block kernel, `a` fewer and must take the sparse
 ; one. Each runs the forward pass's own Relu2_Row and W2_Run; the sums, the
 ; path W2_Run reports and the list count go to WRAM bank 1, beside the
-; diffstep snapshots, for py/tests/test_sparse_w2.py. `a` runs last, so wHb
+; layer-0 snapshots, for py/tests/test_sparse_w2.py. `a` runs last, so wHb
 ; and wSpList are its when the harness looks.
 SECTION "Sparse selftest results", WRAMX, BANK[1]
 wDbgSpAccA:: ds DIM * 2             ; wAcc after vector a, int16
@@ -170,5 +170,81 @@ SparseSelftest::
     ld [wExpIdx], a
     SPARSE_CASE test_sp_b, 1
     SPARSE_CASE test_sp_a, 0
+    ret
+ENDC
+
+IF DEF(PROBES)
+; The embedding copy and the residual add, on the exporter's vectors, for
+; py/tests/test_module_f.py. Lab builds only (build.ps1 -Lab): the app ROM
+; has no reader for the answers and ROM0 has no room to spare. Both run
+; after the generation, and both clobber wX / wXb - MeasureSelftest, which
+; runs last, plants its own wXb.
+SECTION "Module F selftest results", WRAMX, BANK[1]
+wDbgEmb:: ds DIM                    ; wX after EmbedToken on TEST_EMB_TOKEN
+wDbgAdd:: ds TEST_ADD_ROWS * DIM    ; wX after each row's AddSat_Stream
+
+SECTION "Module F selftest code", ROM0
+
+EmbedSelftest::
+    ld a, 1
+    ldh [rSVBK], a
+    ld a, LOW(TEST_EMB_TOKEN)
+    ld [wToken + 0], a
+    ld a, HIGH(TEST_EMB_TOKEN)
+    ld [wToken + 1], a
+    call EmbedToken
+    ld hl, wX
+    ld de, wDbgEmb
+    ld bc, DIM
+    jp CopyBytes
+
+; Row r of test_add_x into wX, row r of test_add_y into wXb, the add, and
+; wX out to wDbgAdd + r * DIM, for r = 0..TEST_ADD_ROWS-1.
+AddSelftest::
+    ld a, 1
+    ldh [rSVBK], a
+    ld b, 0                         ; the row
+    ld de, wDbgAdd
+.row
+    push de
+    push bc
+    ld a, BANK(test_add_x)
+    ld [rROMB0], a
+    ld hl, test_add_x
+    ld a, b
+    call .rowptr
+    ld de, wX
+    ld bc, DIM
+    call CopyBytes
+    pop bc
+    push bc
+    ld a, BANK(test_add_y)
+    ld [rROMB0], a
+    ld hl, test_add_y
+    ld a, b
+    call .rowptr
+    ld de, wXb
+    ld bc, DIM
+    call CopyBytes
+    call AddSat_Stream
+    pop bc
+    pop de
+    push bc
+    ld hl, wX
+    ld bc, DIM
+    call CopyBytes                  ; de advances to the next row's slot
+    pop bc
+    inc b
+    ld a, b
+    cp TEST_ADD_ROWS
+    jr nz, .row
+    ret
+.rowptr                             ; hl += a * DIM; clobbers de
+    or a
+    ret z
+    ld de, DIM
+:   add hl, de
+    dec a
+    jr nz, :-
     ret
 ENDC

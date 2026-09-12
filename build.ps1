@@ -9,12 +9,16 @@ New-Item -ItemType Directory -Force $build | Out-Null
 
 # -Census is the lab entry with stage timers compiled into the forward pass
 # (src/census.inc); its own ROM name, so the test lab stays untouched.
+# -Lab alone defines PROBES: the layer-0 snapshot copies and the extra
+# selftests the suite reads (src/forward.asm, src/selftest.asm). The app
+# never had a reader for them, and the census measures the shipping path,
+# so neither assembles them.
 if ($Census) { $Lab = $true }
 $variant = if ($Lab) { 'lab' } else { 'app' }
 $suffix  = if ($Census) { '-census' } elseif ($Lab) { '-lab' } else { '' }
 # Typed, because a one-element array assigned from an `if` collapses to a
 # scalar, and splatting a scalar hands rgbasm garbage.
-[string[]]$defs = if ($Census) { @('-DCENSUS=1') } else { @() }
+[string[]]$defs = if ($Census) { @('-DCENSUS=1') } elseif ($Lab) { @('-DPROBES=1') } else { @() }
 
 $objs = @()
 $sources = @(Get-ChildItem (Join-Path $root 'src') -Filter *.asm) +
