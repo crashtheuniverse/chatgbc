@@ -64,6 +64,11 @@ DEF NOREPEAT_TRIES EQU 8
 ; claiming a KV bank by mistake once cost an afternoon.
 DEF CLS_TBL_BANK EQU 7
 
+; The WRAM bank of the block tables the output-major sweep reads
+; (src/sweep.asm): bank 1, beside the layer-0 probes, which ForwardLayer
+; maps at entry anyway - so the forward pass never toggles SVBK mid-layer.
+DEF MV_TBL_BANK EQU 1
+
 ; The most tokens one reply may run. The newline normally ends a turn well
 ; before this; the cap is for a reply that never finds one.
 DEF CHAT_REPLY_MAX EQU 48

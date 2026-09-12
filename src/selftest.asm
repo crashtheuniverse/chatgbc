@@ -3,7 +3,11 @@
 ; Runs w1 of layer 0 against an exported activation vector and leaves the result
 ; in wH1, where py/tests/test_kernels.py checks it bit-for-bit against the twin.
 ; It exercises the same code the forward pass uses, but independently of it, so
-; the kernel stays covered even while the full pass is being debugged.
+; the kernel stays covered even while the full pass is being debugged. On the
+; sweep it first routes the vector through layer 0's router rows (the expert
+; into wDbgSwExpert), then runs the same w1 rows a second time at shifts the
+; model never asks for (s = 1, saturating rows) into wDbgSwOut, and leaves
+; the block tables of the test vector in wMvTbl for py/tests/test_sweep.py.
 
 INCLUDE "hardware.inc"
 INCLUDE "chatgbc.inc"
@@ -75,10 +79,28 @@ ENDC
 
 Selftest_Run::
 IF EXPERTS
+IF SWEEP
+    ld de, wXb
+    call Matvec3_BuildAll           ; the tables of test_x, left for the test
+    ld a, BANK(w1_l0_e0)
+    ld [rROMB0], a
+    ld hl, w1_l0_e0
+    call Sweep_Route                ; the router rows that open the blob
+    ld a, [wExpert]
+    ld [wDbgSwExpert], a            ; bank 1, which Matvec3_BuildAll mapped
+    ld de, wH1
+    call Sweep_Rows                 ; the forward pass's own w1 path, expert 0
+    ld a, BANK(test_sw)
+    ld [rROMB0], a
+    ld hl, test_sw
+    ld de, wDbgSwOut
+    jp Sweep_Rows
+ELSE
     BLOCK_RUN
     ld de, w1_sh_l0_e0
     ld bc, wH1
     jp Requant_All16
+ENDC
 ELSE
     call SELFTEST_RUN
     ld de, w1a_sh_l0
@@ -111,6 +133,10 @@ wDbgSpAccA:: ds DIM * 2             ; wAcc after vector a, int16
 wDbgSpAccB:: ds DIM * 2             ; and after vector b
 wDbgSpPath:: ds 2                   ; W2_Run's answer for a, then b
 wDbgSpCount:: ds 2                  ; wSpCount for a, then b
+IF SWEEP
+wDbgSwOut:: ds HID_EXP              ; the sweep over test_sw's synthetic shifts
+wDbgSwExpert:: db                   ; layer 0's router on test_x
+ENDC
 
 SECTION "Sparse selftest code", ROM0
 

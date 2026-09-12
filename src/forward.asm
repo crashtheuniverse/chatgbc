@@ -1,8 +1,13 @@
 ; The transformer forward pass and greedy decode loop.
 ;
-; Mirrors forward_q() in py/quant.py step for step. Every matvec goes through
-; the same Matvec_Run / Requant_All pair; only the manifest entry, the shift
-; table and the destination change.
+; Mirrors forward_q5() in py/twin5.py step for step. On the ternary experts
+; model (SWEEP) the four block matvecs are output-major sweeps over resident
+; tables of the input vector (src/sweep.asm): one table build serves wz and
+; wh (both read xb), one serves the router and the chosen expert's w1 (both
+; read xf), and each row is requantized in the sweep's own epilogue. w2
+; keeps the sparse pair kernel with its dense block fallback and
+; Requant_All16. The other kernels still run the input-major Matvec_Run /
+; Requant_All pair.
 
 INCLUDE "hardware.inc"
 INCLUDE "chatgbc.inc"
@@ -21,9 +26,8 @@ wDbgHt::    ds DIM              ; layer 0: candidate state
 wDbgH1::    ds HIDDEN           ; layer 0: w1 output
 wDbgHb::    ds HIDDEN           ; layer 0: after relu^2
 wDbgXf::    ds DIM              ; layer 0: the FFN's input, after rms_ffn
-wDbgRoute:: ds 8                ; layer 0: the router's four sums, int16
+wDbgExpert:: db                 ; layer 0: the expert the router chose
 wDbgAo::    ds DIM              ; layer 0: wo's output after requant, before the add
-wDbgAccWo:: ds DIM * 2          ; layer 0: wo's raw int16 accumulators
 
 INCLUDE "census.inc"
 
@@ -94,6 +98,23 @@ SetXPtr:
     ld [wMvXPtr + 1], a
     ret
 
+; Maps the ROM bank of a sweep stream and points hl at it.
+;   hl = banks table, de = addrs table, a = index
+MapStream:
+    ld c, a
+    ld b, 0
+    add hl, bc
+    ld a, [hl]
+    ld [rROMB0], a
+    ld h, d
+    ld l, e
+    add hl, bc
+    add hl, bc
+    ld a, [hl+]
+    ld h, [hl]
+    ld l, a
+    ret
+
 ; --- one layer -------------------------------------------------------------
 
 ; Runs layer wLayer over wX.
@@ -120,11 +141,32 @@ ForwardLayer::
     call RmsNorm                    ; wX -> wXb
     CENSUS_END 0
 
+IF SWEEP
+    ; wz and wh read the same xb: one table build, then the layer's stream
+    ; of 64 wz rows and 64 wh rows, each row requantized as it is summed.
+    CENSUS_START
+    ld de, wXb
+    call Matvec3_BuildAll           ; the block tables of xb, once for both
+    ld hl, wzh_banks
+    ld de, wzh_addrs
+    ld a, [wLayer]
+    call MapStream
+    push hl
+    ld hl, wZl                      ; this layer's slice: the gate walks all
+    ld a, [wLayer]                  ; three buffers with one page index
+    call LayerSlice
+    ld d, h
+    ld e, l
+    pop hl
+    call Sweep_Rows                 ; the gate logits; hl -> the wh rows
+    push hl
+    CENSUS_END 1
+ELSE
     CENSUS_START
     ld hl, wXb
     call SetXPtr
 IF TERNARY || BINARY
-    ld a, BLOCKS_DIM                ; the block kernel counts inputs in threes
+    ld a, BLOCKS_DIM                ; the block kernel counts inputs in blocks
     ld [wMvIn], a
 ELSE
     ld a, DIM
@@ -158,6 +200,7 @@ ENDC
     pop bc
     call Requant_All16
     CENSUS_END 2
+ENDC
 
     CENSUS_START
     ld a, [wLayer]                  ; snapshot the logits for diffstep
@@ -176,6 +219,17 @@ ENDC
 
     ; No sigmoid pass: the gate reads its logits raw, through side pages
     ; that fold the layer's sigmoid into the table row (src/gate.asm).
+IF SWEEP
+    CENSUS_START
+    ld hl, wHt                      ; the candidate state, from the wh rows
+    ld a, [wLayer]                  ; that follow the wz rows in the stream
+    call LayerSlice
+    ld d, h
+    ld e, l
+    pop hl
+    call Sweep_Rows
+    CENSUS_END 4
+ELSE
     CENSUS_START
     ld hl, wXb                      ; the candidate state
     call SetXPtr
@@ -214,6 +268,7 @@ ENDC
     pop bc
     call Requant_All16
     CENSUS_END 5
+ENDC
 
     CENSUS_START
     ld a, [wLayer]
@@ -239,6 +294,22 @@ ENDC
     call CopyBytes
 :
     CENSUS_END 17
+IF SWEEP
+    CENSUS_START
+    ld hl, wH                       ; project the state back into the stream
+    ld a, [wLayer]
+    call LayerSlice
+    ld d, h
+    ld e, l
+    call Matvec3_BuildAll           ; the block tables of h
+    ld hl, wo_banks
+    ld de, wo_addrs
+    ld a, [wLayer]
+    call MapStream
+    ld de, wXb
+    call Sweep_Rows                 ; ao, already on the stream's grid
+    CENSUS_END 7
+ELSE
     CENSUS_START
     ld hl, wH                       ; project the state back into the stream
     ld a, [wLayer]
@@ -266,14 +337,6 @@ ELSE
     call Matvec_Run
 ENDC
     CENSUS_END 7
-    ld a, [wLayer]                  ; snapshot wo's raw accumulators
-    or a
-    jr nz, :+
-    ld hl, wAcc
-    ld de, wDbgAccWo
-    ld bc, DIM * 2
-    call CopyBytes
-:
     CENSUS_START
     ld hl, wo_shifts
     ld a, [wLayer]
@@ -283,6 +346,7 @@ ENDC
     ld bc, wXb
     call Requant_All16
     CENSUS_END 8
+ENDC
     ld a, [wLayer]                  ; snapshot wo's output before the add
     or a
     jr nz, :+
@@ -335,6 +399,53 @@ IF EXPERTS
     ; matrix index is layer * EXPERTS + expert, and an expert's w1 (HID_EXP
     ; outputs) and w2 (BLOCKS_HID_EXP inputs) each run whole: one fits a
     ; bank, the other fits int16.
+IF SWEEP
+    ; The router's four rows and the chosen expert's 176 w1 rows both read
+    ; xf, so they share one table build: the router is swept first with the
+    ; argmax in its epilogue, then the expert's stream over the same tables.
+    ; The router's rows open every expert's w1 blob (the exporter writes
+    ; them W1_ROUTER_BYTES long), so expert 0's copy chooses, and the chosen
+    ; expert's blob is entered past its own copy.
+    CENSUS_START
+    ld de, wXb
+    call Matvec3_BuildAll           ; the block tables of xf
+    ld a, [wLayer]                  ; matrix index = layer * EXPERTS + expert
+    add a, a
+    add a, a                        ; EXPERTS is 4; the exporter asserts it
+    ld [wExpIdx], a                 ; expert 0's blob for the router
+    ld hl, w1_banks
+    ld de, w1_addrs
+    call MapStream
+    call Sweep_Route                ; wExpert, ties to the lowest index
+    ld a, [wExpert]
+    ld hl, wExpIdx
+    add a, [hl]
+    ld [hl], a
+    ld hl, w1_banks
+    ld de, w1_addrs
+    call MapStream
+    ld de, W1_ROUTER_BYTES          ; past the router's rows
+    add hl, de
+    ld de, wH1
+    call Sweep_Rows                 ; h1, requantized row by row
+    CENSUS_END 11
+    CENSUS_START
+    ld a, [wLayer]                  ; layer-0 snapshots: the FFN input, the
+    or a                            ; expert and h1, for the twin to check
+    jr nz, :+
+    ld hl, wXb
+    ld de, wDbgXf
+    ld bc, DIM
+    call CopyBytes
+    ld a, [wExpert]
+    ld [wDbgExpert], a
+    ld hl, wH1
+    ld de, wDbgH1
+    ld bc, HID_EXP
+    call CopyBytes
+:
+    CENSUS_END 17
+ELSE
     CENSUS_START
     ld hl, wXb
     call SetXPtr
@@ -347,16 +458,12 @@ IF EXPERTS
     ld hl, EXPERTS
     call Matvec_SetOut
     call Matvec3_Run                ; the router stays on the ternary kernel
-    ld a, [wLayer]                  ; layer-0 snapshots: the FFN input and
-    or a                            ; the router's sums, for the twin to check
+    ld a, [wLayer]                  ; layer-0 snapshot: the FFN input
+    or a
     jr nz, :+
     ld hl, wXb
     ld de, wDbgXf
     ld bc, DIM
-    call CopyBytes
-    ld hl, wAcc
-    ld de, wDbgRoute
-    ld bc, 8
     call CopyBytes
 :
 
@@ -427,6 +534,7 @@ IF EXPERTS
     ld bc, HID_EXP
     call CopyBytes
 :
+ENDC                                ; SWEEP
 
     CENSUS_START
     call Relu2_Row                  ; the activation, and its list of nonzeros

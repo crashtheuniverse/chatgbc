@@ -21,7 +21,10 @@ def test_gate_matches_the_twin_vectors(booted):
 
 
 def test_matvec_requant_bit_exact():
-    # The selftest runs after a generation, so it cannot be read at boot.
+    # The selftest runs after a generation, so it cannot be read at boot. On
+    # the ternary experts model this is the output-major sweep of w1's rows
+    # (src/sweep.asm) with the requant in its epilogue; py/tests/test_sweep.py
+    # takes the same run apart stage by stage.
     from conftest import lab_rom
     want = np.frombuffer((APP / "build" / "blobs" / "test_h1.bin"
                           ).read_bytes(), np.int8)
