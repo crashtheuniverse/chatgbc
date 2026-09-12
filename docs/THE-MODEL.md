@@ -170,10 +170,10 @@ layer. The other three quarters are rows: 372 of them a layer at roughly
 
 At this kernel, wide against deep is not a rule of thumb any more; it is a
 question of bits per character per cycle, and the answer has to be measured
-per shape on the twin and the census. `py/fit.py` still prices a shape with
-v0.4's costs (10.5 cycles a multiply-accumulate, 203K a layer of overhead);
-it has not been refitted to v0.9, which is why the numbers on this page are
-the census's and not the price model's.
+per shape on the twin and the census. `py/fit.py --price` prices a shape
+with every v0.9 term counted from a kernel listing; at the shipped shape it
+reproduces the census within 0.5%, and the numbers on this page are the
+census's, the model's source.
 
 ## Where the numbers come from
 

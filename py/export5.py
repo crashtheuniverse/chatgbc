@@ -776,10 +776,12 @@ def main():
                          // (SPARSE_COL_CYCLES + SPARSE_PAIR_CYCLES * col_nnz))
         w2_sparse_max = min(w2_sparse_max, c.hidden, 254)
         # The guard must leave every real token on the sparse path: the
-        # measured maximum on 6,291 tokens is 88 nonzero u (docs/audit
-        # measure_sparse_w2.py), and it must be a real bound - below the
-        # width, or the dense path is dead code.
-        assert 88 < w2_sparse_max < c.hidden, f"W2_SPARSE_MAX {w2_sparse_max} is out of range"
+        # measured maximum on 6,291 tokens is 88 nonzero u for ts3L_v1024
+        # (measure_sparse_w2.py in the audit) - re-measure it for another
+        # checkpoint - and it must be a real bound: below the width, or the
+        # dense path is dead code.
+        assert 88 < w2_sparse_max < c.hidden, (
+            f"W2_SPARSE_MAX {w2_sparse_max} is out of range (88 is ts3L_v1024's measured max nonzero u)")
         const("W2_SPARSE_MAX", w2_sparse_max)
         print(f"w2 sparse: fullest column {col_nnz} nonzero, dense layer counted at "
               f"{dense_w2_cycles:,} cycles, guard at {w2_sparse_max} nonzero u")

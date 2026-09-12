@@ -71,13 +71,14 @@ HZ = 2_097_152       # M-cycles per second, CGB double speed
 #   and end in a ~40-cycle compare; a group of rows ends with 9.
 # The sparse w2 (src/matvec_sparse.asm): 339 to zero the accumulators and
 #   read the manifest, ~60 for W2_Run to choose the path, 74 per nonzero u,
-#   and per (nonzero u, nonzero weight) pair 11 without a carry, 16 with.
+#   and per (nonzero u, nonzero weight) pair 13 without a carry, 18 with
+#   (11 / 16 of body plus the 2 of loop control over two pairs).
 #   Measured on 6,291 tokens (docs/audit measure_sparse_w2.py): 27 / 23 / 42
 #   nonzero u of 176 a layer = 0.174 of H, ~40 nonzero weights a column =
 #   0.63 of d. The pair term is 16: the census's 67,624 a token less the
-#   counted fixed and per-u parts, over the mean 3,714 pairs, lands there -
-#   the carry path is the common one, and whatever the census tokens' own
-#   pair counts exceed the corpus mean by sits in it too. w2's requant
+#   counted fixed and per-u parts, over the mean 3,714 pairs, lands there,
+#   between the two counted paths (about 60% carries, or the census tokens
+#   carrying more pairs than the corpus mean). w2's requant
 #   (Requant_All16, src/state.asm): ~103 a row at w2's shifts.
 # The norm (src/rmsnorm.asm): 313 an element and 33 for its square, ~1,010 a
 #   norm for the x*r tables, idx and r; 2 L + 1 norms a token.
@@ -95,7 +96,7 @@ HZ = 2_097_152       # M-cycles per second, CGB double speed
 SWEEP_MEAN_SHIFT = 3.2      # the shipped streams, rows weighted (2..5)
 W2_U_FRAC = 0.174           # nonzero u a layer as a fraction of H, measured
 W2_COL_FRAC = 0.63          # nonzero weights a column as a fraction of d, measured
-W2_PAIR = 16                # per pair: the carry path (11 without), calibrated
+W2_PAIR = 16                # per pair, calibrated: between 13 (no carry) and 18
 REQUANT_ROW = 103           # Requant_All16 a row at small shifts
 NORM_ELEM, NORM_FIXED = 313 + 33, 1_010
 GATE_ELEM, GATE_FIXED = 47, 30
