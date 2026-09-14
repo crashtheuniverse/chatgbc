@@ -17,7 +17,7 @@ feels.
 
 | | v0.1 | v0.2 | v0.3 | v0.4.1 | **v0.9** |
 |---|---|---|---|---|---|
-| Released | 2026-08-23 | 2026-08-24 | 2026-09-02 | 2026-09-05 | 2026-09 |
+| Released | 2026-08-23 | 2026-08-24 | 2026-09-02 | 2026-09-05 | 2026-09-14 |
 | Model | stories260K, 4-bit | stories260K, 4-bit | stories260K, 4-bit | **trained here**: minGRU + 4 ternary experts | same as v0.4.1 |
 | Parameters | 260K | 260K | 260K | 374K | 374K |
 | Context | 64-token window | 32-token window | 24-token window | recurrent state, no window | recurrent |
