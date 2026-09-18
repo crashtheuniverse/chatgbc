@@ -53,8 +53,11 @@ IF CLS_TERNARY
 IF CLS_BLOCKS4 != 16
     FAIL "cls4: the scan is unrolled over 16 blocks = one WRAM bank of tables"
 ENDC
-IF CLS_OUTPUTS_PER_PART * 16 != $4000
-    FAIL "cls4: a part must fill its bank - the scan stops at $8000"
+; The scan stops at $8000, so a part's rows END its bank: 1024 of them fill
+; it from $4000, a smaller vocabulary (one part) starts higher.
+DEF CLS_BASE EQU $8000 - CLS_OUTPUTS_PER_PART * 16
+IF CLS_BASE < $4000 || (CLS_PARTS > 1 && CLS_OUTPUTS_PER_PART != 1024)
+    FAIL "cls4: a part is 1024 rows, or the whole of a smaller vocabulary"
 ENDC
 
 SECTION "Cls4 HRAM", HRAM
@@ -367,10 +370,7 @@ Cls4_Take:
 
 ; A part's rows start at $4000 (it fills the bank), so a slot's pointer, which
 ; is past the row, gives token = ((ptr - $4010) >> 4) + part * 1024.
-ASSERT cls_w_p0 == $4000, "cls4: the classifier rows must start the bank"
-IF CLS_OUTPUTS_PER_PART != 1024
-    FAIL "cls4: Cls4_SlotTok forms part * 1024 with two adds"
-ENDC
+ASSERT cls_w_p0 == CLS_BASE, "cls4: the classifier rows must end their bank"
 
 ; hl -> a slot (ptr lo, ptr hi, part) -> wBestTok.
 Cls4_SlotTok:
@@ -381,7 +381,7 @@ Cls4_SlotTok:
     ld c, [hl]
     ld h, d
     ld l, e
-    ld de, -$4010
+    ld de, -(CLS_BASE + $10)
     add hl, de                      ; hl = token * 16
 REPT 4
     srl h
