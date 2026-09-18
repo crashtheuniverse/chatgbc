@@ -6,6 +6,7 @@
 ; The blink is a palette, not a redraw: PRESS START's cells switch between the
 ; text palette and one whose four colours are all the background.
 ; The screen is 20 columns, so the two long lines are each set on two rows.
+; START wipes the screen down, a row a frame, and the main screen follows.
 ;
 ; Cost: nothing in ROM0; about 200 bytes of the UI bank and the splash art.
 
@@ -120,6 +121,21 @@ ReiUi_Splash::
     ld a, [wJoyNew]
     and KB_START
     jr z, .wait
+
+    ld hl, TILEMAP0                 ; a wipe: the night comes down a row a frame
+    ld c, CON_H
+.wipe
+    call Console_WaitVBlank
+    ld b, CON_VIS_W
+    xor a
+.wipeCell
+    ld [hl+], a
+    dec b
+    jr nz, .wipeCell
+    ld de, CON_W - CON_VIS_W
+    add hl, de
+    dec c
+    jr nz, .wipe
     jp ReiScr_Main
 
 ENDC

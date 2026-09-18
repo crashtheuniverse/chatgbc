@@ -34,7 +34,6 @@ wTypeHead:  db                           ; next character to print
 wTypeTail:  db                           ; next free slot
 wTypeOn::   db
 wTypeTick:  db                           ; frames until the next character
-wWinDirty:: db                           ; the status bar's flag; nothing reads it here
 
 SECTION "Rei teletype code", ROM0
 

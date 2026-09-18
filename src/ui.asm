@@ -8,6 +8,10 @@
 ; The box pieces are font tiles sitting just past the ASCII range (CH_* in
 ; chatgbc.inc), which costs eight glyphs and no second tileset.
 
+; The Rei build draws its own frames (src/app/rei_screen.asm), and assembles
+; none of this.
+IF !DEF(REI_UI)
+
 INCLUDE "hardware.inc"
 INCLUDE "chatgbc.inc"
 INCLUDE "model.inc"
@@ -108,4 +112,6 @@ IF CHAT_MODE
 sUiTitle: db " Rei v0.1 ", 0
 ELSE
 sUiTitle: db " ChatGBC v0.9 ", 0
+ENDC
+
 ENDC

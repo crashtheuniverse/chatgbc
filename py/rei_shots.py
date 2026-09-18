@@ -108,12 +108,6 @@ def wait_ready(r, max_frames=40000, each_frame=None):
     raise TimeoutError("the reply never finished")
 
 
-def start(r):
-    """Boot to the splash, then START to the main screen."""
-    r.pyboy.tick(150, False)
-    press(r, "start", after=30)
-
-
 def pick(r, page, row):
     """From the top of page 0, move the list cursor there."""
     for _ in range(page):
@@ -143,22 +137,22 @@ def main():
     r = boot()
     r.pyboy.tick(150, False)
     r.screenshot(SHOTS / "splash.png")
-    press(r, "start", after=30)
+    press(r, "start", after=60)
     r.screenshot(SHOTS / "canned.png")
 
     press(r, "a")                               # "hello"
-    wait_ready(r)
-    press(r, "a")
-    pick(r, 0, 2)                               # "my name is tom"
-    press(r, "a")
     for _ in range(40000):                      # a few words in, mouth open
         r.pyboy.tick(1, False)
         if r.read("wReiReplyLen")[0] >= 9 and face_shown(r) == 3:
             break
     r.screenshot(SHOTS / "reply_mid.png")
     wait_ready(r)
-    r.screenshot(SHOTS / "reply_done.png")
+    r.screenshot(SHOTS / "reply_done.png")      # "hello!": happy, a heart
 
+    press(r, "a")
+    pick(r, 0, 2)                               # "my name is tom"
+    press(r, "a")
+    wait_ready(r)
     press(r, "up")
     r.screenshot(SHOTS / "history.png")
     press(r, "down")

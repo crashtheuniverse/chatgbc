@@ -211,11 +211,11 @@ BAND_W, BAND_H = 6, 3                 # tiles
 def mood_band(word, symbol):
     img = canvas(BAND_W * 8, BAND_H * 8)
     sw = len(symbol[0])
-    art(img, (BAND_W * 8 - sw) // 2, 2, symbol, KEY)
+    art(img, (BAND_W * 8 - sw) // 2, 1, symbol, KEY)
     width = len(word) * 6 - 1
     x = (BAND_W * 8 - width) // 2
     for ch in word:
-        art(img, x, 15, TINY[ch], KEY)
+        art(img, x, 13, TINY[ch], KEY)
         x += 6
     return img
 

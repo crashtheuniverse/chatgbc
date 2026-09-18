@@ -9,6 +9,9 @@
 ; It is drawn in palette 1 - the inverse of palette 0, and the same attribute
 ; trick the keyboard cursor uses. Two palettes is all this ROM has ever needed.
 
+; The Rei build shows no status bar, and assembles none of this.
+IF !DEF(REI_UI)
+
 INCLUDE "hardware.inc"
 INCLUDE "chatgbc.inc"
 
@@ -200,3 +203,5 @@ Win_PutDec32Num:
 sWinCyc:  db "CYC/TOK", 0
 sWinTok:  db "TOK", 0
 sWinBack: db "SEL=MENU", 0
+
+ENDC

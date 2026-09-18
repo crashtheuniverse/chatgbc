@@ -90,7 +90,7 @@ def test_splash_then_start(talk):
     assert r.read("wReady")[0] == 0
     r.pyboy.tick(120, False)
     assert ui.row_text(r, 11).strip() == "PRESS START", "the splash waits for START"
-    ui.press(r, "start", after=30)
+    ui.press(r, "start", after=60)
     m = ui.tilemap(r)
     assert m[0][0] == ART["T_FR_TL"] and m[17][19] == ART["T_FR_BR"]
     assert ui.row_text(r, 0, 8, 11) == "REI"

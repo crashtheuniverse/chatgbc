@@ -50,6 +50,9 @@ wRng::      db
 
 SECTION "Keyboard code", ROM0
 
+; The Rei build keeps Joy_Read and the pad state and nothing else: its keyboard
+; is src/app/rei_input.asm, in the UI bank.
+IF !DEF(REI_UI)
 ; The last cell of the third row is a real space - the prompt is a sentence, so
 ; a keyboard without one can only ever type a single word. Kb_Draw shows it as
 ; an underscore, since a blank cell would look like a hole in the grid.
@@ -63,6 +66,8 @@ KbUpper:
     db "JKLMNOPQR"
     db "STUVWXYZ "
     db ".,!?'-;:\""
+
+ENDC
 
 ; Reads the pad and leaves newly-pressed buttons in wJoyNew.
 Joy_Read::
@@ -93,6 +98,8 @@ ENDR
     ld a, P1F_GET_NONE
     ldh [rJOYP], a
     ret
+
+IF !DEF(REI_UI)
 
 ; hl = the active layout table.
 Kb_Layout:
@@ -434,3 +441,5 @@ sP5: db "The cat saw a", 0
 sP6: db "Anna wanted to", 0
 sP7: db "There was a tiny", 0
 sKbHelp:    db "SELECT abc/ABC", $0A, "A ADD    B DEL", $0A, "START GENERATE", 0
+
+ENDC

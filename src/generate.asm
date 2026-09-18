@@ -225,8 +225,9 @@ ENDC
     inc a
     ld [wGenCount], a
 :
+IF !DEF(REI_UI)                     ; Rei has no status bar to keep current, and
+                                    ; gives whole answers: SELECT cannot cut one
     call StatusWin_Update           ; cycles and count, both current
-IF !DEF(REI_UI)                     ; Rei gives whole answers: SELECT cannot cut one
     call Joy_Read
     ld a, [wJoyNew]
     and KB_SELECT
