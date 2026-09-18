@@ -1,6 +1,7 @@
 ; What the player says to Rei: the bottom half of the screen.
 ;
-; Two ways in, SELECT switches between them:
+; Two ways in; SELECT goes from the list to the keyboard, and from the keyboard
+; to the world (src/app/rei_world.asm), which comes back to the list:
 ;   the list      three prompts from a pool of nine. UP/DOWN pick, LEFT/RIGHT
 ;                 turn the page, A sends.
 ;   the keyboard  four rows of nine keys at a two-tile pitch. The d-pad moves,
@@ -13,6 +14,9 @@
 ; the top row of keys) pages her pane to the reply before, DOWN off the bottom
 ; to the one after (src/app/rei_history.asm). START opens the conversation log
 ; (src/app/rei_log.asm) and comes back to this screen as it was.
+;
+; Left alone for twenty seconds she wanders off to the world by herself; any
+; button there brings this screen back as it was, typed text and all.
 ;
 ; The cursor is a palette, not a tile: the cell (or the list row) under it gets
 ; PAL_PICK in the attribute map. A redraw is two VBlanks - the keys' rectangle,
@@ -44,6 +48,8 @@ wReiKey::     db                    ; the keyboard cursor, row * 9 + column
 wReiTextLen:: db
 wReiText::    ds REI_TEXT_MAX       ; what has been typed
 wReiCaret:    db                    ; the prompt row shows a caret
+wReiGoWorld:: db                    ; ReiUi_Input returned for the world, not to send
+wReiIdle::    dw                    ; frames since a button was last down
 
 SECTION "Rei input", ROMX, BANK[REI_BANK]
 
@@ -75,7 +81,7 @@ sReiHintMore:  db T_ARROW_L + FONT_FIRST, T_ARROW_R + FONT_FIRST, "more", 0
 sReiListTitle: db "SAY", 0
 sReiKeysTitle: db "KEYS", 0
 sReiToKeys:    db "SEL:keys", 0
-sReiToList:    db "SEL:list", 0
+sReiToWorld:   db "SEL:world", 0
 sReiToLog:     db "START:log", 0
 
 ; hl = the chosen prompt's text.
@@ -215,8 +221,8 @@ ReiIn_DrawKeys:
     ld b, KEYS_FX + 2
     ld c, KEYS_FY
     call Rei_Print
-    ld hl, sReiToList
-    ld b, KEYS_FX + KEYS_FW - 10
+    ld hl, sReiToWorld
+    ld b, KEYS_FX + KEYS_FW - 11
     ld c, KEYS_FY
     call Rei_Print
     ld b, IN_KEY_X
@@ -331,6 +337,11 @@ ReiIn_Refresh::
     pop af
     jp ReiIn_Attrs
 
+; Back from the world: the screen is as it was left, so nothing is redrawn and
+; nothing typed is lost.
+ReiUi_Resume::
+    jp ReiUi_Input.resume
+
 ; The INPUT state. Returns with the message in wPromptText / wPromptLen, still
 ; showing on the prompt row, and already in the log.
 ReiUi_Input::
@@ -341,23 +352,57 @@ ReiUi_Input::
 .redraw
     ld a, 1
     call ReiIn_Refresh
+.resume
+    xor a
+    ld [wReiGoWorld], a
+.awake
+    xor a
+    ld [wReiIdle + 0], a
+    ld [wReiIdle + 1], a
 .loop
     call Rei_IdleFrame
     or a
-    jr z, .loop
+    jr nz, .pressed
+    ld a, [wJoyHeld]
+    or a
+    jr nz, .awake
+    ld hl, wReiIdle                 ; nobody there: after a while she wanders off
+    inc [hl]
+    jr nz, :+
+    inc hl
+    inc [hl]
+:   ld a, [wReiIdle + 0]
+    cp LOW(REI_WANDERS)
+    jr nz, .loop
+    ld a, [wReiIdle + 1]
+    cp HIGH(REI_WANDERS)
+    jr nz, .loop
+.toWorld
+    ld a, 1
+    ld [wReiGoWorld], a
+    ret
+.pressed
     ld b, a
+    xor a
+    ld [wReiIdle + 0], a
+    ld [wReiIdle + 1], a
+    ld a, b
     and KB_START
     jr z, :+
     call ReiLog_Run                 ; comes back on SELECT, this screen untouched
-    jr .loop
+    jr .awake
 :   ld a, b
     and KB_SELECT
-    jr z, :+
-    ld a, [wReiMode]
+    jr z, .notSelect
+    ld a, [wReiMode]                ; list -> keys -> world -> list
     xor 1
     ld [wReiMode], a
-    jr .redraw
-:   ld a, [wReiMode]
+    jr nz, .redraw
+    ld a, 1                         ; from the keys: the list drawn now, to come
+    call ReiIn_Refresh              ; back to, and off to the world
+    jr .toWorld
+.notSelect
+    ld a, [wReiMode]
     or a
     jr nz, .keyboard
 
@@ -386,7 +431,7 @@ ReiUi_Input::
     inc a
 .picked
     ld [wReiPick], a
-    jr .redraw
+    jp .redraw
 .turn                               ; the pages go round
     ld a, b
     and KB_LEFT
@@ -404,14 +449,14 @@ ReiUi_Input::
     xor a
 .turned
     ld [wReiPage], a
-    jr .redraw
+    jp .redraw
 
 .older
     call ReiHist_Older
-    jr .loop
+    jp .awake
 .newer
     call ReiHist_Newer
-    jr .loop
+    jp .awake
 
 .sendPrompt
     call ReiIn_Prompt

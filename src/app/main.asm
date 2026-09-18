@@ -30,6 +30,10 @@ IF DEF(REI_UI)
 .rei
     REI_FAR ReiUi_Input             ; list or keyboard -> wPromptText; also the
                                     ; history paging and the log screen
+.reiBack
+    ld a, [wReiGoWorld]             ; or she has gone to the beach
+    or a
+    jr nz, .world
     call Chat_Stage
     REI_FAR ReiUi_ReplyBegin        ; her pane cleared, the keys put away
 
@@ -52,6 +56,45 @@ IF DEF(REI_UI)
     call MeasureSelftest            ; last, so the pass cannot overwrite the buffer
     REI_FAR ReiUi_After             ; mood, history, log, the battery save; wReady
     jp .rei
+
+; The world. The scene is the VBlank handler's (src/app/rei_walk.asm); this
+; context sleeps until a button sends it back to the chat or the timer says it
+; is time for a thought - and a thought is the chat's own sequence, stage,
+; encode, generate, on a conversation that ReiWorld_Muse has put aside and
+; ReiWorld_Settle puts back.
+.world
+    REI_FAR ReiWorld_Enter          ; returns with interrupts on
+.worldIdle
+    ld a, [wWorldQuit]
+    or a
+    jr nz, .worldLeave
+    ld a, [wWorldThink]
+    or a
+    jr nz, .worldThink
+    halt                            ; until the next VBlank
+    jr .worldIdle
+.worldThink
+    REI_FAR ReiWorld_Muse           ; the state aside, a hidden line staged
+    call Chat_Stage
+    ld a, CHAT_REPLY_MAX
+    ld [wGenSteps], a
+    call Type_Enable                ; into the thought box
+    ld a, [wChatStarted]
+    or a
+    jr nz, .worldCont
+    call Encode
+    call Generate
+    jr .worldSettle
+.worldCont
+    call EncodeCont
+    call Generate_Cont
+.worldSettle
+    REI_FAR ReiWorld_Settle         ; typed out, left up a while, cleared; the state back
+    jr .worldIdle
+.worldLeave
+    REI_FAR ReiWorld_Leave          ; interrupts off, the chat screen as it was
+    REI_FAR ReiUi_Resume            ; and the input loop where it left off
+    jp .reiBack
 
 ELSE
 

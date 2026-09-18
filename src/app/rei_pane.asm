@@ -17,7 +17,11 @@
 ; so far move down to the next row. A row never starts with a space. When the
 ; seventh row is full the pane scrolls up one row inside its frame.
 ;
-; Cost: about 350 bytes of ROM0, 170 bytes of WRAM0.
+; The writer's geometry is in WRAM (wReiPaneOrg, wReiPaneW, wReiPaneH), because
+; in the world the same writer fills the thought box (src/app/rei_walk.asm).
+; Rei_PaneBlit is the chat's copy; the world has its own.
+;
+; Cost: about 420 bytes of ROM0, 174 bytes of WRAM0.
 
 IF DEF(REI_UI)
 
@@ -28,7 +32,11 @@ INCLUDE "app/rei.inc"
 SECTION "Rei pane state", WRAM0
 wReiCol::       db                  ; where the next character lands
 wReiRow::       db
-wReiPaneDirty:: db                  ; the shadow pane is ahead of VRAM
+wReiPaneOrg::   dw                  ; the pane's first cell in its shadow (stride CON_W),
+wReiPaneW::     db                  ; its width and its height: her pane in the chat,
+wReiPaneH::     db                  ; the thought box in the world
+wReiPaneDirty:: db                  ; the shadow is ahead of VRAM: 2 = by the one cell
+wReiCell::      dw                  ; at wReiCell, 1 = by more than that
 wReiFaceDirty:: db                  ; wReiFaceSel is ahead of VRAM
 wReiFaceSel::   db                  ; FSEL_*: which of wReiFaces to show
 wReiTalking::   db                  ; characters move her mouth
@@ -42,13 +50,15 @@ SECTION "Rei pane code", ROM0
 ; hl = the shadow address of the start of the current pane row.
 Rei_PaneRowAddr:
     ld a, [wReiRow]
-    add a, PANE_Y
     ld l, a
     ld h, 0
 REPT 5
     add hl, hl                      ; row * CON_W
 ENDR
-    ld de, wConsole + PANE_X
+    ld a, [wReiPaneOrg + 0]
+    ld e, a
+    ld a, [wReiPaneOrg + 1]
+    ld d, a
     add hl, de
     ret
 
@@ -78,7 +88,8 @@ Rei_PanePut::
     ret z
     jr .put
 .inRow
-    cp PANE_W
+    ld hl, wReiPaneW
+    cp [hl]
     jr c, .put
     ld a, b                         ; the row is full. A space there is the
     cp ' '                          ; line break itself: the word ended with
@@ -95,11 +106,19 @@ Rei_PanePut::
     ld a, b
     sub FONT_FIRST
     ld [hl], a
+    ld a, l
+    ld [wReiCell + 0], a
+    ld a, h
+    ld [wReiCell + 1], a
     ld a, e
     inc a
     ld [wReiCol], a
-    ld a, 1
-    ld [wReiPaneDirty], a
+    ld a, [wReiPaneDirty]           ; one cell, unless more is already waiting
+    or a
+    ld a, 2
+    jr z, :+
+    dec a
+:   ld [wReiPaneDirty], a
 
     ld a, [wReiTalking]             ; a letter moves her mouth, a space rests it
     or a
@@ -121,7 +140,11 @@ Rei_PanePut::
 ; the unfinished word down to it, unless the word is the whole row.
 Rei_PaneWrap:
     call Rei_PaneRowAddr
-    ld de, PANE_W - 1
+    ld a, [wReiPaneW]
+    ld b, a                         ; b = the width
+    dec a
+    ld e, a
+    ld d, 0
     add hl, de                      ; the last cell of the row
     ld c, 0                         ; c = letters after the last space
 .scan
@@ -131,7 +154,7 @@ Rei_PaneWrap:
     dec hl
     inc c
     ld a, c
-    cp PANE_W
+    cp b
     jr c, .scan
     ld c, 0                         ; no space at all: break where it is
 .found
@@ -145,8 +168,9 @@ Rei_PaneWrap:
     call Rei_PaneRowAddr            ; hl = the new row; the old one is CON_W back
     ld d, h
     ld e, l
-    ld a, PANE_W - CON_W
-    sub c                           ; -(CON_W - PANE_W + c): the word's start
+    ld a, [wReiPaneW]
+    sub CON_W
+    sub c                           ; -(CON_W - width + c): the word's start
     ld l, a
     ld h, $FF
     add hl, de
@@ -164,43 +188,68 @@ Rei_PaneWrap:
 Rei_PaneNewline:
     xor a
     ld [wReiCol], a
+    inc a
+    ld [wReiPaneDirty], a           ; a wrap or a scroll moves more than a cell
+    ld a, [wReiPaneH]
+    ld b, a
     ld a, [wReiRow]
     inc a
-    cp PANE_H
+    cp b
     jr nc, .scroll
     ld [wReiRow], a
     ret
 .scroll
-    ld hl, wConsole + PANE_OFF + CON_W
-    ld de, wConsole + PANE_OFF
-    ld b, PANE_H - 1
+    ld a, [wReiPaneOrg + 0]
+    ld e, a
+    ld a, [wReiPaneOrg + 1]
+    ld d, a                         ; de = row 0, hl = row 1
+    ld hl, CON_W
+    add hl, de
+    dec b                           ; rows to move
 .row
-    ld c, PANE_W
+    ld a, [wReiPaneW]
+    ld c, a
 .cell
     ld a, [hl+]
     ld [de], a
     inc de
     dec c
     jr nz, .cell
-    ld a, CON_W - PANE_W
+    ld a, [wReiPaneW]
+    cpl
+    add a, CON_W + 1                ; CON_W - width
+    ld c, a
     add a, l
     ld l, a
     jr nc, :+
     inc h
-:   ld a, CON_W - PANE_W
+:   ld a, c
     add a, e
     ld e, a
     jr nc, :+
     inc d
 :   dec b
     jr nz, .row
-    ld b, PANE_W                    ; de = the last row: blank it
+    ld a, [wReiPaneW]               ; de = the last row: blank it
+    ld b, a
     xor a
 .blank
     ld [de], a
     inc de
     dec b
     jr nz, .blank
+    ret
+
+; The writer pointed at her pane on the chat screen. No VRAM.
+Rei_PaneChat::
+    ld a, LOW(wConsole + PANE_OFF)
+    ld [wReiPaneOrg + 0], a
+    ld a, HIGH(wConsole + PANE_OFF)
+    ld [wReiPaneOrg + 1], a
+    ld a, PANE_W
+    ld [wReiPaneW], a
+    ld a, PANE_H
+    ld [wReiPaneH], a
     ret
 
 ; Copies the pane from the shadow to the BG map. VBlank only.

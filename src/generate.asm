@@ -225,6 +225,13 @@ ENDC
     inc a
     ld [wGenCount], a
 :
+IF DEF(REI_UI)
+    ; In the world a button abandons her thought: this token was allowed to
+    ; finish, the rest is dropped. wWorldQuit is never set in the chat.
+    ld a, [wWorldQuit]
+    or a
+    ret nz
+ENDC
 IF !DEF(REI_UI)                     ; Rei has no status bar to keep current, and
                                     ; gives whole answers: SELECT cannot cut one
     call StatusWin_Update           ; cycles and count, both current

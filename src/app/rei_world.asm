@@ -1,0 +1,452 @@
+; The world: a beach Rei walks along, and what she thinks there.
+;
+; SELECT past the keyboard, or twenty idle seconds in the chat, and the dialogue
+; bars are gone: the top twelve rows are the beach (the BG layer, scrolled by
+; SCX round a 32-tile strip), she is a sprite on the sand, and the bottom six
+; rows are a thought box on the window layer, empty most of the time. Any
+; button goes back to the chat exactly as it was: the chat screen is BG map
+; $9800 and its tiles are VRAM bank 0, and the world never touches either (the
+; world is map $9C00 and tile bank 1), so coming and going is eight palettes
+; and LCDC, inside one VBlank.
+;
+; The scene runs from the VBlank handler (src/app/rei_walk.asm). This file is
+; the main context's side: the way in and out, and the thoughts.
+;
+; A thought, every 20-37 s (the first after 8): the conversation's state - wH,
+; wAbsPos, wChatStarted, the same set the battery save keeps - is copied aside;
+; a hidden line from the pool below is staged as if the player had said it; the
+; model answers into the thought box through the same teletype and the same
+; writer as the chat; the answer stays six seconds; the state is put back.
+; Every word in the box is the model's. Nothing of a thought reaches the log,
+; her reply history or the save, and the chat afterwards is bit for bit the
+; chat it would have been (py/tests/test_rei_world.py).
+;
+; THE POOL IS A STAND-IN. This checkpoint was never trained to describe what it
+; sees, so for now a thought is her answer to a line she does know, chosen with
+; the twin (py/rei_muse.py) for answers that read as musing rather than as a
+; reply to somebody. When the observation corpus exists, the hidden prompt will
+; be built from what she is near - which is why each thought already records
+; the nearest object (wWorldNear, an index into ReiWorldObjects and its words),
+; though nothing shows it and the model is not told.
+;
+; Cost: nothing in ROM0 here (the loop is 70 bytes of src/app/main.asm); about
+; 700 bytes of the UI bank and 2.3 KB of beach; 4 bytes of WRAM0; 194 bytes of
+; WRAM bank 3 for the snapshot.
+
+IF DEF(REI_UI)
+
+INCLUDE "hardware.inc"
+INCLUDE "chatgbc.inc"
+INCLUDE "model.inc"
+INCLUDE "app/rei.inc"
+INCLUDE "rei_art.inc"
+
+SECTION "Rei world thoughts", WRAM0
+wWorldNear::  db                    ; NEAR_*: what she was nearest when she thought
+wWorldMuse::  db                    ; which line of the pool it was
+wWorldSnap:   db                    ; the snapshot holds the conversation: put it back
+wWorldBeen:   db                    ; she has a place on the beach already
+
+SECTION "Rei world snapshot", WRAMX, BANK[REI_SNAP_BANK]
+wSnapH:       ds N_LAYERS * DIM
+wSnapAbsPos:  db
+wSnapStarted: db
+
+SECTION "Rei world", ROMX, BANK[REI_BANK]
+
+DEF REI_WORLD_DATA EQU 1
+INCLUDE "rei_world_art.inc"
+
+DEF MUSES EQU 9
+; What she says to each (py/rei_muse.py: fresh state / after a chat):
+;   "do you dream"
+;       when it is quiet i rest. maybe i dream.
+;   "what do you think"
+;       a little! small thoughts for a small head.
+;   "where do you live"
+;       i am in here, in the cartridge. it is small but it is mine.
+;   "the sun is warm"
+;       i like it when it is warm.
+;   "what makes you happy"
+;       i like it when it is windy.  /  i do not know. my nights are very still.
+;   "are you sad"
+;       it is ok to be sad. it will pass.
+;   "what do you like"
+;       my favourite animal is mouse.  /  my favourite game is hide and seek.
+;   "what is your favourite colour"
+;       my favourite colour is black.
+;   "tell me a story"
+;       once a pig lost a bell at the park. i helped it look.  /  once a pig lost a ball at the park. i helped it look.
+ReiMuses:
+    dw .m0, .m1, .m2, .m3, .m4, .m5, .m6, .m7, .m8
+.m0: db "do you dream", 0
+.m1: db "what do you think", 0
+.m2: db "where do you live", 0
+.m3: db "the sun is warm", 0
+.m4: db "what makes you happy", 0
+.m5: db "are you sad", 0
+.m6: db "what do you like", 0
+.m7: db "what is your favourite colour", 0
+.m8: db "tell me a story", 0
+
+; Once, with the LCD off (ReiScr_Main): the beach's tiles into VRAM bank 1, the
+; strip into the second map, her palette, and an OAM with nothing in it.
+ReiWorld_Load::
+    ld a, 1
+    ldh [rVBK], a
+    ld hl, ReiWorldTiles
+    ld de, TILEBLOCK0
+    ld bc, WORLD_TILES * 16
+    call CopyBytes
+    ld hl, ReiWorldAttr
+    ld de, TILEMAP1 + WORLD_MAP_Y * CON_W
+    ld bc, WORLD_W * WORLD_H
+    call CopyBytes
+    xor a
+    ldh [rVBK], a
+    ld hl, ReiWorldMap
+    ld de, TILEMAP1 + WORLD_MAP_Y * CON_W
+    ld bc, WORLD_W * WORLD_H
+    call CopyBytes
+
+    ld a, OBPI_AUTOINC
+    ldh [rOBPI], a
+    ld hl, ReiPalObj
+    ld b, 8
+.pal
+    ld a, [hl+]
+    ldh [rOBPD], a
+    dec b
+    jr nz, .pal
+    ld hl, OAMRAM
+    ld b, OAM_SIZE
+    xor a
+.oam
+    ld [hl+], a
+    dec b
+    jr nz, .oam
+
+    ld a, [wWorldBeen]              ; where she starts, the first time
+    or a
+    ret nz
+    inc a
+    ld [wWorldBeen], a
+    ld a, 112
+    ld [wWorldX], a
+    ld a, 40
+    ld [wWorldTimer], a
+    ld a, [wWorldRng]               ; a seed the harness set stays set
+    or a
+    ret nz
+    ldh a, [rDIV]
+    or 1
+    ld [wWorldRng], a
+    ret
+
+; hl = a row of the second map, b / c / d = its left, middle and right tiles.
+ReiWorld_BoxRow:
+    ld [hl], b
+    inc hl
+    ld e, CON_VIS_W - 2
+    ld a, c
+.mid
+    ld [hl+], a
+    dec e
+    jr nz, .mid
+    ld [hl], d
+    ld de, CON_W - CON_VIS_W + 1
+    add hl, de
+    ret
+
+; The thought box's shadow blank, the writer at its first cell. The handler
+; copies it out a row a frame.
+ReiWorld_ClearBox:
+    ld hl, wWorldBox
+    ld b, THINK_H * CON_W
+    xor a
+.zero
+    ld [hl+], a
+    dec b
+    jr nz, .zero
+    ld [wReiCol], a
+    ld [wReiRow], a
+    ld [wReiReplyLen], a
+    inc a
+    ld [wReiPaneDirty], a
+    ret
+
+; Chat -> world. Returns with interrupts on and the handler running the scene.
+ReiWorld_Enter::
+    call Console_WaitVBlank         ; the box, while the chat is still showing:
+    ld hl, TILEMAP1                 ; the log screen may have been over these rows
+    ld b, T_FR_TL
+    ld c, T_FR_T
+    ld d, T_FR_TR
+    call ReiWorld_BoxRow
+    ld a, T_THINK                   ; its title is a glyph, not a word
+    ld [TILEMAP1 + 2], a
+    ld a, THINK_H
+.middle
+    push af
+    ld b, T_FR_L
+    ld c, 0
+    ld d, T_FR_R
+    call ReiWorld_BoxRow
+    pop af
+    dec a
+    jr nz, .middle
+    ld b, T_FR_BL
+    ld c, T_FR_B
+    ld d, T_FR_BR
+    call ReiWorld_BoxRow
+
+    call Console_WaitVBlank         ; and its attributes: palette 0, tile bank 0
+    ld a, 1
+    ldh [rVBK], a
+    ld hl, TILEMAP1
+    ld c, THINK_H + 2
+.attrRow
+    ld b, CON_VIS_W
+    xor a
+.attrCell
+    ld [hl+], a
+    dec b
+    jr nz, .attrCell
+    ld de, CON_W - CON_VIS_W
+    add hl, de
+    dec c
+    jr nz, .attrRow
+    xor a
+    ldh [rVBK], a
+
+    xor a
+    ld [wWorldQuit], a
+    ld [wWorldThink], a
+    ld [wWorldThinking], a
+    ld [wWorldRows], a
+    ld [wWorldLinger + 0], a
+    ld [wWorldLinger + 1], a
+    ld [wTypeOn], a
+    ld hl, wWorldOam                ; nothing of her until the first frame places her
+    ld b, 8
+.noSprite
+    ld [hl+], a
+    dec b
+    jr nz, .noSprite
+    ld a, LOW(THINK_FIRST)
+    ld [wWorldThinkT + 0], a
+    ld a, HIGH(THINK_FIRST)
+    ld [wWorldThinkT + 1], a
+    ld a, LOW(wWorldBox + THINK_X)  ; the writer: the thought box now
+    ld [wReiPaneOrg + 0], a
+    ld a, HIGH(wWorldBox + THINK_X)
+    ld [wReiPaneOrg + 1], a
+    ld a, THINK_W
+    ld [wReiPaneW], a
+    ld a, THINK_H
+    ld [wReiPaneH], a
+    call ReiWorld_ClearBox
+    xor a
+    ld [wReiPaneDirty], a           ; the box was just drawn empty
+    ld a, [wWorldX]                 ; the camera, with her in the middle
+    sub (CAM_LEFT + CAM_RIGHT) / 2
+    ld [wWorldScx], a
+
+    call Console_WaitVBlank         ; the switch: palettes, scroll, window, LCDC
+    ld a, [wWorldScx]
+    ldh [rSCX], a
+    ld hl, ReiPalWorld
+    call ReiScr_LoadPals
+    ld a, WORLD_SCY
+    ldh [rSCY], a
+    ld a, WORLD_WIN_Y
+    ldh [rWY], a
+    ld a, 7
+    ldh [rWX], a
+    ld a, WORLD_LCDC
+    ldh [rLCDC], a
+
+    ld a, 1
+    ld [wWorldOn], a
+    xor a
+    ldh [rIF], a
+    ld a, IE_VBLANK
+    ldh [rIE], a
+    ei
+    ret
+
+; World -> chat, exactly as it was left. Whatever she was thinking is dropped.
+ReiWorld_Leave::
+    di
+    xor a
+    ld [wWorldOn], a
+    ld [wTypeOn], a
+    ld [wWorldThinking], a
+    call ReiWorld_Restore
+    call Console_WaitVBlank
+    ld hl, ReiPalMain
+    call ReiScr_LoadPals
+    xor a
+    ldh [rSCX], a
+    ldh [rSCY], a
+    ld a, REI_LCDC
+    ldh [rLCDC], a
+    call Rei_PaneChat               ; the writer: her pane again
+    xor a
+    ld [wReiPaneDirty], a
+    ld [wReiTalking], a
+    ld [wWorldQuit], a
+    ret
+
+; The conversation, as it was before she thought.
+ReiWorld_Restore:
+    ld a, [wWorldSnap]
+    or a
+    ret z
+    ld a, REI_SNAP_BANK
+    ldh [rSVBK], a
+    ld hl, wSnapH
+    ld de, wH
+    ld bc, N_LAYERS * DIM
+    call CopyBytes
+    ld a, [wSnapAbsPos]
+    ld [wAbsPos], a
+    ld a, [wSnapStarted]
+    ld [wChatStarted], a
+    ld a, 1
+    ldh [rSVBK], a
+    xor a
+    ld [wWorldSnap], a
+    ret
+
+; The timer ran out. Puts the conversation aside and stages a hidden line in
+; wPromptText, as if the player had sent it. Interrupts stay on throughout.
+ReiWorld_Muse::
+    ld a, 1
+    ld [wWorldThinking], a
+    xor a
+    ld [wWorldThink], a
+
+    ld a, REI_SNAP_BANK
+    ldh [rSVBK], a
+    ld hl, wH
+    ld de, wSnapH
+    ld bc, N_LAYERS * DIM
+    call CopyBytes
+    ld a, [wAbsPos]
+    ld [wSnapAbsPos], a
+    ld a, [wChatStarted]
+    ld [wSnapStarted], a
+    ld a, 1
+    ldh [rSVBK], a
+    ld [wWorldSnap], a
+
+    ld hl, ReiWorldObjects          ; what is she nearest? (for the retrain)
+    ld b, WORLD_OBJECTS
+    ld c, 0
+    ld d, $FF                       ; d = the least distance so far, e = whose
+.object
+    ld a, [wWorldX]
+    add a, 8                        ; her middle
+    sub [hl]
+    bit 7, a                        ; the strip is a ring: the short way round
+    jr z, :+
+    cpl
+    inc a
+:   cp d
+    jr nc, :+
+    ld d, a
+    ld e, c
+:   ld a, [hl+]                     ; past the x and the words
+    or a
+    jr nz, :-
+    inc c
+    dec b
+    jr nz, .object
+    ld a, e
+    ld [wWorldNear], a
+
+    di                              ; the generator is the handler's
+    call World_Rand
+    ei
+    and $0F
+    cp MUSES
+    jr c, :+
+    sub MUSES
+:   ld [wWorldMuse], a
+    add a, a
+    ld e, a
+    ld d, 0
+    ld hl, ReiMuses
+    add hl, de
+    ld a, [hl+]
+    ld h, [hl]
+    ld l, a
+    ld de, wPromptText
+    ld c, 0
+.copy
+    ld a, [hl+]
+    or a
+    jr z, .staged
+    ld [de], a
+    inc de
+    inc c
+    jr .copy
+.staged
+    ld a, c
+    ld [wPromptLen], a
+    jp ReiWorld_ClearBox
+
+; The model has finished (or was interrupted). Lets the teletype finish, leaves
+; the thought up for a while, clears it, and puts the conversation back. A
+; button cuts all of it short.
+ReiWorld_Settle::
+    ei                              ; the profiler leaves them off
+.typing
+    ld a, [wWorldQuit]
+    or a
+    jr nz, .over
+    call Type_Idle
+    jr z, .typed
+    halt
+    jr .typing
+.typed
+    ld a, LOW(THINK_STAYS)
+    ld [wWorldLinger + 0], a
+    ld a, HIGH(THINK_STAYS)
+    ld [wWorldLinger + 1], a
+.staying
+    ld a, [wWorldQuit]
+    or a
+    jr nz, .over
+    ld hl, wWorldLinger
+    ld a, [hl+]
+    or [hl]
+    jr z, .over
+    halt
+    jr .staying
+.over
+    xor a
+    ld [wTypeOn], a
+    call ReiWorld_ClearBox
+    call ReiWorld_Restore
+    di
+    call World_Rand                 ; the next one: 20 s and up to 17 more
+    ei
+    ld l, a
+    ld h, 0
+    add hl, hl
+    add hl, hl
+    ld de, THINK_EVERY
+    add hl, de
+    ld a, l
+    ld [wWorldThinkT + 0], a
+    ld a, h
+    ld [wWorldThinkT + 1], a
+    xor a
+    ld [wWorldThinking], a
+    ret
+
+ASSERT MUSES <= 16 && PROMPT_MAX >= 29 + 4, "the longest line, staged"
+
+ENDC

@@ -274,7 +274,9 @@ ReiScr_Main::
     call ReiScr_LoadTiles
     ld hl, ReiPalMain
     call ReiScr_LoadPals
+    call ReiWorld_Load              ; the beach, in the other tile bank and the other map
     call ReiScr_Clear
+    call Rei_PaneChat
 
     xor a                           ; PAL_INK everywhere first
     ld b, a

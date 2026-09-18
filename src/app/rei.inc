@@ -7,6 +7,9 @@
 ;   x 0-19  y 12-17  the keys: a 20 x 6 frame around 4 rows - the canned
 ;                    prompts or the keyboard
 ;
+; That is the chat. SELECT past the keyboard (or twenty idle seconds) goes to
+; the world: a beach she walks along, with a thought box where the keys were.
+;
 ; Only the Rei build assembles any of this: build.ps1 -Rei defines REI_UI.
 
 IF !DEF(REI_INC)
@@ -76,6 +79,33 @@ DEF MOOD_CURIOUS EQU 2
 DEF MOOD_SAD     EQU 3
 
 DEF REI_LCDC EQU LCDC_ON | LCDC_BG_ON | LCDC_BLOCK01 | LCDC_BG_9800
+
+; --- The world (src/app/rei_world.asm, rei_walk.asm) -------------------------
+; The second BG map, $9C00, holds both halves of the world screen: the thought
+; box in rows 0-5, which the window shows at the bottom of the screen, and the
+; beach strip in rows 20-31, which the BG shows at the top with SCY = 160. The
+; log screen shares the map but only ever writes rows 0-17, so the strip is
+; drawn once; the box is redrawn on the way in.
+DEF OAMRAM       EQU $FE00
+DEF WORLD_MAP_Y  EQU 20             ; the strip's first row in the map
+DEF WORLD_SCY    EQU WORLD_MAP_Y * 8
+DEF WORLD_WIN_Y  EQU 96             ; the thought box: the bottom six rows
+DEF WORLD_REI_Y  EQU 72             ; the top of her sprite; her feet are 16 lower,
+                                    ; on the two rows of sand the art keeps clear
+DEF CAM_LEFT     EQU 56             ; the camera keeps her left edge between these
+DEF CAM_RIGHT    EQU 88
+DEF THINK_X      EQU 1              ; the text inside the box, in window map cells
+DEF THINK_Y      EQU 1
+DEF THINK_W      EQU 18
+DEF THINK_H      EQU 4
+DEF THINK_FIRST  EQU 8 * 60         ; frames to the first thought of a visit,
+DEF THINK_EVERY  EQU 20 * 60        ; and to each one after: this much and up to
+                                    ; 17 s more (1,020 frames), at random
+DEF THINK_STAYS  EQU 6 * 60         ; a finished thought stays up this long
+DEF REI_WANDERS  EQU 20 * 60        ; frames of an idle chat before she wanders off
+DEF REI_SNAP_BANK EQU 3             ; WRAM bank of the conversation's snapshot
+
+DEF WORLD_LCDC EQU LCDC_ON | LCDC_BG_ON | LCDC_BLOCK01 | LCDC_BG_9C00 | LCDC_WIN_ON | LCDC_WIN_9C00 | LCDC_OBJ_ON | LCDC_OBJ_16
 
 ; Maps the UI bank and calls into it. Only from ROM0.
 MACRO REI_FAR

@@ -14,7 +14,7 @@
 ; At the end of a reply the queue is played out at a brisk pace rather than
 ; dumped, so her last words are typed like the rest.
 ;
-; Cost: about 220 bytes of ROM0, 68 bytes of WRAM0 - less than the teletype it
+; Cost: about 245 bytes of ROM0, 68 bytes of WRAM0 - less than the teletype it
 ; replaces.
 
 IF DEF(REI_UI)
@@ -92,7 +92,8 @@ Type_Step:
     inc a
     and TYPE_QLEN - 1
     ld [wTypeHead], a
-    ld a, 1
+    ld a, [wWorldOn]                     ; in the world there is no face to move
+    xor 1
     ld [wReiTalking], a                  ; her first letter: the mouth takes over
     ld a, d
     jp Rei_PanePut
@@ -115,6 +116,11 @@ Type_Frame:
     call Rei_FaceBlit
 .tick
     call Rei_BlinkTick                   ; while she thinks; talking stops it
+    ; fall through
+
+; The pacing: counts the frame, and releases a character when it is time.
+; The world's handler (src/app/rei_walk.asm) calls this part alone.
+Type_Tick::
     ld hl, wTypeTick
     dec [hl]
     ret nz
@@ -134,12 +140,17 @@ Type_Frame:
     ld [wTypeTick], a
     jr Type_Step
 
-; The VBlank handler.
+; The VBlank handler. In the chat it is the teletype, and only while she is
+; answering; in the world it is the whole scene, every frame.
 Type_ISR::
     push af
+    ld a, [wWorldOn]
+    or a
+    jr nz, .on
     ld a, [wTypeOn]
     or a
     jr z, .out
+.on
     ldh a, [rLY]
     sub 144                              ; lines 144..147 leave room for a copy
     cp 4
@@ -147,13 +158,27 @@ Type_ISR::
     push bc
     push de
     push hl
+    ld a, [wWorldOn]
+    or a
+    jr nz, .world
     call Type_Frame
+    jr .done
+.world
+    call World_Frame
+.done
     pop hl
     pop de
     pop bc
 .out
     pop af
     reti
+
+; Z set if nothing is waiting to be typed.
+Type_Idle::
+    ld a, [wTypeHead]
+    ld hl, wTypeTail
+    cp [hl]
+    ret
 
 ; The end of a reply, interrupts off: plays out what is still queued, a
 ; character every TYPE_FINISH frames, then the last VRAM jobs, and switches off.
