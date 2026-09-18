@@ -24,9 +24,12 @@ IF DEF(REI_UI)
 ; bank's business (src/app/rei_*.asm); this loop only says when. The model
 ; side is the chat loop's, line for line: stage the turn, encode, generate,
 ; and the stream continues from one exchange to the next.
-    REI_FAR ReiUi_Splash            ; until START; leaves the main screen up
+    REI_FAR ReiUi_Splash            ; the menu: a new conversation, or the saved
+                                    ; one (wH, wAbsPos, wChatStarted restored);
+                                    ; leaves the main screen up
 .rei
-    REI_FAR ReiUi_Input             ; canned prompt or keyboard -> wPromptText
+    REI_FAR ReiUi_Input             ; list or keyboard -> wPromptText; also the
+                                    ; history paging and the log screen
     call Chat_Stage
     REI_FAR ReiUi_ReplyBegin        ; her pane cleared, the keys put away
 
@@ -47,7 +50,7 @@ IF DEF(REI_UI)
 .reiAfter
     call Type_Drain                 ; the tail of the reply, typed out
     call MeasureSelftest            ; last, so the pass cannot overwrite the buffer
-    REI_FAR ReiUi_After             ; mood, history; raises wReady while it waits
+    REI_FAR ReiUi_After             ; mood, history, log, the battery save; wReady
     jp .rei
 
 ELSE
@@ -180,7 +183,8 @@ Chat_Stage:
     ret
 
 SECTION "Chat state", WRAM0
-wChatStarted: db                ; 0 until the first exchange; boot clears WRAM
+wChatStarted:: db               ; 0 until the first exchange; boot clears WRAM.
+                                ; Exported for Rei's battery save.
 
 ELSE
 

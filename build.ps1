@@ -71,7 +71,10 @@ $stem = if ($Rei) { $name + $suffix.Substring(4) } else { "$name$suffix" }
 $rom = Join-Path $build "$stem.gbc"
 & (Join-Path $rgbds 'rgblink.exe') -o $rom -n (Join-Path $build "$stem.sym") -m (Join-Path $build "$stem.map") @objs
 if ($LASTEXITCODE -ne 0) { throw 'rgblink failed' }
-& (Join-Path $rgbds 'rgbfix.exe') -C -m MBC5 -t $title -i CGBX -p 0xFF -v $rom
+# Rei keeps her conversation on the cartridge: MBC5+RAM+BATTERY, one 8 KB bank.
+# The story cartridge has no RAM, and its header does not change.
+[string[]]$mbc = if ($Rei) { @('-m', 'MBC5+RAM+BATTERY', '-r', '2') } else { @('-m', 'MBC5') }
+& (Join-Path $rgbds 'rgbfix.exe') -C $mbc -t $title -i CGBX -p 0xFF -v $rom
 if ($LASTEXITCODE -ne 0) { throw 'rgbfix failed' }
 Write-Host "built $rom ($((Get-Item $rom).Length) bytes)"
 

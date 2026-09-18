@@ -2,19 +2,22 @@
 ;
 ; ReiUi_ReplyBegin clears her pane and puts the keys away while she thinks.
 ; ReiUi_After runs when the reply is complete: it reads her mood, files the
-; reply, raises wReady for the harness, and then lets the player page through
-; her last eight replies - UP for the one before, DOWN for the one after - until
-; A, B or START goes back to talking. A marker in the bottom edge of her frame
-; says which reply is showing: 8/8 is the newest once eight are on file.
+; reply, adds it to the log, counts the exchange, saves, and raises wReady for
+; the harness. Then the input screen comes straight back, her reply still up.
+;
+; Her last eight replies can be paged from the input screen at any time
+; (src/app/rei_input.asm: UP off the top of the list or the keys for the one
+; before, DOWN off the bottom for the one after). A marker in the bottom edge
+; of her frame says which is showing: 8/8 is the newest once eight are on file.
+; Sending a message goes back to the newest.
 ;
 ; A reply is kept as text, not as tiles: a length byte and up to 96 characters,
-; eight slots in a ring in WRAM bank 2. Showing one replays its characters
-; through Rei_PanePut, the same writer the teletype uses, so an old reply wraps
-; and scrolls exactly as it did when she said it. rSVBK is put back to 1 before
-; anything else runs.
+; eight slots in a ring in the save image (WRAM bank 2). Showing one replays its
+; characters through Rei_PanePut, the same writer the teletype uses, so an old
+; reply wraps and scrolls exactly as it did when she said it. rSVBK is put back
+; to 1 before anything else runs.
 ;
-; Cost: nothing in ROM0; about 400 bytes of the UI bank, 3 bytes of WRAM0 and
-; 776 of WRAM bank 2.
+; Cost: nothing in ROM0; about 300 bytes of the UI bank, 3 bytes of WRAM0.
 
 IF DEF(REI_UI)
 
@@ -33,56 +36,52 @@ wReiHistCount:: db                  ; replies on file, up to REI_HIST
 wReiHistNext::  db                  ; the slot the next one goes in
 wReiHistAge::   db                  ; the one showing: 0 = the newest
 
-SECTION "Rei history store", WRAMX, BANK[REI_HIST_BANK]
-wReiHist:: ds REI_HIST * HIST_SLOT
-
 SECTION "Rei history", ROMX, BANK[REI_BANK]
 
 sReiThinking: db "   ", T_DOT + FONT_FIRST, " ", T_DOT + FONT_FIRST, " ", T_DOT + FONT_FIRST, 0
-sReiBack:     db T_ARROW_UP + FONT_FIRST, T_ARROW_DN + FONT_FIRST, "  her words", 0
-sReiTalk:     db "A   talk to her", 0
 
-; The keys' interior blank and unpicked, with up to two lines of help.
-; hl = the first line (row 1) or 0, de = the second (row 2) or 0.
-ReiHist_Panel:
-    push de
-    push hl
+; The marker's cells as plain frame edge, into the shadow.
+ReiHist_NoMark:
+    ld a, T_FR_B
+    ld b, MARK_X
+    ld c, MARK_Y
+    ld d, MARK_W
+    ld e, 1
+    jp Rei_Fill
+
+; Pane and marker, shadow -> screen, in one VBlank.
+ReiHist_Push:
+    call Console_WaitVBlank
+    call Rei_PaneBlit
     xor a
+    ld [wReiPaneDirty], a
+    ld hl, MARK_Y * CON_W + MARK_X
+    ld b, 1
+    ld c, MARK_W
+    jp Rei_Blit
+
+; She is about to answer: an empty pane, no marker, and the keys make way.
+ReiUi_ReplyBegin::
+    xor a
+    ld [wReiHistAge], a             ; whatever was being read, the newest is next
+    call Rei_PaneClear
+    call ReiHist_NoMark
+    call ReiHist_Push
+    xor a                           ; the keys' interior: three dots
     ld b, KEYS_X
     ld c, KEYS_Y
     ld d, KEYS_W
     ld e, KEYS_H
     call Rei_Fill
-    pop hl
-    ld a, h
-    or l
-    jr z, :+
+    ld hl, sReiThinking
     ld b, KEYS_X + 3
     ld c, KEYS_Y + 1
     call Rei_Print
-:   pop hl
-    ld a, h
-    or l
-    jr z, :+
-    ld b, KEYS_X + 3
-    ld c, KEYS_Y + 2
-    call Rei_Print
-:   call Console_WaitVBlank
+    call Console_WaitVBlank
     ld hl, KEYS_Y * CON_W + KEYS_X
     ld b, KEYS_H
     ld c, KEYS_W
     jp Rei_Blit
-
-; She is about to answer: an empty pane, and the keys make way.
-ReiUi_ReplyBegin::
-    call Rei_PaneClear
-    call Console_WaitVBlank
-    call Rei_PaneBlit
-    xor a
-    ld [wReiPaneDirty], a
-    ld hl, sReiThinking
-    ld de, 0
-    jp ReiHist_Panel
 
 ; a = slot -> hl = its address (in REI_HIST_BANK).
 ReiHist_Slot:
@@ -128,13 +127,13 @@ ReiHist_Store:
     ld [wReiHistCount], a
     ret
 
-; Shows the reply wReiHistAge names, and the marker. a = 0 for no marker.
-ReiHist_Show:
-    push af
+; The reply wReiHistAge names and the marker, into the shadow. No VRAM.
+ReiHist_Render::
     call Rei_PaneClear
+    call ReiHist_NoMark
     ld a, [wReiHistCount]
     or a
-    jr z, .drawn
+    ret z
     ld a, [wReiHistAge]
     ld b, a
     ld a, [wReiHistNext]
@@ -157,17 +156,8 @@ ReiHist_Show:
     jr nz, .char
     ld a, 1
     ldh [rSVBK], a
-.drawn
-    ld a, T_FR_B                    ; the marker's cells: edge, or "^v n/8"
-    ld b, MARK_X
-    ld c, MARK_Y
-    ld d, MARK_W
-    ld e, 1
-    call Rei_Fill
-    pop af
-    or a
-    jr z, .push
-    ld b, MARK_X
+
+    ld b, MARK_X                    ; "^v n/8"
     ld c, MARK_Y
     call Rei_CellAddr
     ld a, T_ARROW_UP
@@ -183,63 +173,51 @@ ReiHist_Show:
     ld a, '/' - FONT_FIRST
     ld [hl+], a
     ld [hl], '0' + REI_HIST - FONT_FIRST
-.push
-    call Console_WaitVBlank
-    call Rei_PaneBlit
-    xor a
-    ld [wReiPaneDirty], a
-    ld hl, MARK_Y * CON_W + MARK_X
-    ld b, 1
-    ld c, MARK_W
-    jp Rei_Blit
+    ret
 
-; The reply is complete. Returns when the player wants to talk again.
-ReiUi_After::
-    call ReiFace_Show               ; the mood of what she said
-    call ReiHist_Store
-    xor a
-    ld [wReiHistAge], a
-    inc a
-    call ReiHist_Show               ; the same words, now with the marker
-    ld hl, sReiBack
-    ld de, sReiTalk
-    call ReiHist_Panel
+; The same, and onto the screen.
+ReiHist_Show::
+    call ReiHist_Render
+    jp ReiHist_Push
 
-    ld a, READY_MAGIC               ; a stable window for the harness to read
-    ld [wReady], a
-.loop
-    call Rei_IdleFrame
-    ld b, a
-    and KB_A | KB_B | KB_START
-    jr nz, .leave
-    ld a, b
-    and KB_UP
-    jr z, .down
-    ld a, [wReiHistCount]           ; older, if there is one
+; The reply before the one showing, if there is one.
+ReiHist_Older::
+    ld a, [wReiHistCount]
     ld c, a
     ld a, [wReiHistAge]
     inc a
     cp c
-    jr nc, .loop
-    jr .page
-.down
-    ld a, b
-    and KB_DOWN
-    jr z, .loop
+    ret nc
+    jr ReiHist_Page
+
+; The reply after the one showing, if it is not the newest.
+ReiHist_Newer::
     ld a, [wReiHistAge]
     or a
-    jr z, .loop
+    ret z
     dec a
-.page
+ReiHist_Page:
     ld [wReiHistAge], a
-    ld a, 1
-    call ReiHist_Show
-    jr .loop
-.leave
+    jr ReiHist_Show
+
+; The reply is complete.
+ReiUi_After::
+    call ReiFace_Show               ; the mood of what she said
+    call ReiHist_Store
+    ld hl, wReiReply                ; her side of the log
+    ld a, [wReiReplyLen]
+    ld c, a
+    ld b, 0
+    call ReiLog_Add
     xor a
-    ld [wReady], a
     ld [wReiHistAge], a
-    jp ReiHist_Show                 ; a = 0: the newest reply, the marker gone
+    call ReiHist_Show               ; the same words, now with the marker
+    ld hl, wReiLines
+    call ReiSave_Count
+    call ReiSave_Write              ; interrupts are off: the run is over
+    ld a, READY_MAGIC               ; the exchange is whole and saved; the flag
+    ld [wReady], a                  ; stays up until the next message is sent
+    ret
 
 ASSERT REI_HIST == 8, "the ring index is masked, the marker is one digit"
 

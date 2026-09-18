@@ -1,7 +1,7 @@
 ; Rei's screen: where everything is, in tiles. One persistent 20 x 18 BG map.
 ;
 ;   x 0-5   y 0-5    her face, a 6 x 6 frame around 4 x 4 tiles of art
-;   x 0-5   y 6-8    the mood band: a symbol over the word, no frame
+;   x 0-5   y 6-8    the mood band: one icon, centred under the face, no frame
 ;   x 6-19  y 0-8    her words: a 14 x 9 frame around a 12 x 7 text pane
 ;   x 0-19  y 9-11   your words: a 20 x 3 frame around one 18-character row
 ;   x 0-19  y 12-17  the keys: a 20 x 6 frame around 4 rows - the canned
@@ -56,7 +56,11 @@ DEF KEYS_H      EQU 4
 
 DEF REI_REPLY_MAX EQU 96            ; characters of a reply kept as text
 DEF REI_HIST      EQU 8             ; replies remembered
-DEF REI_HIST_BANK EQU 2             ; WRAM bank of the history; 2..6 are free
+DEF REI_HIST_BANK EQU 2             ; WRAM bank of the save image (history, log)
+                                    ; and the log screen's shadow; 2..6 are free
+DEF REI_LOG_LINES EQU 64            ; lines of conversation kept for the log
+DEF REI_LOG_COLS  EQU 18
+DEF REI_LOG_SLOT  EQU REI_LOG_COLS + 1      ; who said it, then the tiles
 DEF REI_TEXT_MAX  EQU 44            ; typed characters: PROMPT_MAX less the
                                     ; turn marker and newline Chat_Stage adds
 

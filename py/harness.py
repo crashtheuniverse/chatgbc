@@ -5,6 +5,7 @@ Addresses come from rgblink's symbol file and constants are parsed straight out
 of the assembly sources, so tests can never drift from the ROM they test.
 """
 
+import io
 import re
 from pathlib import Path
 
@@ -51,13 +52,17 @@ def load_defs(*paths):
 class Rom:
     """A booted ROM plus typed accessors for its WRAM."""
 
-    def __init__(self, rom=None, sym=None, dirty_ram=False, lab=False):
+    def __init__(self, rom=None, sym=None, dirty_ram=False, lab=False, sram=None):
         """lab boots build/chatgbc-lab.gbc, the ROM with no keyboard or frame.
 
         The demo boots into an entry screen and waits for START, which costs the
         suite wall-clock for presentation no test is checking. The lab ROM parks
         in an idle loop instead and takes its prompt and token count from here,
         so a test can ask for the shortest run that proves its point.
+
+        sram is the battery-backed cartridge RAM to boot with, as bytes (what
+        `Rom.sram()` returned from an earlier instance): a power cycle. Nothing
+        is ever written to disk, so without it a cartridge boots blank.
 
         dirty_ram fills WRAM with a non-zero pattern before the CPU runs.
 
@@ -75,7 +80,9 @@ class Rom:
         self.defs = load_defs(SRC / "chatgbc.inc", SRC / "model.inc",
                               SRC / "boot.asm", SRC / "matvec.asm", SRC / "generate.asm")
         self.syms = load_symbols(sym)
-        self.pyboy = PyBoy(str(rom), window="null", cgb=True, sound_emulated=False)
+        ram_file = io.BytesIO(bytes(sram)) if sram is not None else None
+        self.pyboy = PyBoy(str(rom), window="null", cgb=True, sound_emulated=False,
+                           ram_file=ram_file)
         # Without this PyBoy paces itself to real time, which for a ROM that
         # spends seconds per token makes the test loop unusable.
         self.pyboy.set_emulation_speed(0)
@@ -109,6 +116,15 @@ class Rom:
     def read(self, name, count=1):
         a = self.addr(name)
         return bytes(self.pyboy.memory[a : a + count])
+
+    def sram(self, size=0x2000):
+        """The cartridge RAM's first bank, as bytes. The MBC only shows it while
+        it is enabled, so this enables it around the read - between frames,
+        where the ROM (which keeps it disabled outside a save) cannot notice."""
+        self.pyboy.memory[0x0000] = 0x0A
+        data = bytes(self.pyboy.memory[0xA000 : 0xA000 + size])
+        self.pyboy.memory[0x0000] = 0x00
+        return data
 
     def read_u32(self, name):
         return int.from_bytes(self.read(name, 4), "little")

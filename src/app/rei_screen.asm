@@ -7,13 +7,18 @@
 ; a rectangle by Rei_Blit inside VBlank. Palettes are per region, through the
 ; CGB attribute map, written straight to VRAM bank 1 under the same rule.
 ;
-; Cost: nothing in ROM0. About 3.2 KB of the UI bank, nearly all of it art.
+; Cost: nothing in ROM0, 2 bytes of WRAM0. About 2.9 KB of the UI bank, nearly
+; all of it art.
 
 IF DEF(REI_UI)
 
 INCLUDE "hardware.inc"
 INCLUDE "chatgbc.inc"
 INCLUDE "app/rei.inc"
+
+SECTION "Rei screen state", WRAM0
+wReiShadow:: dw                     ; where Rei_CellAddr's cells are: wConsole,
+                                    ; or the log's own shadow while it is open
 
 SECTION "Rei screen", ROMX, BANK[REI_BANK]
 
@@ -61,8 +66,12 @@ ReiScr_LoadPals::
     jr nz, .loop
     ret
 
-; The shadow, all blank.
+; The shadow, all blank, and the drawing routines pointed at it.
 ReiScr_Clear::
+    ld a, LOW(wConsole)
+    ld [wReiShadow + 0], a
+    ld a, HIGH(wConsole)
+    ld [wReiShadow + 1], a
     ld hl, wConsole
     ld bc, CON_SIZE
 .loop
@@ -84,7 +93,10 @@ ENDR
     ld a, b
     or l
     ld l, a
-    ld de, wConsole
+    ld a, [wReiShadow + 0]
+    ld e, a
+    ld a, [wReiShadow + 1]
+    ld d, a
     add hl, de
     ret
 
@@ -254,6 +266,7 @@ Rei_IdleFrame::
 
 ; Draws the whole main screen, LCD off, and switches it on. Once, after the
 ; splash: from then on the screen is only ever touched a rectangle at a time.
+; A conversation continued from the save comes up as it was left.
 ReiScr_Main::
     call ReiScr_LcdOff
     ld hl, ReiTilesMain
@@ -326,9 +339,10 @@ ReiScr_Main::
     ld e, KEYS_FH
     call Rei_Attr
 
-    xor a                           ; she has not spoken: calm, and an empty pane
-    ld [wReiMood], a
-    call ReiFace_Set
+    ld hl, wReiVisits               ; one more visit; the next save keeps it
+    call ReiSave_Count
+    call ReiHist_Render             ; her last reply, if this conversation has one
+    call ReiFace_Set                ; and its mood: calm, when she has not spoken
     call ReiFace_DrawMood
     call ReiFace_MoodAttr
     call Console_FlushNow
