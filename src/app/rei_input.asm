@@ -9,10 +9,10 @@
 ; the tail of what has been typed with a caret after it.
 ;
 ; The cursor is a palette, not a tile: the cell (or the list row) under it gets
-; PAL_PICK in the attribute map. A redraw is two VBlanks - the keys' rectangle
-; and the prompt row, then the attributes - and every change just redraws.
+; PAL_PICK in the attribute map. A redraw is two VBlanks - the keys' rectangle,
+; then the prompt row and the attributes - and every change just redraws.
 ;
-; Cost: nothing in ROM0; about 650 bytes of the UI bank, 52 bytes of WRAM0.
+; Cost: nothing in ROM0; about 850 bytes of the UI bank, 50 bytes of WRAM0.
 
 IF DEF(REI_UI)
 

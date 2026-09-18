@@ -14,7 +14,8 @@
 ; At the end of a reply the queue is played out at a brisk pace rather than
 ; dumped, so her last words are typed like the rest.
 ;
-; Cost: about 200 bytes of ROM0, 75 bytes of WRAM0.
+; Cost: about 220 bytes of ROM0, 68 bytes of WRAM0 - less than the teletype it
+; replaces.
 
 IF DEF(REI_UI)
 

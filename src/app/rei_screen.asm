@@ -7,7 +7,7 @@
 ; a rectangle by Rei_Blit inside VBlank. Palettes are per region, through the
 ; CGB attribute map, written straight to VRAM bank 1 under the same rule.
 ;
-; Cost: nothing in ROM0. About 2.6 KB of the UI bank, nearly all of it art.
+; Cost: nothing in ROM0. About 3.2 KB of the UI bank, nearly all of it art.
 
 IF DEF(REI_UI)
 

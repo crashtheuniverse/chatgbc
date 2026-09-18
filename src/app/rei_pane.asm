@@ -17,7 +17,7 @@
 ; so far move down to the next row. A row never starts with a space. When the
 ; seventh row is full the pane scrolls up one row inside its frame.
 ;
-; Cost: about 330 bytes of ROM0, 170 bytes of WRAM0.
+; Cost: about 350 bytes of ROM0, 170 bytes of WRAM0.
 
 IF DEF(REI_UI)
 

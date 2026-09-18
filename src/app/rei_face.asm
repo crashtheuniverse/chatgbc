@@ -10,7 +10,7 @@
 ; ROM0 handler can reach them with the UI bank unmapped: the mood's face, the
 ; same face blinking, and the two talking mouths.
 ;
-; Cost: nothing in ROM0; about 200 bytes of the UI bank, one byte of WRAM0.
+; Cost: nothing in ROM0; about 260 bytes of the UI bank, one byte of WRAM0.
 
 IF DEF(REI_UI)
 
