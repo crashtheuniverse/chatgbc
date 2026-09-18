@@ -14,6 +14,10 @@
 ; Off - the lab ROM, the keyboard, every test - everything prints
 ; synchronously as before, so the golden tokens are untouched.
 
+; The Rei build has its own teletype, src/app/rei_type.asm, which writes into
+; her pane instead of the console; this file then assembles to nothing.
+IF !DEF(REI_UI)
+
 INCLUDE "hardware.inc"
 INCLUDE "chatgbc.inc"
 
@@ -227,3 +231,5 @@ ENDR
     pop bc
     pop af
     reti
+
+ENDC

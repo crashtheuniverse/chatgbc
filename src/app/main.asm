@@ -8,12 +8,49 @@
 INCLUDE "hardware.inc"
 INCLUDE "chatgbc.inc"
 INCLUDE "model.inc"
+IF DEF(REI_UI)
+INCLUDE "app/rei.inc"
+ENDC
 
 SECTION "App", ROM0
 
 Run::
 
 IF CHAT_MODE
+
+IF DEF(REI_UI)
+
+; Rei: the chat loop below with a game screen around it. The screen is the UI
+; bank's business (src/app/rei_*.asm); this loop only says when. The model
+; side is the chat loop's, line for line: stage the turn, encode, generate,
+; and the stream continues from one exchange to the next.
+    REI_FAR ReiUi_Splash            ; until START; leaves the main screen up
+.rei
+    REI_FAR ReiUi_Input             ; canned prompt or keyboard -> wPromptText
+    call Chat_Stage
+    REI_FAR ReiUi_ReplyBegin        ; her pane cleared, the keys put away
+
+    ld a, CHAT_REPLY_MAX
+    ld [wGenSteps], a
+    call Type_Enable                ; her words arrive a character at a time
+    ld a, [wChatStarted]
+    or a
+    jr nz, .reiCont
+    call Encode
+    call Generate
+    ld a, 1
+    ld [wChatStarted], a
+    jr .reiAfter
+.reiCont
+    call EncodeCont
+    call Generate_Cont
+.reiAfter
+    call Type_Drain                 ; the tail of the reply, typed out
+    call MeasureSelftest            ; last, so the pass cannot overwrite the buffer
+    REI_FAR ReiUi_After             ; mood, history; raises wReady while it waits
+    jp .rei
+
+ELSE
 
 ; The chat loop. One conversation is one stream: the ring keeps the KV cache,
 ; the absolute position keeps counting, and each exchange is encoded as a
@@ -74,6 +111,8 @@ IF CHAT_MODE
     ld [wReady], a
     call StatusWin_Hide
     jp .chat
+
+ENDC
 
 ; Puts the turn marker in front of the typed text, in place and back to front
 ; so the overlap is safe. The first exchange gets "> "; every later one gets a

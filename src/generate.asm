@@ -190,7 +190,15 @@ Generate::
     ld a, [wToken + 1]
     ld [hl], a
 
+IF DEF(REI_UI)
+    ; Every word in Rei's pane is the model's: the player's own turn, forced
+    ; from the prompt, is already on the prompt row and is not echoed.
+    ld a, [wFromModel]
+    or a
+    call nz, PrintToken
+ELSE
     call PrintToken
+ENDC
     call Type_Flush                 ; Console_Flush, unless the teletype owns the screen
 
     ld hl, wTokCycles               ; running total, for a truthful average
@@ -218,11 +226,13 @@ Generate::
     ld [wGenCount], a
 :
     call StatusWin_Update           ; cycles and count, both current
+IF !DEF(REI_UI)                     ; Rei gives whole answers: SELECT cannot cut one
     call Joy_Read
     ld a, [wJoyNew]
     and KB_SELECT
     ret nz                          ; the player asked to go back - SELECT is
                                     ; "back" everywhere now, START only sends
+ENDC
 
     ld a, [wGenSteps]
     or a                            ; zero means no limit: SELECT ends the run
