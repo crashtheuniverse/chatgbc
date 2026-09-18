@@ -2,10 +2,11 @@
 
     python py/rei_shots.py
 
-The six pictures the v1.0.0 review asks for - splash_menu (a save present),
-canned, reply_mid (the teletype running, her mouth open), reply_done_input
-(her reply up, the list back), log, keyboard (with the OK key) - taken from
-one short conversation and a power cycle. Needs `.\\build.ps1 -Rei`.
+The pictures the reviews ask for - splash_menu (a save present), canned,
+reply_mid (the teletype running, her mouth open), reply_done_input (her reply
+up, the list back), log, keyboard (with the OK key), and the world: world_walk,
+world_pause, world_thought_mid, world_thought_done - taken from one short
+conversation, a walk on the beach and a power cycle. Needs `.\\build.ps1 -Rei`.
 
 The helpers here (boot, press, read the pane back, lay text out the way the
 pane and the log do) are also what py/tests/test_rei_ui.py drives the ROM with.
@@ -166,6 +167,61 @@ def type_text(r, text, cell=0):
     return cell
 
 
+# --- the world ---------------------------------------------------------------
+
+THINK_W, THINK_H = 18, 4                        # the thought box, on the window map
+
+
+def world_on(r):
+    return bool(r.read("wWorldOn")[0])
+
+
+def to_world(r):
+    """From the chat's input screen: SELECT past the keyboard."""
+    if not r.read("wReiMode")[0]:
+        press(r, "select")
+    press(r, "select", after=12)
+    assert world_on(r)
+
+
+def set_word(r, name, value):
+    a = r.addr(name)
+    r.pyboy.memory[a] = value & 0xFF
+    r.pyboy.memory[a + 1] = value >> 8
+
+
+def thought_box(r):
+    """The thought box's four rows of text, off the window's map."""
+    rows = []
+    for y in range(1, 1 + THINK_H):
+        a = LOG_MAP + y * 32 + 1
+        rows.append("".join(chr(t + 32) if t < 96 else "#" for t in r.pyboy.memory[a:a + THINK_W]))
+    return rows
+
+
+def think_now(r, max_frames=200):
+    """Run the thought timer out; returns once the thought has begun."""
+    set_word(r, "wWorldThinkT", 2)
+    for _ in range(max_frames):
+        r.pyboy.tick(1, False)
+        if r.read("wWorldThinking")[0]:
+            return
+    raise TimeoutError("she never started thinking")
+
+
+def thought_done(r, max_frames=40000, each_frame=None):
+    """Tick until the thought is whole and lingering in the box."""
+    a = r.addr("wWorldLinger")
+    for _ in range(max_frames):
+        r.pyboy.tick(1, False)
+        if each_frame:
+            each_frame()
+        if r.pyboy.memory[a] | r.pyboy.memory[a + 1]:
+            r.pyboy.tick(6, False)              # the last cell, or the last rows of a wrap
+            return
+    raise TimeoutError("the thought never finished")
+
+
 def press_until(r, button, done, most=12):
     """Press `button` until `done()`. Bounded: a screen that is not listening
     (the log left open by a failed test) must fail, not hang the suite."""
@@ -227,6 +283,30 @@ def main():
     press(r, "select")
     type_text(r, "i like chess")
     r.screenshot(SHOTS / "keyboard.png")
+
+    r.pyboy.memory[r.addr("wWorldRng")] = 40
+    to_world(r)                                 # SELECT again: the beach
+    set_word(r, "wWorldThinkT", 60000)          # no thought until the walk is on film
+    for _ in range(600):
+        r.pyboy.tick(1, False)
+        if not r.read("wWorldAct")[0] and r.pyboy.memory[0xFE02] == 16:
+            break
+    r.screenshot(SHOTS / "world_walk.png")
+    for _ in range(3000):
+        r.pyboy.tick(1, False)
+        if r.read("wWorldAct")[0]:
+            break
+    r.pyboy.tick(4, False)
+    r.screenshot(SHOTS / "world_pause.png")
+    think_now(r)
+    for _ in range(40000):
+        r.pyboy.tick(1, False)
+        if r.read("wReiReplyLen")[0] >= 12:
+            break
+    r.screenshot(SHOTS / "world_thought_mid.png")
+    thought_done(r)
+    r.screenshot(SHOTS / "world_thought_done.png")
+    press(r, "b", after=12)
     saved = r.sram()
     r.close()
 
@@ -234,7 +314,7 @@ def main():
     r.pyboy.tick(150, False)
     r.screenshot(SHOTS / "splash_menu.png")
     r.close()
-    print(f"wrote six pictures to {SHOTS}")
+    print(f"wrote the pictures to {SHOTS}")
 
 
 if __name__ == "__main__":

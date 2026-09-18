@@ -40,53 +40,7 @@ MARKER = {(x, 8) for x in range(13, 18)}
 SAVE_BODY = 11 + 192 + 8 * 97 + 64 * 19        # src/app/rei_save.asm: 2,195 bytes
 
 
-def pool():
-    text = (APP / "src" / "app" / "rei_input.asm").read_text(encoding="utf-8")
-    return re.findall(r'^\.p\d: db "([^"]*)", 0', text, re.M)
-
-
-@pytest.fixture(scope="module")
-def twin():
-    m = Model5(export5.CKPT)
-    tok = Tokenizer()
-    return twin5.quantize5(m, twin5.calibrate5(m, tok, export5.cal_prompts())), tok
-
-
-class Talk:
-    """A ROM and the twin, in the same conversation."""
-
-    def __init__(self, twin, sram=None):
-        self.rom = ui.boot(sram)
-        self.q, self.tok = twin
-        self.st = twin5.QState5(self.q.cfg)
-        self.said = []            # the twin's replies, newline stripped
-        self.lines = []           # the whole conversation, for the log: (who, text)
-
-    def expect(self, text):
-        """The twin's reply to `text`, which the ROM is about to be sent."""
-        reply = golden5.chat_turn(self.q, self.tok, self.st, text, first=not self.said)
-        self.said.append(reply.rstrip("\n"))
-        self.lines += [(1, text), (0, self.said[-1])]
-        return self.said[-1]
-
-    def rom_reply(self):
-        n = self.rom.read("wReiReplyLen")[0]
-        return bytes(self.rom.read("wReiReply", n)).decode("ascii")
-
-    def send_from_list(self, page, row):
-        r = self.rom
-        assert r.read("wReiMode")[0] == 0
-        ui.press_until(r, "left", lambda: r.read("wReiPage")[0] == 0)   # page 0, row 0
-        ui.press_until(r, "up", lambda: r.read("wReiPick")[0] == 0)
-        ui.pick(r, page, row)
-        text = pool()[page * 3 + row]
-        assert ui.row_text(r, 10, 1, 19).rstrip() == text
-        want = self.expect(text)
-        ui.press(r, "a", after=0)
-        ui.wait_ready(r)
-        assert self.rom_reply() == want
-        assert ui.pane(r) == ui.layout(want)
-        return want
+from rei_talk import Talk, pool, twin           # noqa: E402,F401  (twin is a fixture)
 
 
 @pytest.fixture(scope="module")
@@ -221,7 +175,7 @@ def test_keyboard_ok_sends_and_edges_page(talk):
     assert r.read("wReiMode")[0] == 1
     assert ui.row_text(r, 13, 2, 19) == "a b c d e f g h i"
     assert ui.tilemap(r)[16][18] == ART["T_OK"]
-    assert "SEL:list" in ui.row_text(r, 12)
+    assert "SEL:world" in ui.row_text(r, 12)
 
     ui.press(r, "up")                               # off the top row of keys
     assert ui.pane(r) == ui.layout(talk.said[-2]) and ui.row_text(r, 8, 15, 18) == "3/8"
@@ -253,7 +207,10 @@ def test_keyboard_ok_sends_and_edges_page(talk):
     assert ui.pane(r) == ui.layout(want)
     assert ui.row_text(r, 13, 2, 19) == "a b c d e f g h i", "the keyboard is back"
     assert ui.row_text(r, 10, 1, 19).rstrip() == "_"
-    ui.press(r, "select")                           # back to the list for the rest
+    ui.press(r, "select", after=12)                 # SELECT again is the world,
+    assert ui.world_on(r)
+    ui.press(r, "b", after=10)                      # and any button there is the list
+    assert not ui.world_on(r) and r.read("wReiMode")[0] == 0
 
 
 def test_the_log_shows_both_sides(talk):
