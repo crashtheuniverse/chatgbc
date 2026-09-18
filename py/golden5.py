@@ -24,6 +24,36 @@ STEPS = 48
 PROMPT = export5.PROMPT
 
 
+def chat_turn(q, tok, st, text, first, steps=48):
+    """One exchange of a conversation on the twin, as the chat ROMs run it.
+
+    `st` carries the recurrent state from turn to turn. The first turn is
+    "> text(nl)" behind BOS; a later one is "(nl)> text(nl)" with no BOS and no
+    dummy prefix (EncodeCont), its leading newline being the token the last
+    reply stopped on. Returns the text of the model-chosen tokens only - what
+    the Rei screen puts in her pane - the stop token's piece included.
+    """
+    if first:
+        ids = tok.encode("> " + text + "\n")
+    else:
+        ids = tok.encode("\n> " + text + "\n", bos=False, prefix=False)
+    token, tokens, said, prev = ids[0], [], "", None
+    for pos in range(steps):
+        logits = twin5.forward_q5(q, st, token)
+        forced = pos + 1 < len(ids)
+        nxt = ids[pos + 1] if forced else Q.pick_token(logits, tokens)
+        if nxt == EOS:
+            break
+        tokens.append(nxt)
+        piece = tok.decode(nxt, prev)
+        if not forced:
+            said += piece
+        prev = token = nxt
+        if not forced and nxt <= tok.lookup[b"\n"]:
+            break
+    return said
+
+
 def main():
     m = Model5(export5.CKPT)
     tok = Tokenizer()
