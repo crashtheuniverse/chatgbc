@@ -43,7 +43,7 @@ emb_rows_p2:: INCBIN "build/blobs/emb_rows_p2.bin"   ; 16384 bytes
 SECTION "emb_rows_p3", ROMX
 emb_rows_p3:: INCBIN "build/blobs/emb_rows_p3.bin"   ; 16384 bytes
 
-SECTION "cls_w_p0", ROMX
+SECTION "cls_w_p0", ROMX[$4000]
 cls_w_p0:: INCBIN "build/blobs/cls_w_p0.bin"   ; 16384 bytes
 
 SECTION "lut_cls_hi", ROMX
