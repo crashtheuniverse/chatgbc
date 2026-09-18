@@ -11,6 +11,10 @@ $chat = @{
 }
 try {
     Write-Host '--- story ---'
+    # Whatever an interrupted run left behind, start from the story export.
+    foreach ($k in $chat.Keys) { [Environment]::SetEnvironmentVariable($k, $null) }
+    $env:CHATGBC_LAB = $null
+    & $python (Join-Path $PSScriptRoot 'py/export5.py') | Out-Null
     & (Join-Path $PSScriptRoot 'build.ps1') -Quiet
     & (Join-Path $PSScriptRoot 'build.ps1') -Quiet -Lab
     & $python (Join-Path $PSScriptRoot 'py/golden5.py') | Out-Null
