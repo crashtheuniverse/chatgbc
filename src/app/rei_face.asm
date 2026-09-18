@@ -1,10 +1,11 @@
 ; Rei's mood: read off the reply's text, shown on her face and in the band
 ; under it. No model change - the words decide.
 ;
-;   "forget", "sorry" or "sad" anywhere   -> sad      (a tear)
+;   "forget", "sorry" or "sad" anywhere   -> sad      (a drop)
 ;   otherwise a '!'                       -> happy    (a heart)
-;   otherwise a '?'                       -> curious
-;   otherwise                             -> calm
+;   otherwise a '?'                       -> curious  (a question mark and a spark)
+;   otherwise                             -> calm     (a leaf)
+; The band shows the icon alone; there is no word.
 ;
 ; ReiFace_Set copies the four pictures the mood needs into wReiFaces, where the
 ; ROM0 handler can reach them with the UI bank unmapped: the mood's face, the
@@ -30,7 +31,7 @@ sReiSadWords:
     db "sad", 0
     db 0
 
-; The palette of each mood's band: the symbol's colour.
+; The palette of each mood's band: the icon's colour.
 ReiMoodPal:
     db PAL_GREEN, PAL_RED, PAL_AMBER, PAL_BLUE
 

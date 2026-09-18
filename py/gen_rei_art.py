@@ -2,8 +2,8 @@
 
 Everything the Rei screen shows that is not a font glyph is drawn here, in
 code, as 2bpp Game Boy tiles: the window frames, the face (4 x 4 tiles, one
-picture per mood plus a blink and two talking mouths), the mood band (a symbol
-and the word in a compact 5 x 7 face), the arrows, and the splash logotype.
+picture per mood plus a blink and two talking mouths), the mood icons, the
+arrows, the keyboard's OK key, and the splash logotype.
 Pictures are composed as whole images, cut into 8 x 8 tiles and de-duplicated,
 so the assembly side only ever sees tile data and small maps of tile indices.
 
@@ -137,9 +137,18 @@ SYMBOLS = {
             "........",
             "........"],
 }
+SYMBOLS["OK"] = ["........",                # the keyboard's send key
+                 "......#.",
+                 "......#.",
+                 "..#...#.",
+                 ".##...#.",
+                 "#######.",
+                 ".##.....",
+                 "..#....."]
 SYMBOLS["ARROW_L"] = mirror(SYMBOLS["ARROW_R"])
 SYMBOLS["ARROW_DN"] = SYMBOLS["ARROW_UP"][::-1]
 
+# The small heart: the dot of the logotype's i.
 HEART = ["..##...##..",
          ".#++#.#++#.",
          "#+--+#++++#",
@@ -151,72 +160,73 @@ HEART = ["..##...##..",
          "....###....",
          ".....#....."]
 
-QUESTION = ["..####...",
-            ".#++++#..",
-            "#++##++#.",
-            ".##.#++#.",
-            "...#++#..",
-            "..#++#...",
-            "..#++#...",
-            "...##....",
-            "..#++#...",
-            "...##...."]
+# The mood icons, one a mood, each its own shape and its own colour.
+ICON_HAPPY = ["..###...###..",
+              ".#+++#.#+++#.",
+              "#+--++#+++++#",
+              "#+-+++++++++#",
+              "#+++++++++++#",
+              "#+++++++++++#",
+              ".#+++++++++#.",
+              "..#+++++++#..",
+              "...#+++++#...",
+              "....#+++#....",
+              ".....#+#.....",
+              "......#......"]
 
-TEAR = ["....#....",
-        "...#+#...",
-        "...#+#...",
-        "..#++-#..",
-        "..#++-#..",
-        ".#++++-#.",
-        ".#+++++#.",
-        ".#+++++#.",
-        "..#+++#..",
-        "...###..."]
+ICON_CALM = [".........####",
+             ".......##++-#",
+             ".....##+++-+#",
+             "....#++++-++#",
+             "...#++++-+++#",
+             "..#++++-++++#",
+             "..#+++-++++#.",
+             ".#+++-+++++#.",
+             ".#++-+++++#..",
+             ".#+-++++##...",
+             ".#-+####.....",
+             ".##.#........",
+             "#............"]
 
-LEAF = ["......###.",
-        "....##++#.",
-        "...#+++-#.",
-        "..#++++-#.",
-        ".#+++-++#.",
-        ".#++-+++#.",
-        ".#+-+++#..",
-        ".#-+++#...",
-        ".#####....",
-        "#........."]
+ICON_CURIOUS = ["..#####.....#..",
+                ".#+++++#...#-#.",
+                "#++###++#.#---#",
+                "#++#..#++#.#-#.",
+                ".##..#+++#..#..",
+                "....#+++#......",
+                "...#+++#.......",
+                "...#++#........",
+                "...#++#........",
+                "....##.........",
+                "...#++#........",
+                "...#++#........",
+                "....##........."]
 
-# --- the mood band: a symbol over the word -----------------------------------
-# Seven letters have to fit in six tiles, so the word gets its own 5 x 7 face
-# at a six-pixel pitch, in the manner of a character LCD.
+ICON_SAD = [".....#.....",
+            "....#+#....",
+            "....#+#....",
+            "...#+++#...",
+            "...#+-+#...",
+            "..#++-++#..",
+            "..#+-+++#..",
+            ".#++-++++#.",
+            ".#+-+++++#.",
+            "#++-++++++#",
+            "#+++++++++#",
+            "#+++++++++#",
+            ".#+++++++#.",
+            "..#######.."]
 
-TINY = {
-    "a": [".....", ".....", ".###.", "....#", ".####", "#...#", ".####"],
-    "c": [".....", ".....", ".###.", "#....", "#....", "#...#", ".###."],
-    "d": ["....#", "....#", ".##.#", "#..##", "#...#", "#...#", ".####"],
-    "h": ["#....", "#....", "#.##.", "##..#", "#...#", "#...#", "#...#"],
-    "i": ["..#..", ".....", ".##..", "..#..", "..#..", "..#..", ".###."],
-    "l": [".##..", "..#..", "..#..", "..#..", "..#..", "..#..", ".###."],
-    "m": [".....", ".....", "##.#.", "#.#.#", "#.#.#", "#...#", "#...#"],
-    "o": [".....", ".....", ".###.", "#...#", "#...#", "#...#", ".###."],
-    "p": [".....", ".....", "####.", "#...#", "####.", "#....", "#...."],
-    "r": [".....", ".....", "#.##.", "##..#", "#....", "#....", "#...."],
-    "s": [".....", ".....", ".###.", "#....", ".###.", "....#", "####."],
-    "u": [".....", ".....", "#...#", "#...#", "#...#", "#..##", ".##.#"],
-    "y": [".....", ".....", "#...#", "#...#", ".####", "....#", ".###."],
-}
+# --- the mood band: an icon, centred under the face --------------------------
 
-MOODS = [("calm", LEAF), ("happy", HEART), ("curious", QUESTION), ("sad", TEAR)]
+MOODS = [("calm", ICON_CALM), ("happy", ICON_HAPPY), ("curious", ICON_CURIOUS), ("sad", ICON_SAD)]
 BAND_W, BAND_H = 6, 3                 # tiles
 
 
-def mood_band(word, symbol):
+def mood_band(icon):
     img = canvas(BAND_W * 8, BAND_H * 8)
-    sw = len(symbol[0])
-    art(img, (BAND_W * 8 - sw) // 2, 1, symbol, KEY)
-    width = len(word) * 6 - 1
-    x = (BAND_W * 8 - width) // 2
-    for ch in word:
-        art(img, x, 13, TINY[ch], KEY)
-        x += 6
+    w, h = len(icon[0]), len(icon)
+    art(img, (BAND_W * 8 - w) // 2, (BAND_H * 8 - h) // 2, icon, KEY)
     return img
 
 
@@ -448,7 +458,7 @@ MAIN_PALETTES = [
     ("PICK",  [(48, 144, 72), (168, 224, 144), (248, 236, 184), CREAM]),  # the key under the cursor
     ("FACE",  [CREAM, (248, 208, 176), (152, 96, 200), INK]),        # paper, skin, hair, ink
     ("AMBER", [CREAM, (248, 216, 96), (224, 144, 32), INK]),         # curious
-    ("SPARE", [CREAM, CREAM, CREAM, INK]),
+    ("YOURS", [CREAM, (152, 200, 248), (48, 96, 208), (40, 72, 184)]),   # the player's lines in the log
 ]
 
 NIGHT = (32, 28, 64)
@@ -472,10 +482,13 @@ def build():
         art(t, 0, 0, rows, KEY)
         main.add(t, name)
     face_maps = [(n, main.cut(img)) for n, img in faces()]
-    mood_maps = [(w, main.cut(mood_band(w, s))) for w, s in MOODS]
+    mood_maps = [(w, main.cut(mood_band(icon))) for w, icon in MOODS]
 
     splash = TileSet()
     splash.add(canvas(8, 8), "S_BLANK")
+    t = canvas(8, 8)
+    art(t, 0, 0, SYMBOLS["ARROW_R"], KEY)
+    splash.add(t, "S_ARROW")                     # the menu's cursor
     limg, heart_box = logo()
     logo_map = splash.cut(limg)
     hx, hy, hw, hh = heart_box
@@ -574,7 +587,7 @@ def preview(face_maps_imgs, limg):
         for x in range(96):
             im.putpixel((x, 34 + y), pal_logo[limg[y][x]])
     for i, (w, s) in enumerate(MOODS):
-        b = mood_band(w, s)
+        b = mood_band(s)
         for y in range(24):
             for x in range(48):
                 im.putpixel((100 + i * 50 + x, 34 + y), pal_red[b[y][x]])
