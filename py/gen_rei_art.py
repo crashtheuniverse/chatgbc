@@ -7,7 +7,8 @@ arrows, the keyboard's OK key, and the splash logotype.
 Pictures are composed as whole images, cut into 8 x 8 tiles and de-duplicated,
 so the assembly side only ever sees tile data and small maps of tile indices.
 
-    python py/gen_rei_art.py             write src/rei_art.inc
+    python py/gen_rei_art.py             write src/rei_art.inc, and the world's
+                                         src/rei_world_art.inc (py/gen_rei_world.py)
     python py/gen_rei_art.py --preview   also write build/rei_art_preview.png
 
 Two tile sets share one VRAM range (tiles REI_TILE_BASE and up): the splash
@@ -145,6 +146,14 @@ SYMBOLS["OK"] = ["........",                # the keyboard's send key
                  "#######.",
                  ".##.....",
                  "..#....."]
+SYMBOLS["THINK"] = ["..####..",               # the thought box's title: a thought bubble
+                    ".#....#.",
+                    "#......#",
+                    "#......#",
+                    ".#....#.",
+                    "..####..",
+                    ".##.....",
+                    "#......."]
 SYMBOLS["ARROW_L"] = mirror(SYMBOLS["ARROW_R"])
 SYMBOLS["ARROW_DN"] = SYMBOLS["ARROW_UP"][::-1]
 
@@ -605,6 +614,8 @@ def preview(face_maps_imgs, limg):
 
 
 if __name__ == "__main__":
+    import gen_rei_world                     # the beach has a generator of its own
+    gen_rei_world.emit()
     main, face_maps, mood_maps, splash, logo_map, logo_attr, limg = build()
     emit(main, face_maps, mood_maps, splash, logo_map, logo_attr)
     if "--preview" in sys.argv:
