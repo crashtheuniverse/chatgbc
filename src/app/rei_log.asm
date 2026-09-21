@@ -12,9 +12,10 @@
 ; never touched, so SELECT returns to it exactly as it was by pointing LCDC
 ; back. UP and DOWN scroll a row at a time and repeat while held; the newest row
 ; is at the bottom when the log opens. The player's rows are in blue
-; (PAL_YOURS), hers in ink; small arrows in the frame say there is more.
+; (PAL_YOURS, which borrows the input cursor's palette slot while the log is
+; open), hers in ink; small arrows in the frame say there is more.
 ;
-; Cost: nothing in ROM0; about 570 bytes of the UI bank, 8 bytes of WRAM0 and
+; Cost: nothing in ROM0; about 600 bytes of the UI bank, 8 bytes of WRAM0 and
 ; 1,152 of WRAM bank 2 for the shadow (the rows themselves are in the image).
 
 IF DEF(REI_UI)
@@ -312,6 +313,18 @@ ReiLog_MaxTop:
     xor a
     ret
 
+; hl = four colours for BG palette 7. VBlank only.
+ReiLog_Slot7:
+    ld a, BGPI_AUTOINC | (PAL_YOURS * 8)
+    ldh [rBCPS], a
+    ld b, 8
+.colour
+    ld a, [hl+]
+    ldh [rBCPD], a
+    dec b
+    jr nz, .colour
+    ret
+
 ; The log screen, until SELECT. Called from the input screen; returns to it.
 ReiLog_Run::
     ld a, REI_HIST_BANK
@@ -346,6 +359,8 @@ ReiLog_Run::
     call ReiLog_MaxTop              ; the newest row at the bottom
     ld [wReiLogTop], a
     call ReiLog_Draw
+    ld hl, ReiPalYours              ; the player's blue, in the cursor's slot
+    call ReiLog_Slot7               ; (still inside the VBlank of the draw)
     ldh a, [rLCDC]
     or LCDC_BG_9C00
     ldh [rLCDC], a
@@ -397,6 +412,8 @@ ReiLog_Run::
     ldh a, [rLCDC]
     and ~LCDC_BG_MAP
     ldh [rLCDC], a
+    ld hl, ReiPalMain + PAL_CURSOR * 8
+    call ReiLog_Slot7               ; the cursor's palette back
     ld a, LOW(wConsole)
     ld [wReiShadow + 0], a
     ld a, HIGH(wConsole)

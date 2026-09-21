@@ -1,7 +1,7 @@
 ; The world: a beach Rei walks along, and what she thinks there.
 ;
-; SELECT past the keyboard, or twenty idle seconds in the chat, and the dialogue
-; bars are gone: the top twelve rows are the beach (the BG layer, scrolled by
+; Leave the chat alone for twenty seconds - there is no button for it, it is
+; hers to do - and the dialogue bars are gone: the top twelve rows are the beach (the BG layer, scrolled by
 ; SCX round a 32-tile strip), she is a sprite on the sand, and the bottom six
 ; rows are a thought box on the window layer, empty most of the time. Any
 ; button goes back to the chat exactly as it was: the chat screen is BG map

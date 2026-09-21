@@ -1,4 +1,4 @@
-; Rei's main screen: the tiles, the palettes, the four frames, and the small
+; Rei's main screen: the tiles, the palettes, the three frames and the bar, and the small
 ; drawing routines the rest of the UI bank uses.
 ;
 ; Everything is drawn into the console shadow (wConsole, tile numbers at the
@@ -329,16 +329,17 @@ ReiScr_Main::
     ld c, SAY_FY
     call Rei_Print
 
-    ld b, KEYS_FX
-    ld c, KEYS_FY
-    ld d, KEYS_FW
-    ld e, KEYS_FH
-    call Rei_Frame
-    ld a, PAL_GREEN
-    ld b, KEYS_FX
-    ld c, KEYS_FY
-    ld d, KEYS_FW
-    ld e, KEYS_FH
+    ld a, PAL_PICK                  ; the bar: solid, edge to edge
+    ld b, LIST_X
+    ld c, BAR_Y
+    ld d, LIST_W
+    ld e, 1
+    call Rei_Attr
+    ld a, PAL_GREEN                 ; and the five rows under it
+    ld b, LIST_X
+    ld c, LIST_Y
+    ld d, LIST_W
+    ld e, LIST_H
     call Rei_Attr
 
     ld hl, wReiVisits               ; one more visit; the next save keeps it

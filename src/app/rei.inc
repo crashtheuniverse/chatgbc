@@ -4,11 +4,12 @@
 ;   x 0-5   y 6-8    the mood band: one icon, centred under the face, no frame
 ;   x 6-19  y 0-8    her words: a 14 x 9 frame around a 12 x 7 text pane
 ;   x 0-19  y 9-11   your words: a 20 x 3 frame around one 18-character row
-;   x 0-19  y 12-17  the keys: a 20 x 6 frame around 4 rows - the canned
-;                    prompts or the keyboard
+;   x 0-19  y 12     a solid bar: what the rows under it are, and the buttons
+;   x 0-19  y 13-17  five full rows, no frame: the topics, a topic's sentences,
+;                    or the keyboard
 ;
-; That is the chat. SELECT past the keyboard (or twenty idle seconds) goes to
-; the world: a beach she walks along, with a thought box where the keys were.
+; That is the chat. Left alone for twenty seconds she goes to the world: a beach
+; she walks along, with a thought box where the list was.
 ;
 ; Only the Rei build assembles any of this: build.ps1 -Rei defines REI_UI.
 
@@ -48,14 +49,11 @@ DEF SAY_X       EQU 1
 DEF SAY_Y       EQU 10
 DEF SAY_W       EQU 18
 
-DEF KEYS_FX     EQU 0
-DEF KEYS_FY     EQU 12
-DEF KEYS_FW     EQU 20
-DEF KEYS_FH     EQU 6
-DEF KEYS_X      EQU 1
-DEF KEYS_Y      EQU 13
-DEF KEYS_W      EQU 18
-DEF KEYS_H      EQU 4
+DEF BAR_Y       EQU 12              ; the solid bar: a title and the buttons
+DEF LIST_X      EQU 0               ; five full rows under it, no frame
+DEF LIST_Y      EQU 13
+DEF LIST_W      EQU 20
+DEF LIST_H      EQU 5
 
 DEF REI_REPLY_MAX EQU 96            ; characters of a reply kept as text
 DEF REI_HIST      EQU 8             ; replies remembered

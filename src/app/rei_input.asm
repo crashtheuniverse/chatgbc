@@ -1,28 +1,36 @@
-; What the player says to Rei: the bottom half of the screen.
+; What the player says to Rei: the bottom third of the screen.
 ;
-; Two ways in; SELECT goes from the list to the keyboard, and from the keyboard
-; to the world (src/app/rei_world.asm), which comes back to the list:
-;   the list      three prompts from a pool of nine. UP/DOWN pick, LEFT/RIGHT
-;                 turn the page, A sends.
-;   the keyboard  four rows of nine keys at a two-tile pitch. The d-pad moves,
-;                 A types, B deletes; the last key is OK, and A on it sends.
-;                 Nothing typed, nothing sent.
-; The prompt row above always shows what would be sent: the chosen prompt, or
-; the tail of what has been typed with a caret after it.
+; Row 12 is a solid bar, the title and the buttons of whatever is under it;
+; rows 13-17 are five full-width rows with no frame. Three states:
+;   topics     ten names in a grid of two by five (src/rei_topics.inc). The
+;              d-pad moves, wrapping; A opens the topic. The prompt row is
+;              empty: nothing is chosen yet.
+;   sentences  the topic's lines, five to a page. UP/DOWN pick (wrapping in the
+;              page), LEFT/RIGHT turn the page when there is another, A sends,
+;              B goes back up to the topics with the cursor where it was.
+;   keyboard   four rows of nine keys at a two-tile pitch. The d-pad moves
+;              (wrapping), A types, B deletes; the last key is OK, and A on it
+;              sends. Nothing typed, nothing sent.
+; SELECT goes between the list (whichever of its two states it was in) and the
+; keyboard. START opens the conversation log (src/app/rei_log.asm) and comes
+; back to this screen as it was. The prompt row above always shows what would
+; be sent: the sentence under the cursor, or the tail of what has been typed
+; with a caret after it.
 ;
-; Her earlier replies are always a step away: UP off the top of the list (or
-; the top row of keys) pages her pane to the reply before, DOWN off the bottom
-; to the one after (src/app/rei_history.asm). START opens the conversation log
-; (src/app/rei_log.asm) and comes back to this screen as it was.
+; After a reply the screen comes back in the state the message was sent from -
+; the same topic, page and cursor - so a follow-up is one press.
 ;
-; Left alone for twenty seconds she wanders off to the world by herself; any
-; button there brings this screen back as it was, typed text and all.
+; Left alone for twenty seconds she wanders off to the world by herself
+; (src/app/rei_world.asm) - the only way there. Any button brings this screen
+; back as it was, typed text and all.
 ;
-; The cursor is a palette, not a tile: the cell (or the list row) under it gets
-; PAL_PICK in the attribute map. A redraw is two VBlanks - the keys' rectangle,
-; then the prompt row and the attributes - and every change just redraws.
+; The cursor is a palette, not only a tile: the cell or the row under it gets
+; PAL_CURSOR in the attribute map (the bar is always PAL_PICK). A redraw is
+; two VBlanks - the six rows, then the prompt row and the attributes - and
+; every change just redraws.
 ;
-; Cost: nothing in ROM0; about 960 bytes of the UI bank, 50 bytes of WRAM0.
+; Cost: nothing in ROM0; about 1.1 KB of the UI bank and 1.5 KB of topics,
+; 56 bytes of WRAM0.
 
 IF DEF(REI_UI)
 
@@ -31,19 +39,25 @@ INCLUDE "chatgbc.inc"
 INCLUDE "app/rei.inc"
 INCLUDE "rei_art.inc"
 
-DEF IN_COLS   EQU 9
-DEF IN_ROWS   EQU 4
-DEF IN_CELLS  EQU IN_COLS * IN_ROWS
-DEF IN_KEY_X  EQU KEYS_X + 1        ; the first key's column; two apart after
-DEF IN_POOL   EQU 9
-DEF IN_PER    EQU 3                 ; prompts a page
-DEF IN_PAGES  EQU IN_POOL / IN_PER
-DEF IN_LIST_X EQU KEYS_X + 1        ; the prompts, right of the arrow
+DEF IN_COLS    EQU 9
+DEF IN_ROWS    EQU 4
+DEF IN_CELLS   EQU IN_COLS * IN_ROWS
+DEF IN_KEY_X   EQU 1                ; the first key's column; two apart after: 1..17
+DEF GRID_ROWS  EQU 5                ; the topics: two columns of five
+DEF GRID_X0    EQU 1                ; a column's text; its arrow is one to the left
+DEF GRID_X1    EQU 11
+DEF GRID_W     EQU 10               ; a column's highlight
+
+DEF MODE_TOPICS EQU 0
+DEF MODE_LINES  EQU 1
+DEF MODE_KEYS   EQU 2
 
 SECTION "Rei input state", WRAM0
-wReiMode::    db                    ; 0 = the list, 1 = the keyboard
-wReiPage::    db                    ; which three prompts
-wReiPick::    db                    ; which of the three
+wReiMode::    db                    ; MODE_*
+wReiList:     db                    ; the list state SELECT returns to from the keys
+wReiTopic::   db                    ; 0..9: column * 5 + row
+wReiPage::    db                    ; of the topic's sentences
+wReiPick::    db                    ; the row on that page
 wReiKey::     db                    ; the keyboard cursor, row * 9 + column
 wReiTextLen:: db
 wReiText::    ds REI_TEXT_MAX       ; what has been typed
@@ -53,22 +67,7 @@ wReiIdle::    dw                    ; frames since a button was last down
 
 SECTION "Rei input", ROMX, BANK[REI_BANK]
 
-; The pool. Lower case and inside the training distribution, every one - which
-; is why the questions carry no question mark: the player's lines in her
-; training text never do, and with one she mistakes the turn for her own and
-; writes a player's line back. py/tests/test_rei_ui.py checks that each prompt
-; encodes with no unknown piece and draws a reply in her own voice.
-ReiPrompts:
-    dw .p0, .p1, .p2, .p3, .p4, .p5, .p6, .p7, .p8
-.p0: db "hello", 0
-.p1: db "what is your name", 0
-.p2: db "my name is tom", 0
-.p3: db "what is my name", 0
-.p4: db "i like chess", 0
-.p5: db "what do i like", 0
-.p6: db "how are you", 0
-.p7: db "do you dream", 0
-.p8: db "bye", 0
+INCLUDE "rei_topics.inc"
 
 ReiKeys:
     db "abcdefghi"
@@ -76,30 +75,69 @@ ReiKeys:
     db "stuvwxyz "
     db ".,!?'-;: "                   ; the last cell is the OK key, not a character
 
-sReiHintSay:   db "A:say", 0
-sReiHintMore:  db T_ARROW_L + FONT_FIRST, T_ARROW_R + FONT_FIRST, "more", 0
-sReiListTitle: db "SAY", 0
-sReiKeysTitle: db "KEYS", 0
-sReiToKeys:    db "SEL:keys", 0
-sReiToWorld:   db "SEL:world", 0
-sReiToLog:     db "START:log", 0
+sReiBarTopics: db "TOPIC       A:select", 0
+sReiBarLines:  db "SAY", 0
+sReiBarPages:  db T_ARROW_L + FONT_FIRST, T_ARROW_R + FONT_FIRST, 0
+sReiBarBack:   db "B:back", 0
+sReiBarKeys:   db "KEYS B:del  SEL:list", 0
 
-; hl = the chosen prompt's text.
-ReiIn_Prompt:
+; a = how many sentences the topic has.
+ReiIn_Count:
+    ld a, [wReiTopic]
+    ld e, a
+    ld d, 0
+    ld hl, ReiTopicCounts
+    add hl, de
+    ld a, [hl]
+    ret
+
+; a = how many of them are on the page showing, b = how many pages.
+ReiIn_OnPage:
+    call ReiIn_Count
+    ld b, 1
+    cp TOPIC_PAGE + 1
+    jr c, :+
+    inc b
+:   ld c, a
     ld a, [wReiPage]
+    or a
+    ld a, c
+    jr z, :+
+    sub TOPIC_PAGE
+:   cp TOPIC_PAGE
+    ret c
+    ld a, TOPIC_PAGE
+    ret
+
+; a = sentence number in the topic -> hl = its text.
+ReiIn_Line:
     ld b, a
-    add a, a
-    add a, b                        ; page * IN_PER
-    ld hl, wReiPick
-    add a, [hl]
+    ld a, [wReiTopic]
     add a, a
     ld e, a
     ld d, 0
-    ld hl, ReiPrompts
+    ld hl, ReiTopicLists
     add hl, de
     ld a, [hl+]
     ld h, [hl]
     ld l, a
+    inc b
+    jr .next
+.skip
+    ld a, [hl+]
+    or a
+    jr nz, .skip
+.next
+    dec b
+    jr nz, .skip
+    ret
+
+; a = the first sentence number of the page showing.
+ReiIn_PageBase:
+    ld a, [wReiPage]
+    or a
+    ret z
+    ld a, TOPIC_PAGE
     ret
 
 ; The prompt row, into the shadow.
@@ -112,8 +150,13 @@ ReiIn_DrawSay:
     call Rei_Fill
     ld a, [wReiMode]
     or a
-    jr nz, .typed
-    call ReiIn_Prompt
+    ret z                           ; the topics: nothing chosen, nothing shown
+    cp MODE_KEYS
+    jr z, .typed
+    call ReiIn_PageBase
+    ld hl, wReiPick
+    add a, [hl]
+    call ReiIn_Line
     ld b, SAY_X
     ld c, SAY_Y
     jp Rei_Print
@@ -164,69 +207,114 @@ ReiIn_DrawSay:
     ld [hl], '_' - FONT_FIRST
     ret
 
-; The keys' interior, into the shadow: the list or the keyboard.
-ReiIn_DrawKeys:
-    call ReiIn_FrameEdges
+; The bar and the five rows, into the shadow: whichever state it is.
+ReiIn_Draw:
     xor a
-    ld b, KEYS_X
-    ld c, KEYS_Y
-    ld d, KEYS_W
-    ld e, KEYS_H
+    ld b, LIST_X
+    ld c, BAR_Y
+    ld d, LIST_W
+    ld e, LIST_H + 1
     call Rei_Fill
     ld a, [wReiMode]
-    or a
-    jr nz, .keyboard
+    cp MODE_LINES
+    jr z, .lines
+    jp nc, .keys
 
-    ld hl, sReiListTitle
-    ld b, KEYS_FX + 2
-    ld c, KEYS_FY
+    ; --- the topics ---
+    ld hl, sReiBarTopics
+    ld b, LIST_X
+    ld c, BAR_Y
     call Rei_Print
-    ld a, [wReiPick]                ; remember it: the rows below count in wReiPick
+    ld hl, ReiTopicNames
+    ld b, GRID_X0
+.column
+    ld c, LIST_Y
+.name
+    push bc
+    push hl
+    call Rei_CellAddr
+    ld d, h
+    ld e, l
+    pop hl
+    ld b, TOPIC_W
+.letter
+    ld a, [hl+]
+    sub FONT_FIRST
+    ld [de], a
+    inc de
+    dec b
+    jr nz, .letter
+    pop bc
+    inc c
+    ld a, c
+    cp LIST_Y + GRID_ROWS
+    jr c, .name
+    ld a, b
+    cp GRID_X1
+    ld b, GRID_X1
+    jr c, .column
+    call ReiIn_TopicCell            ; the arrow, left of the chosen name
+    dec b
+    jr .arrow
+
+    ; --- a topic's sentences ---
+.lines
+    ld hl, sReiBarLines
+    ld b, LIST_X
+    ld c, BAR_Y
+    call Rei_Print
+    ld hl, sReiBarBack
+    ld b, LIST_X + LIST_W - 6
+    ld c, BAR_Y
+    call Rei_Print
+    call ReiIn_OnPage
+    dec b
+    jr z, .onePage
+    ld hl, sReiBarPages             ; "<>1/2": there is another page
+    ld b, LIST_X + 4
+    ld c, BAR_Y
+    call Rei_Print
+    ld b, LIST_X + 6
+    ld c, BAR_Y
+    call Rei_CellAddr
+    ld a, [wReiPage]
+    add a, '1' - FONT_FIRST
+    ld [hl+], a
+    ld a, '/' - FONT_FIRST
+    ld [hl+], a
+    ld [hl], '2' - FONT_FIRST
+.onePage
+    call ReiIn_OnPage
     push af
-    xor a
-.prompt
-    ld [wReiPick], a
-    call ReiIn_Prompt
-    ld a, [wReiPick]
-    add a, KEYS_Y
-    ld c, a
-    ld b, IN_LIST_X
-    call Rei_Print
-    ld a, [wReiPick]
-    inc a
-    cp IN_PER
-    jr c, .prompt
+    call ReiIn_PageBase
+    call ReiIn_Line
     pop af
-    ld [wReiPick], a
-    add a, KEYS_Y                   ; the arrow beside the chosen one
+    ld c, LIST_Y
+.line
+    push af
+    ld b, LIST_X + 1
+    call Rei_Print                  ; leaves hl at the next sentence
+    inc c
+    pop af
+    dec a
+    jr nz, .line
+    ld a, [wReiPick]
+    add a, LIST_Y
     ld c, a
-    ld b, KEYS_X
+    ld b, LIST_X
+.arrow
     call Rei_CellAddr
     ld [hl], T_ARROW_R
-    ld hl, sReiToKeys
-    ld b, KEYS_FX + KEYS_FW - 10
-    ld c, KEYS_FY
-    call Rei_Print
-    ld hl, sReiHintSay
-    ld b, KEYS_X
-    ld c, KEYS_Y + IN_PER
-    call Rei_Print
-    ld hl, sReiHintMore
-    ld b, KEYS_X + KEYS_W - 6
-    ld c, KEYS_Y + IN_PER
-    jp Rei_Print
+    ret
 
-.keyboard
-    ld hl, sReiKeysTitle
-    ld b, KEYS_FX + 2
-    ld c, KEYS_FY
-    call Rei_Print
-    ld hl, sReiToWorld
-    ld b, KEYS_FX + KEYS_FW - 11
-    ld c, KEYS_FY
+    ; --- the keyboard ---
+.keys
+    ld hl, sReiBarKeys
+    ld b, LIST_X
+    ld c, BAR_Y
     call Rei_Print
     ld b, IN_KEY_X
-    ld c, KEYS_Y
+    ld c, LIST_Y
     call Rei_CellAddr
     ld de, ReiKeys
     ld c, IN_ROWS
@@ -252,58 +340,54 @@ ReiIn_DrawKeys:
     dec c
     jr nz, .row
     ld b, IN_KEY_X + (IN_COLS - 1) * 2      ; the last key sends
-    ld c, KEYS_Y + IN_ROWS - 1
+    ld c, LIST_Y + IN_ROWS - 1
     call Rei_CellAddr
     ld [hl], T_OK
     ret
 
-; The keys frame's top and bottom edges, plain, and START's hint: the titles
-; are laid over them.
-ReiIn_FrameEdges:
-    ld a, T_FR_T
-    ld b, KEYS_FX + 1
-    ld c, KEYS_FY
-    ld d, KEYS_FW - 2
-    ld e, 1
-    call Rei_Fill
-    ld a, T_FR_B
-    ld b, KEYS_FX + 1
-    ld c, KEYS_FY + KEYS_FH - 1
-    ld d, KEYS_FW - 2
-    ld e, 1
-    call Rei_Fill
-    ld hl, sReiToLog
-    ld b, KEYS_FX + KEYS_FW - 11
-    ld c, KEYS_FY + KEYS_FH - 1
-    jp Rei_Print
+; b = column, c = row of the chosen topic's name.
+ReiIn_TopicCell:
+    ld a, [wReiTopic]
+    ld b, GRID_X0
+    cp GRID_ROWS
+    jr c, :+
+    sub GRID_ROWS
+    ld b, GRID_X1
+:   add a, LIST_Y
+    ld c, a
+    ret
 
-; The cursor's palette: everything inside the frame plain, then the pick.
-; a = 0 to leave nothing picked. Must run inside VBlank.
+; The cursor's palette: the five rows plain, then the pick. a = 0 to leave
+; nothing picked. Must run inside VBlank.
 ReiIn_Attrs:
     push af
     ld a, PAL_GREEN
-    ld b, KEYS_X
-    ld c, KEYS_Y
-    ld d, KEYS_W
-    ld e, KEYS_H
+    ld b, LIST_X
+    ld c, LIST_Y
+    ld d, LIST_W
+    ld e, LIST_H
     call Rei_Attr
     pop af
     or a
     ret z
     ld a, [wReiMode]
     or a
-    jr nz, .key
-    ld a, [wReiPick]
-    add a, KEYS_Y
+    jr nz, :+
+    call ReiIn_TopicCell            ; a topic: its half of the row
+    dec b
+    ld d, GRID_W
+    jr .pick
+:   cp MODE_KEYS
+    jr z, .key
+    ld a, [wReiPick]                ; a sentence: the whole row
+    add a, LIST_Y
     ld c, a
-    ld b, KEYS_X
-    ld d, KEYS_W
-    ld e, 1
-    ld a, PAL_PICK
-    jp Rei_Attr
+    ld b, LIST_X
+    ld d, LIST_W
+    jr .pick
 .key
     ld a, [wReiKey]
-    ld c, KEYS_Y
+    ld c, LIST_Y
 .rows
     cp IN_COLS
     jr c, .col
@@ -315,19 +399,20 @@ ReiIn_Attrs:
     add a, IN_KEY_X
     ld b, a
     ld d, 1
+.pick
     ld e, 1
-    ld a, PAL_PICK
+    ld a, PAL_CURSOR
     jp Rei_Attr
 
 ; Shadow -> screen for everything this file draws. a = 0 hides the cursor.
 ReiIn_Refresh::
     push af
     call ReiIn_DrawSay
-    call ReiIn_DrawKeys
+    call ReiIn_Draw
     call Console_WaitVBlank
-    ld hl, KEYS_FY * CON_W + KEYS_FX
-    ld b, KEYS_FH
-    ld c, KEYS_FW
+    ld hl, BAR_Y * CON_W + LIST_X
+    ld b, LIST_H + 1
+    ld c, LIST_W
     call Rei_Blit
     call Console_WaitVBlank
     ld hl, SAY_Y * CON_W + SAY_X
@@ -343,7 +428,7 @@ ReiUi_Resume::
     jp ReiUi_Input.resume
 
 ; The INPUT state. Returns with the message in wPromptText / wPromptLen, still
-; showing on the prompt row, and already in the log.
+; showing on the prompt row, and already in the log - or with wReiGoWorld set.
 ReiUi_Input::
     xor a
     ld [wReiTextLen], a
@@ -377,7 +462,6 @@ ReiUi_Input::
     ld a, [wReiIdle + 1]
     cp HIGH(REI_WANDERS)
     jr nz, .loop
-.toWorld
     ld a, 1
     ld [wReiGoWorld], a
     ret
@@ -391,87 +475,145 @@ ReiUi_Input::
     jr z, :+
     call ReiLog_Run                 ; comes back on SELECT, this screen untouched
     jr .awake
-:   ld a, b
+:   ld a, [wReiMode]
+    ld c, a                         ; c = the state, b = the buttons
+    ld a, b
     and KB_SELECT
     jr z, .notSelect
-    ld a, [wReiMode]                ; list -> keys -> world -> list
-    xor 1
-    ld [wReiMode], a
-    jr nz, .redraw
-    ld a, 1                         ; from the keys: the list drawn now, to come
-    call ReiIn_Refresh              ; back to, and off to the world
-    jr .toWorld
+    ld a, c                         ; the list <-> the keyboard
+    cp MODE_KEYS
+    ld a, [wReiList]
+    jr z, :+
+    ld a, c
+    ld [wReiList], a
+    ld a, MODE_KEYS
+:   ld [wReiMode], a
+    jr .redraw
 .notSelect
-    ld a, [wReiMode]
-    or a
-    jr nz, .keyboard
+    ld a, c
+    cp MODE_LINES
+    jp z, .lines
+    jp nc, .keyboard
 
-    ; --- the list ---
+    ; --- the topics: a grid of two by five ---
     ld a, b
     and KB_A
-    jr nz, .sendPrompt
+    jr z, :+
+    xor a
+    ld [wReiPage], a
+    ld [wReiPick], a
+    inc a
+    ld [wReiMode], a                ; MODE_LINES
+    jp .redraw
+:   ld a, [wReiTopic]
+    ld c, a
     ld a, b
     and KB_LEFT | KB_RIGHT
-    jr nz, .turn
+    jr z, :+
+    ld a, c                         ; the other column, the same row
+    add a, GRID_ROWS
+    cp TOPIC_COUNT
+    jr c, .topic
+    sub TOPIC_COUNT
+    jr .topic
+:   ld a, c                         ; e = the column's first topic, a = the row
+    ld e, 0
+    cp GRID_ROWS
+    jr c, :+
+    sub GRID_ROWS
+    ld e, GRID_ROWS
+:   ld d, GRID_ROWS
+    call .upDown
+    jp z, .loop
+    add a, e
+.topic
+    ld [wReiTopic], a
+    jp .redraw
+
+; a = a row, d = how many rows, b = the buttons: a = the row after UP or DOWN,
+; wrapping. Z set if neither was pressed.
+.upDown
+    ld c, a
     ld a, b
     and KB_UP
-    jr z, .listDown
-    ld a, [wReiPick]
+    jr z, :+
+    ld a, c
     or a
-    jr z, .older                    ; off the top: her reply before this one
+    jr nz, .up
+    ld a, d
+.up
     dec a
-    jr .picked
-.listDown
-    ld a, b
+    jr .moved
+:   ld a, b
     and KB_DOWN
-    jr z, .loop
-    ld a, [wReiPick]
-    cp IN_PER - 1
-    jr z, .newer                    ; off the bottom: the one after
+    ret z
+    ld a, c
     inc a
-.picked
+    cp d
+    jr c, .moved
+    xor a
+.moved
+    ld c, a
+    or 1                            ; Z clear
+    ld a, c
+    ret
+
+    ; --- a topic's sentences ---
+.lines
+    ld a, b
+    and KB_B
+    jr z, :+
+    xor a
+    ld [wReiMode], a                ; back up, the cursor on the topic it came from
+    jp .redraw
+:   ld a, b
+    and KB_A
+    jr nz, .sendLine
+    ld a, b
+    and KB_LEFT | KB_RIGHT
+    jr z, :+
+    push bc
+    call ReiIn_OnPage
+    pop de
+    dec b
+    jp z, .loop                     ; one page: nothing to turn
+    ld a, [wReiPage]
+    xor 1
+    ld [wReiPage], a
+    call ReiIn_OnPage               ; the new page may be shorter
+    ld hl, wReiPick
+    dec a
+    cp [hl]
+    jp nc, .redraw
+    ld [hl], a
+    jp .redraw
+:   push bc
+    call ReiIn_OnPage
+    pop bc
+    ld d, a
+    ld a, [wReiPick]
+    call .upDown
+    jp z, .loop
     ld [wReiPick], a
     jp .redraw
-.turn                               ; the pages go round
-    ld a, b
-    and KB_LEFT
-    ld a, [wReiPage]
-    jr z, .turnOn
-    or a
-    jr nz, :+
-    ld a, IN_PAGES
-:   dec a
-    jr .turned
-.turnOn
-    inc a
-    cp IN_PAGES
-    jr c, .turned
-    xor a
-.turned
-    ld [wReiPage], a
-    jp .redraw
 
-.older
-    call ReiHist_Older
-    jp .awake
-.newer
-    call ReiHist_Newer
-    jp .awake
-
-.sendPrompt
-    call ReiIn_Prompt
+.sendLine
+    call ReiIn_PageBase
+    ld hl, wReiPick
+    add a, [hl]
+    call ReiIn_Line
     ld de, wPromptText
     ld c, 0
-.copyPrompt
+.copyLine
     ld a, [hl+]
     or a
     jp z, .staged
     ld [de], a
     inc de
     inc c
-    jr .copyPrompt
+    jr .copyLine
 
-    ; --- the keyboard ---
+    ; --- the keyboard: four rows of nine ---
 .keyboard
     ld a, b
     and KB_A
@@ -491,19 +633,11 @@ ReiUi_Input::
     jr nz, .move
     ld a, b
     and KB_DOWN
-    jr z, .keyUp
-    ld a, c
-    cp IN_CELLS - IN_COLS
-    jr nc, .newer                   ; off the bottom row
     ld e, IN_COLS
-    jr .move
-.keyUp
+    jr nz, .move
     ld a, b
     and KB_UP
     jp z, .loop
-    ld a, c
-    cp IN_COLS
-    jr c, .older                    ; off the top row
     ld e, IN_CELLS - IN_COLS
 .move
     ld a, c
@@ -570,5 +704,6 @@ ReiUi_Input::
     jp ReiIn_Refresh
 
 ASSERT REI_TEXT_MAX + 4 <= PROMPT_MAX, "Chat_Stage adds a newline, the marker and a newline"
+ASSERT TOPIC_COUNT == 2 * GRID_ROWS && TOPIC_PAGE == LIST_H
 
 ENDC
