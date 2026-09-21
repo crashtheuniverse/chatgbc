@@ -29,7 +29,7 @@ from rei_talk import Talk, twin   # noqa: E402,F401  (twin is a fixture)
 
 DEFS = harness.load_defs(APP / "src" / "chatgbc.inc", APP / "src" / "hardware.inc",
                          APP / "src" / "app" / "rei.inc")
-LCDC_WORLD = 0x08 | 0x20 | 0x40 | 0x02 | 0x04    # BG and window on $9C00, 8 x 16 objects
+LCDC_WORLD = 0x80 | 0x08 | 0x20 | 0x40 | 0x02 | 0x04 | 0x01   # BG and window on $9C00, 8 x 16 objects, LCDC.4 clear
 BOX = {(x, y) for x in range(1, 19) for y in range(1, 5)}
 
 
@@ -53,6 +53,19 @@ def model_state(r):
 def sprite(r):
     y, x, tile, _ = r.pyboy.memory[0xFE00:0xFE04]
     return x, tile
+
+
+def strip_cells(r, bank):
+    """The scene's twelve rows of the second map: tiles (bank 0) or attributes."""
+    at = 0x9C00 + DEFS["WORLD_MAP_Y"] * 32
+    return [r.pyboy.memory[bank, at + i] for i in range(12 * 32)]
+
+
+def art_table(label):
+    text = (APP / "src" / "rei_world_art.inc").read_text(encoding="utf-8")
+    body = text.split(f"{label}::")[1].split("\n\n")[0]
+    return [int(v) for line in body.splitlines() if line.strip().startswith("db")
+            for v in line.split("db")[1].split(",")]
 
 
 @pytest.fixture(scope="module")
@@ -81,9 +94,12 @@ def test_left_alone_she_goes_and_any_button_brings_the_chat_back(talk):
     assert not ui.world_on(r), "there is no button for the world"
     ui.to_world(r)                                  # nobody there: she wanders off
     lcdc = r.pyboy.memory[0xFF40]
-    assert lcdc & LCDC_WORLD == LCDC_WORLD, hex(lcdc)
+    assert lcdc == LCDC_WORLD, hex(lcdc)
     assert r.pyboy.memory[0xFF4A] == 96 and r.pyboy.memory[0xFF42] == 160   # WY, SCY
-    assert window_map(r)[0][2] == harness.load_defs(APP / "src" / "rei_art.inc")["T_THINK"]
+    assert window_map(r) == [[0] * 20] * 6, "a plain panel: no frame, nothing on it"
+    assert not any(r.pyboy.memory[1, 0x9C00 + y * 32 + x] for y in range(6) for x in range(20))
+    assert strip_cells(r, 0) == art_table("ReiWorldMap")
+    assert strip_cells(r, 1) == art_table("ReiWorldAttr")
     assert ui.thought_box(r) == [" " * 18] * 4, "the box is empty most of the time"
 
     for button in ("b", "a", "start", "select"):    # any button comes back
@@ -123,27 +139,66 @@ def test_a_button_keeps_her_in(talk):
     assert r.read("wReiIdle")[0] < 10
 
 
+def objects(r):
+    """Her sprite as OAM has it: [(y, x, tile, flags)] for the objects on screen."""
+    oam = r.pyboy.memory[0xFE00:0xFE00 + 9 * 4]
+    return [tuple(oam[i:i + 4]) for i in range(0, 36, 4) if oam[i]]
+
+
 def test_she_walks_and_the_camera_follows(talk):
     r = talk.rom
     ui.to_world(r)
     ui.set_word(r, "wWorldThinkT", 60000)           # no thought for now: just the walk
-    seen = {"x": set(), "scx": set(), "tile": set(), "wave": set(), "act": set(), "sx": set()}
-    wave = 0x9C00 + (DEFS["WORLD_MAP_Y"] + gen_rei_world.ROW_WAVE) * 32
+    first = art_table("ReiWorldFrames")
+    seen = {"x": set(), "scx": set(), "pose": set(), "act": set()}
     for _ in range(1500):
         r.pyboy.tick(1, False)
-        x, tile = sprite(r)
-        seen["sx"].add(x - 8)
-        seen["tile"].add(tile & ~3)
+        objs = objects(r)
+        pose, act = r.read("wWorldPose")[0], r.read("wWorldAct")[0]
         seen["x"].add(r.read("wWorldX")[0])
         seen["scx"].add(r.pyboy.memory[0xFF43])
-        seen["wave"].add(r.pyboy.memory[wave])
-        seen["act"].add(r.read("wWorldAct")[0])
-    assert len(seen["x"]) > 100 and len(seen["scx"]) > 60
-    assert seen["tile"] == {12, 16, 20}, "two walking frames and the looking one"
+        seen["pose"].add(pose >> 1)
+        seen["act"].add(act)
+        assert all(0 <= x - 8 <= 160 - 8 and 43 + 16 <= y <= 43 + 48 for y, x, _, _ in objs), objs
+        tiles = {t for _, _, t, _ in objs}
+        if len(objs) == 6:                          # her back to us: a back view's tiles, unmirrored
+            assert min(tiles) in first[:4] and not any(f & 0x20 for *_, f in objs)
+        else:
+            assert len(objs) == 9 and min(tiles) in first[4:]
+        assert all(f & 0x08 for *_, f in objs), "her tiles are in VRAM bank 1"
+    assert len(seen["x"]) > 100 and len(seen["scx"]) > 40
     assert seen["act"] == {0, 1}, "she walks, and she stops to look"
-    assert seen["wave"] == {2, 3}, "the sea moves"
-    assert min(seen["sx"]) >= DEFS["CAM_LEFT"] - 1 and max(seen["sx"]) <= DEFS["CAM_RIGHT"] + 1
+    assert seen["pose"] == set(range(8)), "four back views, four steps"
+    assert max(seen["scx"]) <= DEFS["CAM_MAX"]
     assert ui.thought_box(r) == [" " * 18] * 4
+
+
+def walk(r, x, to_the_right, frames):
+    """Put her at x, walking that way for a long stretch; run; where is she?"""
+    scx = min(max(x - 68, 0), DEFS["CAM_MAX"])
+    for name, v in (("wWorldX", x), ("wWorldScx", scx), ("wWorldDir", to_the_right),
+                    ("wWorldAct", 0), ("wWorldTimer", 250)):
+        r.pyboy.memory[r.addr(name)] = v
+    r.pyboy.tick(frames, False)
+    return r.read("wWorldX")[0], r.read("wWorldDir")[0], r.pyboy.memory[0xFF43]
+
+
+def test_the_picture_has_ends(talk):
+    r = talk.rom
+    x, right, scx = walk(r, DEFS["WORLD_MIN_X"] + 6, 0, 60)
+    assert right == 1 and DEFS["WORLD_MIN_X"] <= x < DEFS["WORLD_MIN_X"] + 30, "she turns at the left end"
+    assert scx == 0, "and the camera stops there"
+    assert min(o[1] for o in objects(r)) - 8 >= DEFS["WORLD_MIN_X"]
+    x, right, scx = walk(r, DEFS["WORLD_MAX_X"] - 6, 1, 60)
+    assert right == 0 and DEFS["WORLD_MAX_X"] - 30 < x <= DEFS["WORLD_MAX_X"], "and at the right end"
+    assert scx == DEFS["CAM_MAX"]
+    assert max(o[1] for o in objects(r)) - 8 + 8 <= 160 - 8
+    flags = {o[3] & 0x20 for o in objects(r)}
+    assert flags == {0}, "walking left is how she is drawn; right is the mirror"
+    walk(r, 120, 1, 8)
+    assert {o[3] & 0x20 for o in objects(r)} == {0x20}
+    xs = [o[1] for o in objects(r)]
+    assert max(xs) - min(xs) == 16 and len(set(xs)) == 3, "three columns, side by side"
 
 
 def test_a_thought_is_the_models_and_leaves_no_trace(talk):
@@ -177,9 +232,8 @@ def test_a_thought_is_the_models_and_leaves_no_trace(talk):
     rows = ui.wrap(want, ui.THINK_W)
     assert ui.thought_box(r) == rows + [" " * 18] * (4 - len(rows))
 
-    centres = [x for _, x, _ in gen_rei_world.OBJECTS]
-    ring = [min((x_at + 8 - c) % 256, (c - x_at - 8) % 256) for c in centres]
-    assert ring[r.read("wWorldNear")[0]] <= min(ring) + 1, "the nearest thing is on record"
+    far = [abs(x_at + 12 - x) for _, x, _ in gen_rei_world.OBJECTS]
+    assert far[r.read("wWorldNear")[0]] <= min(far) + 1, "the nearest thing is on record"
 
     for _ in range(DEFS["THINK_STAYS"] + 60):       # it stays a while, then it goes
         r.pyboy.tick(1, False)
@@ -215,6 +269,24 @@ def test_a_button_cuts_a_thought_short(talk):
     assert not r.read("wWorldThinking")[0] and not r.read("wTypeOn")[0]
     assert r.pyboy.memory[0xFF40] == 0x91
     assert ui.pane(r) == ui.layout(talk.said[-1]), "her last reply is still in her pane"
+
+
+def test_the_log_and_the_world_share_a_map(talk):
+    """$9C00 is the log's screen and the world's. Each must come up whole after
+    the other has been there."""
+    r = talk.rom
+    rows = ui.log_rows(talk.lines)
+    ui.press(r, "start", after=12)
+    assert ui.log_screen(r)[:len(rows)] == rows, "the log, after the world"
+    ui.press(r, "select", after=12)
+    ui.to_world(r)                                  # the world, after the log
+    assert window_map(r) == [[0] * 20] * 6
+    assert not any(r.pyboy.memory[1, 0x9C00 + y * 32 + x] for y in range(6) for x in range(20))
+    assert strip_cells(r, 0) == art_table("ReiWorldMap")
+    ui.press(r, "b", after=10)
+    ui.press(r, "start", after=12)
+    assert ui.log_screen(r)[:len(rows)] == rows
+    ui.press(r, "select", after=12)
 
 
 def test_the_chat_never_knew(talk):
