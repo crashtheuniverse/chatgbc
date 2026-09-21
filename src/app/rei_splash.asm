@@ -278,6 +278,6 @@ ReiUi_Splash::
     add hl, de
     dec c
     jr nz, .wipe
-    jp ReiScr_Main
+    jp ReiScr_LcdOff                ; the main loop loads the world's art, then ReiScr_Main
 
 ENDC

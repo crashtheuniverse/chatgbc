@@ -9,7 +9,7 @@
 ;                    or the keyboard
 ;
 ; That is the chat. Left alone for twenty seconds she goes to the world: a beach
-; she walks along, with a thought box where the list was.
+; riverside at sunset she walks along, and now and then a thought over the sky.
 ;
 ; Only the Rei build assembles any of this: build.ps1 -Rei defines REI_UI.
 
@@ -80,19 +80,27 @@ DEF REI_LCDC EQU LCDC_ON | LCDC_BG_ON | LCDC_BLOCK01 | LCDC_BG_9800
 
 ; --- The world (src/app/rei_world.asm, rei_walk.asm) -------------------------
 ; The second BG map, $9C00, holds both halves of the world screen: the thought
-; box in rows 0-5, which the window shows at the bottom of the screen, and the
-; beach strip in rows 20-31, which the BG shows at the top with SCY = 160. The
-; log screen shares the map but only ever writes rows 0-17, so the strip is
-; drawn once; the box is redrawn on the way in.
+; panel in rows 0-5, which the window shows at the bottom of the screen, and
+; the scene's strip in rows 20-31, which the BG shows at the top with SCY = 160
+; and scrolls sideways with SCX from 0 to 96 (it does not wrap). The log screen
+; shares the map but only ever writes rows 0-17, so the strip is drawn once;
+; the panel is redrawn on the way in. The world runs with LCDC.4 clear: its BG
+; tiles are VRAM bank 1 at $8800-$97FF, her sprite's bank 1 at $8000-$87FF, and
+; the panel's letters a copy of the chat's first 128 tiles at $9000 in bank 0.
+DEF REI_WORLD_BANK EQU 30           ; the world's code and its art: a ROM bank of its own
 DEF OAMRAM       EQU $FE00
 DEF WORLD_MAP_Y  EQU 20             ; the strip's first row in the map
 DEF WORLD_SCY    EQU WORLD_MAP_Y * 8
-DEF WORLD_WIN_Y  EQU 96             ; the thought box: the bottom six rows
-DEF WORLD_REI_Y  EQU 72             ; the top of her sprite; her feet are 16 lower,
-                                    ; on the two rows of sand the art keeps clear
-DEF CAM_LEFT     EQU 56             ; the camera keeps her left edge between these
-DEF CAM_RIGHT    EQU 88
-DEF THINK_X      EQU 1              ; the text inside the box, in window map cells
+DEF WORLD_WIN_Y  EQU 96             ; the thought panel: the bottom six rows, black
+DEF WORLD_REI_Y  EQU 43             ; the top of her sprite: 48 tall, her feet on the promenade
+DEF WORLD_REI_W  EQU 24             ; her box: the walking frames fill it, the back views are 16
+DEF WORLD_OBJS   EQU 9              ; 8 x 16 objects: three columns of three
+DEF WORLD_MIN_X  EQU 8              ; she turns round at the ends of the picture,
+DEF WORLD_MAX_X  EQU 256 - WORLD_REI_W - 8
+DEF CAM_MAX      EQU 256 - 160      ; and the camera stops there
+DEF CAM_LEFT     EQU 56             ; in between it keeps her left edge between these
+DEF CAM_RIGHT    EQU 80
+DEF THINK_X      EQU 1              ; the text on the panel, in window map cells: a margin all round
 DEF THINK_Y      EQU 1
 DEF THINK_W      EQU 18
 DEF THINK_H      EQU 4
@@ -103,7 +111,14 @@ DEF THINK_STAYS  EQU 6 * 60         ; a finished thought stays up this long
 DEF REI_WANDERS  EQU 20 * 60        ; frames of an idle chat before she wanders off
 DEF REI_SNAP_BANK EQU 3             ; WRAM bank of the conversation's snapshot
 
-DEF WORLD_LCDC EQU LCDC_ON | LCDC_BG_ON | LCDC_BLOCK01 | LCDC_BG_9C00 | LCDC_WIN_ON | LCDC_WIN_9C00 | LCDC_OBJ_ON | LCDC_OBJ_16
+DEF WORLD_LCDC EQU LCDC_ON | LCDC_BG_ON | LCDC_BG_9C00 | LCDC_WIN_ON | LCDC_WIN_9C00 | LCDC_OBJ_ON | LCDC_OBJ_16
+
+; Maps the world's bank and calls into it. Only from ROM0.
+MACRO WORLD_FAR
+    ld a, REI_WORLD_BANK
+    ld [rROMB0], a
+    call \1
+ENDM
 
 ; Maps the UI bank and calls into it. Only from ROM0.
 MACRO REI_FAR
