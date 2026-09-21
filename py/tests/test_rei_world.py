@@ -62,10 +62,7 @@ def talk(twin):
     r.pyboy.tick(150, False)
     r.pyboy.memory[r.addr("wWorldRng")] = 40        # the walk, the same every run
     ui.press(r, "start", after=60)
-    want = t.expect("hello")
-    ui.press(r, "a", after=0)
-    ui.wait_ready(r)
-    assert t.rom_reply() == want
+    t.send(0, 0)                                    # "hello"
     yield t
     r.close()
 
@@ -74,13 +71,15 @@ def test_the_pool_is_the_one_the_twin_chose():
     assert muses() == rei_muse.POOL
 
 
-def test_select_cycles_to_the_world_and_back(talk):
+def test_left_alone_she_goes_and_any_button_brings_the_chat_back(talk):
     r = talk.rom
+    assert r.read("wReiMode")[0] == 1               # a topic's sentences, as "hello" left it
+    ui.press(r, "down")
     before = chat_screen(r)
     ui.press(r, "select")
-    assert r.read("wReiMode")[0] == 1 and "SEL:world" in ui.row_text(r, 12)
-    ui.press(r, "select", after=12)
-    assert ui.world_on(r)
+    ui.press(r, "select")
+    assert not ui.world_on(r), "there is no button for the world"
+    ui.to_world(r)                                  # nobody there: she wanders off
     lcdc = r.pyboy.memory[0xFF40]
     assert lcdc & LCDC_WORLD == LCDC_WORLD, hex(lcdc)
     assert r.pyboy.memory[0xFF4A] == 96 and r.pyboy.memory[0xFF42] == 160   # WY, SCY
@@ -95,18 +94,21 @@ def test_select_cycles_to_the_world_and_back(talk):
         assert not ui.world_on(r), button
         assert r.pyboy.memory[0xFF40] == 0x91 and r.pyboy.memory[0xFF43] == 0
         assert chat_screen(r) == before, f"the chat is not as it was left ({button})"
-        assert r.read("wReiMode")[0] == 0 and not ui.log_open(r)
+        assert r.read("wReiMode")[0] == 1 and r.read("wReiPick")[0] == 1 and not ui.log_open(r)
+    ui.press(r, "b")
+    topics = chat_screen(r)                         # and from the topics
+    ui.to_world(r)
+    ui.press(r, "a", after=10)
+    assert chat_screen(r) == topics and r.read("wReiMode")[0] == 0
 
 
 def test_typed_text_survives_a_visit(talk):
     r = talk.rom
     ui.press(r, "select")
     ui.type_text(r, "hi")
-    ui.set_word(r, "wReiIdle", DEFS["REI_WANDERS"] - 20)
-    r.pyboy.tick(40, False)                         # nobody there: she wanders off
-    assert ui.world_on(r)
+    ui.to_world(r)
     ui.press(r, "b", after=10)
-    assert r.read("wReiMode")[0] == 1, "she left by herself: the keyboard is still up"
+    assert r.read("wReiMode")[0] == 2, "the keyboard is still up"
     assert ui.row_text(r, 10, 1, 19).rstrip() == "hi_"
     ui.press(r, "b")
     ui.press(r, "b")
@@ -218,8 +220,8 @@ def test_a_button_cuts_a_thought_short(talk):
 def test_the_chat_never_knew(talk):
     """Two thoughts later, one abandoned: the conversation goes on exactly as
     the twin's does - and the twin never went to the beach."""
-    talk.send_from_list(0, 2)                       # "my name is tom"
-    want = talk.send_from_list(1, 0)                # "what is my name"
+    talk.send(1, 0)                                 # "my name is tom"
+    want = talk.send(1, 2)                          # "what is my name"
     assert "tom" in want
     r = talk.rom
     ui.press(r, "start", after=12)                  # and the log has no thoughts in it

@@ -1,19 +1,13 @@
 """What the Rei suites share: the twin, and a ROM in conversation with it."""
-import re
-
 import pytest
 
 import export5                    # noqa: E402
 import golden5                    # noqa: E402
 import rei_shots as ui            # noqa: E402
+import rei_topics                 # noqa: E402
 import twin5                      # noqa: E402
 from conftest import APP
 from model5 import Model5, Tokenizer   # noqa: E402
-
-
-def pool():
-    text = (APP / "src" / "app" / "rei_input.asm").read_text(encoding="utf-8")
-    return re.findall(r'^\.p\d: db "([^"]*)", 0', text, re.M)
 
 
 @pytest.fixture(scope="module")
@@ -44,14 +38,13 @@ class Talk:
         n = self.rom.read("wReiReplyLen")[0]
         return bytes(self.rom.read("wReiReply", n)).decode("ascii")
 
-    def send_from_list(self, page, row):
+    def send(self, topic, line):
+        """Through the topic tree: sentence `line` of topic `topic`, sent with A
+        and answered; the reply checked against the twin's."""
         r = self.rom
-        assert r.read("wReiMode")[0] == 0
-        ui.press_until(r, "left", lambda: r.read("wReiPage")[0] == 0)   # page 0, row 0
-        ui.press_until(r, "up", lambda: r.read("wReiPick")[0] == 0)
-        ui.pick(r, page, row)
-        text = pool()[page * 3 + row]
-        assert ui.row_text(r, 10, 1, 19).rstrip() == text
+        ui.choose(r, topic, line)
+        text = rei_topics.TOPICS[topic][1][line]
+        assert ui.row_text(r, 10, 1, 19).rstrip() == text, "the prompt row shows what A sends"
         want = self.expect(text)
         ui.press(r, "a", after=0)
         ui.wait_ready(r)

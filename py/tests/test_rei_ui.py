@@ -2,7 +2,8 @@
 cartridge remembers it.
 
 Drives build/rei.gbc (the app ROM with the game screen) through a conversation
-and checks it against the integer twin turn by turn. The first group of tests
+(the topic tree, the keyboard, the log) and checks it against the integer twin
+turn by turn. The first group of tests
 shares one booted ROM and one twin state and runs in file order: each leaves
 the conversation where the next picks it up. The save tests at the end power
 the cartridge off and on: a new emulator booted with the cartridge RAM the
@@ -40,7 +41,8 @@ MARKER = {(x, 8) for x in range(13, 18)}
 SAVE_BODY = 11 + 192 + 8 * 97 + 64 * 19        # src/app/rei_save.asm: 2,195 bytes
 
 
-from rei_talk import Talk, pool, twin           # noqa: E402,F401  (twin is a fixture)
+import rei_topics                 # noqa: E402
+from rei_talk import Talk, twin   # noqa: E402,F401  (twin is a fixture)
 
 
 @pytest.fixture(scope="module")
@@ -54,13 +56,20 @@ def changed(before, after):
     return {(x, y) for y in range(18) for x in range(20) if before[y][x] != after[y][x]}
 
 
-def test_pool_is_in_vocabulary():
+def test_topics_are_in_vocabulary_and_in_the_rom():
+    """Every sentence encodes with no unknown piece (py/rei_topics.py asked the
+    twin about each when the table was made), and the table the ROM carries is
+    the one that script holds."""
     tok = Tokenizer()
-    prompts = pool()
-    assert len(prompts) == 9
-    for p in prompts:
-        assert p == p.lower() and len(p) <= 17
-        assert 0 not in tok.encode("> " + p + "\n"), f"{p!r} has an unknown piece"
+    rei_topics.check_shape()
+    for _, lines in rei_topics.TOPICS:
+        for s in lines:
+            assert 0 not in tok.encode("> " + s + "\n"), f"{s!r} has an unknown piece"
+    inc = (APP / "src" / "rei_topics.inc").read_text(encoding="utf-8")
+    assert re.findall(r'^    db "([^"]*)", 0', inc, re.M) == \
+        [s for _, lines in rei_topics.TOPICS for s in lines]
+    assert [n.strip() for n in re.findall(r'^    db "([^"]{8})"$', inc, re.M)] == \
+        [name for name, _ in rei_topics.TOPICS]
 
 
 def test_splash_then_start(talk):
@@ -74,24 +83,90 @@ def test_splash_then_start(talk):
     assert ui.row_text(r, 11).strip() == "PRESS START", "the splash waits for START"
     ui.press(r, "start", after=60)
     m = ui.tilemap(r)
-    assert m[0][0] == ART["T_FR_TL"] and m[17][19] == ART["T_FR_BR"]
+    assert m[0][0] == ART["T_FR_TL"] and m[11][19] == ART["T_FR_BR"]
     assert ui.row_text(r, 0, 8, 11) == "REI"
 
 
-def test_first_screen_is_the_list(talk):
+def bar_is_solid(r):
+    attrs = r.pyboy.memory[1, 0x9800 + 12 * 32: 0x9800 + 12 * 32 + 20]
+    return all(a == ART["PAL_PICK"] for a in attrs)
+
+
+def frame_tiles_below_the_bar(r):
+    frame = {v for k, v in ART.items() if k.startswith("T_FR_")}
+    m = ui.tilemap(r)
+    return [(x, y) for y in range(12, 18) for x in range(20) if m[y][x] in frame]
+
+
+def cursor_cells(r):
+    return {(x, y) for y in range(13, 18) for x in range(20)
+            if r.pyboy.memory[1, 0x9800 + y * 32 + x] == ART["PAL_CURSOR"]}
+
+
+def test_first_screen_is_the_topics(talk):
     r = talk.rom
     assert r.read("wReiMode")[0] == 0
-    prompts = pool()
-    for i in range(3):
-        assert ui.row_text(r, 13 + i, 2, 19).rstrip() == prompts[i]
-    assert ui.row_text(r, 10, 1, 19).rstrip() == prompts[0], "the prompt row shows what will be sent"
-    assert "START:log" in ui.row_text(r, 17) and "SEL:keys" in ui.row_text(r, 12)
+    assert ui.row_text(r, 12) == "TOPIC       A:select"
+    assert bar_is_solid(r) and not frame_tiles_below_the_bar(r)
+    names = [name for name, _ in rei_topics.TOPICS]
+    for i in range(5):
+        assert ui.row_text(r, 13 + i, 1, 9).rstrip() == names[i]
+        assert ui.row_text(r, 13 + i, 11, 19).rstrip() == names[5 + i]
+    assert ui.tilemap(r)[13][0] == ART["T_ARROW_R"]
+    assert cursor_cells(r) == {(x, 13) for x in range(10)}
+    assert ui.row_text(r, 10, 1, 19).strip() == "", "nothing is chosen yet"
     assert ui.pane(r) == [" " * 12] * 7, "she has not spoken yet"
+    assert ui.row_text(r, 8, 7, 19) == "#" * 12, "no paging marker in her frame"
     assert ui.face_shown(r) in (0, 1)
+
+
+def test_the_grid_wraps(talk):
+    r = talk.rom
+    for button, topic in (("up", 4), ("down", 0), ("left", 5), ("down", 6), ("right", 1), ("up", 0)):
+        ui.press(r, button)
+        assert r.read("wReiTopic")[0] == topic, button
+    ui.press(r, "right")
+    ui.press(r, "down")
+    assert cursor_cells(r) == {(x, 14) for x in range(10, 20)}
+    assert ui.tilemap(r)[14][10] == ART["T_ARROW_R"]
+    ui.press(r, "left")
+    ui.press(r, "up")
+    assert r.read("wReiTopic")[0] == 0
+
+
+def test_a_topic_opens_its_sentences(talk):
+    r = talk.rom
+    ui.press_until(r, "down", lambda: r.read("wReiTopic")[0] == 2)     # rei: ten sentences
+    ui.press(r, "a")
+    lines = rei_topics.TOPICS[2][1]
+    assert r.read("wReiMode")[0] == 1
+    assert ui.row_text(r, 12, 0, 3) == "SAY" and ui.row_text(r, 12, 14, 20) == "B:back"
+    assert ui.row_text(r, 12, 6, 9) == "1/2" and bar_is_solid(r)
+    assert [ui.row_text(r, 13 + i, 1, 20).rstrip() for i in range(5)] == lines[:5]
+    assert cursor_cells(r) == {(x, 13) for x in range(20)}
+    assert ui.row_text(r, 10, 1, 19).rstrip() == lines[0], "the prompt row shows what A sends"
+    ui.press(r, "up")                               # wraps inside the page
+    assert r.read("wReiPick")[0] == 4
+    ui.press(r, "right")                            # the other page
+    assert ui.row_text(r, 12, 6, 9) == "2/2"
+    assert [ui.row_text(r, 13 + i, 1, 20).rstrip() for i in range(5)] == lines[5:]
+    assert ui.row_text(r, 10, 1, 19).rstrip() == lines[9]
+    ui.press(r, "left")
+    ui.press(r, "b")                                # back up, the cursor where it was
+    assert r.read("wReiMode")[0] == 0 and r.read("wReiTopic")[0] == 2
+    assert ui.row_text(r, 10, 1, 19).strip() == ""
+
+    ui.choose(r, 9, 0)                              # kind: nine sentences, four on page 2
+    ui.press_until(r, "down", lambda: r.read("wReiPick")[0] == 4)
+    ui.press(r, "right")
+    assert r.read("wReiPick")[0] == 3, "the cursor stays on a sentence"
+    assert ui.row_text(r, 17, 1, 20).strip() == ""
+    ui.press(r, "b")
 
 
 def test_hello_lands_in_the_pane_only(talk):
     r = talk.rom
+    ui.choose(r, 0, 0)
     want = talk.expect("hello")
     before = ui.tilemap(r)
     ui.press(r, "a", after=0)
@@ -115,12 +190,12 @@ def test_hello_lands_in_the_pane_only(talk):
     assert not seen["stray"], f"tiles changed outside her pane during the reply: {sorted(seen['stray'])}"
     assert seen["mouth"], "her mouth never opened"
 
-    # No after-reply screen: the list is back as it was, her reply stays up.
+    # Back in the state it was sent from: the same topic, page and cursor.
     after = ui.tilemap(r)
-    assert not changed(before, after) - PANE - FACE - MOOD - MARKER
-    assert ui.row_text(r, 13, 2, 19).rstrip() == "hello"
-    assert r.pyboy.memory[1, 0x9800 + 13 * 32 + 5] == ART["PAL_PICK"], "the cursor is back"
-    assert ui.row_text(r, 8, 15, 18) == "1/8"
+    assert not changed(before, after) - PANE - FACE - MOOD
+    assert r.read("wReiMode")[0] == 1 and r.read("wReiTopic")[0] == 0
+    assert cursor_cells(r) == {(x, 13) for x in range(20)}, "the cursor is back"
+    assert bar_is_solid(r)
 
     assert talk.rom_reply() == want
     assert ui.pane(r) == ui.layout(want)
@@ -131,73 +206,49 @@ def test_hello_lands_in_the_pane_only(talk):
 
 
 def test_the_state_carries(talk):
-    talk.send_from_list(0, 2)                       # "my name is tom"
-    want = talk.send_from_list(1, 0)                # "what is my name"
+    talk.send(1, 0)                                 # me: "my name is tom"
+    want = talk.send(1, 2)                          # "what is my name": a follow-up, same topic
     assert "tom" in want, "she forgot the name"
+    talk.send(5, 7)                                 # play, second page: "tell me a story"
 
 
-def test_edge_paging_from_the_list(talk):
+def test_up_and_down_belong_to_the_list(talk):
+    """Her pane no longer pages: whatever the d-pad does, her last reply stays."""
     r = talk.rom
-    newest, before = talk.said[-1], talk.said[-2]
-    assert ui.row_text(r, 8, 15, 18) == "3/8"
-    assert r.read("wReiPick")[0] == 0
-    ui.press(r, "up")                               # off the top of the list
-    assert ui.pane(r) == ui.layout(before)
-    assert ui.row_text(r, 8, 15, 18) == "2/8"
-    assert r.read("wReiPick")[0] == 0, "the cursor stays"
-    ui.press(r, "up")
-    ui.press(r, "up")                               # there is nothing before the first
-    assert ui.pane(r) == ui.layout(talk.said[0])
-    assert ui.row_text(r, 8, 15, 18) == "1/8"
-    ui.press(r, "down")                             # inside the list DOWN only moves
-    assert r.read("wReiPick")[0] == 1 and ui.row_text(r, 8, 15, 18) == "1/8"
-    ui.press(r, "down")
-    ui.press(r, "down")                             # off the bottom
-    assert ui.row_text(r, 8, 15, 18) == "2/8"
-    ui.newer(r)
-    ui.newer(r)                                     # and nothing after the newest
-    assert ui.pane(r) == ui.layout(newest)
-    assert ui.row_text(r, 8, 15, 18) == "3/8"
+    pane = ui.pane(r)
+    for button in ("up", "up", "down", "left", "right", "b", "up", "down", "left"):
+        ui.press(r, button)
+        assert ui.pane(r) == pane
+    assert ui.row_text(r, 8, 7, 19) == "#" * 12
 
 
-def test_sending_snaps_to_the_newest(talk):
+def test_keyboard_and_the_ok_key(talk):
     r = talk.rom
-    ui.older(r)
-    ui.older(r)
-    assert ui.row_text(r, 8, 15, 18) == "1/8"
-    talk.send_from_list(1, 1)                       # "i like chess"
-    assert ui.row_text(r, 8, 15, 18) == "4/8"
-
-
-def test_keyboard_ok_sends_and_edges_page(talk):
-    r = talk.rom
+    ui.choose(r, 3, 1)                              # somewhere in the list
     ui.press(r, "select")
-    assert r.read("wReiMode")[0] == 1
-    assert ui.row_text(r, 13, 2, 19) == "a b c d e f g h i"
-    assert ui.tilemap(r)[16][18] == ART["T_OK"]
-    assert "SEL:world" in ui.row_text(r, 12)
+    assert r.read("wReiMode")[0] == 2
+    assert ui.row_text(r, 12) == "KEYS B:del  SEL:list" and bar_is_solid(r)
+    assert ui.row_text(r, 13, 1, 18) == "a b c d e f g h i"
+    assert ui.tilemap(r)[16][17] == ART["T_OK"]
+    assert ui.row_text(r, 17).strip() == "" and not frame_tiles_below_the_bar(r)
+    assert cursor_cells(r) == {(1, 13)}
+    ui.press(r, "up")                               # the keys wrap, top to bottom
+    assert r.read("wReiKey")[0] == 27
+    ui.press(r, "down")
 
-    ui.press(r, "up")                               # off the top row of keys
-    assert ui.pane(r) == ui.layout(talk.said[-2]) and ui.row_text(r, 8, 15, 18) == "3/8"
-    assert r.read("wReiKey")[0] == 0
-    for _ in range(3):
-        ui.press(r, "down")
-    assert r.read("wReiKey")[0] == 27 and ui.row_text(r, 8, 15, 18) == "3/8"
-    ui.press(r, "down")                             # off the bottom row
-    assert ui.pane(r) == ui.layout(talk.said[-1]) and ui.row_text(r, 8, 15, 18) == "4/8"
-
-    cell = ui.type_text(r, ui.OK, 27)
+    cell = ui.type_text(r, ui.OK, 0)
     assert r.read("wReady")[0] and not r.read("wTypeOn")[0], "an empty message is not sent"
     cell = ui.type_text(r, "hiz", cell)
     ui.press(r, "b")                                # B deletes
     assert ui.row_text(r, 10, 1, 19).rstrip() == "hi_"
 
-    ui.press(r, "start", after=12)                  # START is the log now, not send
+    ui.press(r, "start", after=12)                  # START is the log, not send
     assert ui.log_open(r) and r.read("wReady")[0] and not r.read("wTypeOn")[0]
     ui.press(r, "select", after=12)
     assert not ui.log_open(r)
-    assert r.read("wReiMode")[0] == 1, "leaving the log is not a mode switch"
+    assert r.read("wReiMode")[0] == 2, "leaving the log is not a mode switch"
     assert ui.row_text(r, 10, 1, 19).rstrip() == "hi_"
+    assert cursor_cells(r) == {(1 + 2 * (cell % 9), 13 + cell // 9)}
 
     want = talk.expect("hi")
     ui.type_text(r, ui.OK, cell)
@@ -205,21 +256,32 @@ def test_keyboard_ok_sends_and_edges_page(talk):
     ui.wait_ready(r)
     assert talk.rom_reply() == want
     assert ui.pane(r) == ui.layout(want)
-    assert ui.row_text(r, 13, 2, 19) == "a b c d e f g h i", "the keyboard is back"
+    assert ui.row_text(r, 13, 1, 18) == "a b c d e f g h i", "the keyboard is back"
     assert ui.row_text(r, 10, 1, 19).rstrip() == "_"
-    ui.press(r, "select", after=12)                 # SELECT again is the world,
-    assert ui.world_on(r)
-    ui.press(r, "b", after=10)                      # and any button there is the list
-    assert not ui.world_on(r) and r.read("wReiMode")[0] == 0
+    ui.press(r, "select")                           # and SELECT goes back to where the list was
+    assert r.read("wReiMode")[0] == 1 and r.read("wReiTopic")[0] == 3 and r.read("wReiPick")[0] == 1
+    ui.press(r, "select")
+    ui.press(r, "select")
+    assert not ui.world_on(r), "SELECT is never the world"
+
+
+def bg_palette(r, slot):
+    """A BG palette's eight bytes, read back through BCPS/BCPD."""
+    out = []
+    for i in range(8):
+        r.pyboy.memory[0xFF68] = slot * 8 + i
+        out.append(r.pyboy.memory[0xFF69])
+    return bytes(out)
 
 
 def test_the_log_shows_both_sides(talk):
     r = talk.rom
-    talk.send_from_list(1, 2)                       # "what do i like": enough rows to scroll
+    talk.send(2, 8)                                 # "do you dream": enough rows to scroll
     rows = ui.log_rows(talk.lines)
     assert len(rows) > ui.LOG_H
     main = ui.tilemap(r)
     attrs = bytes(r.pyboy.memory[1, 0x9800:0x9800 + 18 * 32])
+    cursor = bg_palette(r, ART["PAL_CURSOR"])
 
     ui.press(r, "start", after=12)
     assert ui.log_open(r)
@@ -228,6 +290,7 @@ def test_the_log_shows_both_sides(talk):
     assert rows[0] == (1, "> hello".ljust(18))
     top = r.pyboy.memory[ui.LOG_MAP + 17], r.pyboy.memory[ui.LOG_MAP + 17 * 32 + 17]
     assert top == (ART["T_ARROW_UP"], ART["T_FR_B"]), "more above, nothing below"
+    assert bg_palette(r, ART["PAL_CURSOR"]) != cursor, "the player's blue is in the slot"
 
     ui.press(r, "up", after=12)
     assert ui.log_screen(r) == rows[-ui.LOG_H - 1:-1]
@@ -243,30 +306,8 @@ def test_the_log_shows_both_sides(talk):
     assert not ui.log_open(r)
     assert ui.tilemap(r) == main, "the main screen is as it was"
     assert bytes(r.pyboy.memory[1, 0x9800:0x9800 + 18 * 32]) == attrs
-    assert r.read("wReiMode")[0] == 0
-
-
-def test_long_reply_scrolls(talk):
-    """A reply longer than the pane. The model never says this much, so the
-    text is planted in the newest history slot and shown the way any old reply
-    is: replayed through Rei_PanePut, the writer the teletype uses."""
-    r = talk.rom
-    long = ("the quick brown fox jumps over the lazy dog and then she said "
-            "supercalifragilistic words!")
-    long = long[:96]
-    assert len(long) > 84
-    assert not ui.layout(long)[0].startswith("the quick"), "this text should not fit"
-    slot = (r.read("wReiHistNext")[0] - 1) & 7
-    base = r.addr("wReiHist") + slot * 97
-    r.pyboy.memory[2, base] = len(long)
-    for i, ch in enumerate(long.encode("ascii")):
-        r.pyboy.memory[2, base + 1 + i] = ch
-    ui.older(r)
-    ui.newer(r)
-    assert ui.pane(r) == ui.layout(long)
-    m = ui.tilemap(r)
-    assert m[0][6] == ART["T_FR_TL"] and m[8][6] == ART["T_FR_BL"], "the frame survived the scroll"
-    assert all(m[y][6] == ART["T_FR_L"] and m[y][19] == ART["T_FR_R"] for y in range(1, 8))
+    assert bg_palette(r, ART["PAL_CURSOR"]) == cursor, "and so is the cursor's palette"
+    assert r.read("wReiMode")[0] == 1
 
 
 def test_speed_is_on_record(talk):
@@ -289,7 +330,7 @@ def saved(twin):
     t = Talk(twin)
     assert not menu(t.rom)
     ui.press(t.rom, "start", after=60)
-    t.send_from_list(0, 2)                          # "my name is tom"
+    t.send(1, 0)                                    # "my name is tom"
     sram = t.rom.sram()
     t.rom.close()
     return sram, t
@@ -322,8 +363,7 @@ def test_continue_is_exact(saved, twin):
 
     assert r.read("wChatStarted")[0] == 1
     assert ui.pane(r) == ui.layout(t.said[0]), "her last reply is back in the pane"
-    assert ui.row_text(r, 8, 15, 18) == "1/8"
-    want = t.send_from_list(1, 0)                   # "what is my name"
+    want = t.send(1, 2)                             # "what is my name"
     assert "tom" in want
 
     ui.press(r, "start", after=12)                  # and the log has all of it
@@ -336,6 +376,33 @@ def test_continue_is_exact(saved, twin):
     assert menu(r)
     assert ui.row_text(r, 13).split() == ["visits", "2"]
     assert ui.row_text(r, 14).split() == ["lines", "2"]
+    r.close()
+
+
+def test_a_long_reply_scrolls(saved):
+    """A reply longer than her pane. The model never says this much, so the text
+    is planted in the save as her last reply (checksum put right) and comes
+    back on continue the way any reply does: replayed through Rei_PanePut, the
+    writer the teletype uses, which has to scroll to get to the end of it."""
+    long = ("the quick brown fox jumps over the lazy dog and then she said "
+            "supercalifragilistic words!")[:96]
+    assert len(long) > 84
+    assert not ui.layout(long)[0].startswith("the quick"), "this text should not fit"
+    sram = bytearray(saved[0])
+    body = 6
+    slot = (sram[body + 8] - 1) & 7                 # wReiHistNext: the newest is the one before
+    at = body + 11 + 192 + slot * 97
+    sram[at] = len(long)
+    sram[at + 1:at + 1 + len(long)] = long.encode("ascii")
+    total = (0x5A17 + sum(sram[body:body + SAVE_BODY])) & 0xFFFF
+    sram[4:6] = total.to_bytes(2, "little")
+    r = ui.boot(bytes(sram))
+    assert menu(r)
+    ui.press(r, "a", after=60)
+    assert ui.pane(r) == ui.layout(long)
+    m = ui.tilemap(r)
+    assert m[0][6] == ART["T_FR_TL"] and m[8][6] == ART["T_FR_BL"], "the frame survived the scroll"
+    assert all(m[y][6] == ART["T_FR_L"] and m[y][19] == ART["T_FR_R"] for y in range(1, 8))
     r.close()
 
 

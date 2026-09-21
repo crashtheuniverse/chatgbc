@@ -2,14 +2,15 @@
 
     python py/rei_shots.py
 
-The pictures the reviews ask for - splash_menu (a save present), canned,
-reply_mid (the teletype running, her mouth open), reply_done_input (her reply
-up, the list back), log, keyboard (with the OK key), and the world: world_walk,
-world_pause, world_thought_mid, world_thought_done - taken from one short
-conversation, a walk on the beach and a power cycle. Needs `.\\build.ps1 -Rei`.
+The pictures the reviews ask for - splash_menu (a save present), topics,
+sentences (and sentences_page2), reply_mid (the teletype running, her mouth
+open), reply_done (her reply up, the list back, START:LOG under the mood), log,
+keyboard, and the world: world_walk, world_pause, world_thought_mid,
+world_thought_done, back_from_world - taken from one short conversation, a walk
+on the beach and a power cycle. Needs `.\\build.ps1 -Rei`.
 
 The helpers here (boot, press, read the pane back, lay text out the way the
-pane and the log do) are also what py/tests/test_rei_ui.py drives the ROM with.
+pane and the log do) are also what the Rei test suites drive the ROM with.
 """
 
 import sys
@@ -28,6 +29,7 @@ PANE_X, PANE_Y, PANE_W, PANE_H = 7, 1, 12, 7    # src/app/rei.inc
 FACE_X, FACE_Y = 1, 1
 OK = "\n"                                       # the keyboard's last cell: send
 KEYS = "abcdefghi" "jklmnopqr" "stuvwxyz " ".,!?'-;:" + OK
+REI_WANDERS = 20 * 60                           # src/app/rei.inc: idle frames before the world
 LOG_MAP = 0x9C00                                # the log screen's own BG map
 LOG_W, LOG_H = 18, 16
 
@@ -142,12 +144,22 @@ def wait_ready(r, max_frames=40000, each_frame=None):
     raise TimeoutError("the reply never finished")
 
 
-def pick(r, page, row):
-    """From the top of page 0, move the list cursor there."""
-    for _ in range(page):
+def choose(r, topic, line):
+    """From any state of the input screen: the cursor on sentence `line` of
+    topic `topic` (both counted from 0), ready for A to send it."""
+    if r.read("wReiMode")[0] == 2:
+        press(r, "select")                      # the keyboard -> the list
+    if r.read("wReiMode")[0] == 1 and r.read("wReiTopic")[0] != topic:
+        press(r, "b")                           # up to the topics
+    if r.read("wReiMode")[0] == 0:
+        if r.read("wReiTopic")[0] // 5 != topic // 5:
+            press(r, "right")                   # the other column
+        press_until(r, "down", lambda: r.read("wReiTopic")[0] == topic)
+        press(r, "a")
+    assert r.read("wReiMode")[0] == 1 and r.read("wReiTopic")[0] == topic
+    if r.read("wReiPage")[0] != line // 5:
         press(r, "right")
-    for _ in range(row):
-        press(r, "down")
+    press_until(r, "down", lambda: r.read("wReiPick")[0] == line % 5)
 
 
 def type_text(r, text, cell=0):
@@ -177,10 +189,10 @@ def world_on(r):
 
 
 def to_world(r):
-    """From the chat's input screen: SELECT past the keyboard."""
-    if not r.read("wReiMode")[0]:
-        press(r, "select")
-    press(r, "select", after=12)
+    """The only way there: nobody touches anything. The idle counter is WRAM,
+    so the wait is a moment instead of twenty seconds."""
+    set_word(r, "wReiIdle", REI_WANDERS - 8)
+    r.pyboy.tick(30, False)
     assert world_on(r)
 
 
@@ -232,32 +244,18 @@ def press_until(r, button, done, most=12):
     assert done(), f"{button} never got there"
 
 
-def older(r):
-    """Page her pane to the reply before: UP off the top of the list or keys."""
-    if r.read("wReiMode")[0]:
-        press_until(r, "up", lambda: r.read("wReiKey")[0] < 9)
-    else:
-        press_until(r, "up", lambda: r.read("wReiPick")[0] == 0)
-    press(r, "up")
-
-
-def newer(r):
-    """And to the one after: DOWN off the bottom."""
-    if r.read("wReiMode")[0]:
-        press_until(r, "down", lambda: r.read("wReiKey")[0] >= 27)
-    else:
-        press_until(r, "down", lambda: r.read("wReiPick")[0] == 2)
-    press(r, "down")
-
-
 def main():
     if not ROM.exists():
         sys.exit(f"{ROM} missing - run .\\build.ps1 -Rei")
     SHOTS.mkdir(parents=True, exist_ok=True)
+    for old in ("canned.png", "reply_done_input.png"):
+        (SHOTS / old).unlink(missing_ok=True)
     r = boot()
     r.pyboy.tick(150, False)
     press(r, "start", after=60)
-    r.screenshot(SHOTS / "canned.png")
+    r.screenshot(SHOTS / "topics.png")
+    press(r, "a")                               # the first topic: hello
+    r.screenshot(SHOTS / "sentences.png")
 
     press(r, "a", after=0)                      # "hello"
     for _ in range(40000):                      # a few words in, mouth open
@@ -266,16 +264,16 @@ def main():
             break
     r.screenshot(SHOTS / "reply_mid.png")
     wait_ready(r)
-    r.screenshot(SHOTS / "reply_done_input.png")    # "hello!": a heart, the list back
+    r.screenshot(SHOTS / "reply_done.png")      # a heart, START:LOG under it, the list back
 
-    pick(r, 0, 2)                               # "my name is tom"
+    choose(r, 1, 0)                             # me: "my name is tom"
     press(r, "a", after=0)
     wait_ready(r)
-    press(r, "right")
-    press(r, "up")
-    press(r, "up")                              # "what is my name"
+    choose(r, 1, 2)                             # "what is my name"
     press(r, "a", after=0)
     wait_ready(r)
+    choose(r, 2, 8)                             # rei, second page
+    r.screenshot(SHOTS / "sentences_page2.png")
     press(r, "start", after=12)
     r.screenshot(SHOTS / "log.png")
     press(r, "select", after=12)
@@ -285,7 +283,7 @@ def main():
     r.screenshot(SHOTS / "keyboard.png")
 
     r.pyboy.memory[r.addr("wWorldRng")] = 40
-    to_world(r)                                 # SELECT again: the beach
+    to_world(r)                                 # left alone: the beach
     set_word(r, "wWorldThinkT", 60000)          # no thought until the walk is on film
     for _ in range(600):
         r.pyboy.tick(1, False)
@@ -307,6 +305,7 @@ def main():
     thought_done(r)
     r.screenshot(SHOTS / "world_thought_done.png")
     press(r, "b", after=12)
+    r.screenshot(SHOTS / "back_from_world.png")
     saved = r.sram()
     r.close()
 
