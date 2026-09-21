@@ -157,18 +157,6 @@ SYMBOLS["THINK"] = ["..####..",               # the thought box's title: a thoug
 SYMBOLS["ARROW_L"] = mirror(SYMBOLS["ARROW_R"])
 SYMBOLS["ARROW_DN"] = SYMBOLS["ARROW_UP"][::-1]
 
-# The small heart: the dot of the logotype's i.
-HEART = ["..##...##..",
-         ".#++#.#++#.",
-         "#+--+#++++#",
-         "#+-++++++##",
-         "#++++++++##",
-         ".#++++++##.",
-         "..#++++##..",
-         "...#++##...",
-         "....###....",
-         ".....#....."]
-
 # The mood icons, one a mood, each its own shape and its own colour.
 ICON_HAPPY = ["..###...###..",
               ".#+++#.#+++#.",
@@ -368,45 +356,99 @@ def faces():
     ]
 
 
-# --- the logotype ------------------------------------------------------------
-LOGO_W, LOGO_H = 12, 5                # tiles
+# --- the title ----------------------------------------------------------------
+# The maintainer's design, at the screen's own resolution: REI in slab letters
+# cut on the diagonal, a red line that runs behind them from corner to corner,
+# the character for zero (rei) on the left, four small words on the right.
+# Colours: 0 night, 2 red, 3 white (the font's own colour).
+LOGO_W, LOGO_H = 20, 9                # tiles; the picture sits on tile row 1
+WHITE, RED = 3, 2
+
+KANJI = [".#########.",
+         ".....#.....",
+         "###########",
+         "#.##.#.##.#",
+         "..##.#.##..",
+         "....#.#....",
+         "..##.#.##..",
+         "##.......##",
+         "..#######..",
+         "....#...#..",
+         "....#..##..",
+         "....#......",
+         "....#......"]
+
+TINY = {"A": "####.#####.##.#", "B": "##.#.###.#.###.", "E": "####..##.#..###",
+        "I": "###.#..#..#.###", "N": "##.#.##.##.##.#", "G": "####..#.##.####",
+        "C": "####..#..#..###", "R": "##.#.###.#.##.#", "T": "###.#..#..#..#.",
+        "D": "##.#.##.##.###.", " ": "." * 15}
+
+
+def tiny(img, x, y, text, colour=WHITE):
+    """Capitals three pixels wide and five tall."""
+    for ch in text:
+        g = TINY[ch]
+        for i, v in enumerate(g):
+            if v == "#":
+                img[y + i // 3][x + i % 3] = colour
+        x += 4
 
 
 def logo():
-    """'Rei', 96 x 40: fat round letters, a highlight along the top of each
-    stroke, an ink outline, and a heart for the dot of the i."""
-    img = canvas(LOGO_W * 8, LOGO_H * 8)
-    c = 2
-    # R
-    x = 9
-    rect(img, x, 3, x + 7, 36, c)
-    ellipse(img, x + 15, 12.5, 13, 9.5, c)
-    rect(img, x, 3, x + 15, 21, c)
-    ellipse(img, x + 15, 12.5, 6, 3.5, 0)
-    rect(img, x + 8, 10, x + 15, 15, 0)
-    for i in range(16):                                  # the leg
-        rect(img, x + 11 + i * 10 // 15, 21 + i, x + 19 + i * 10 // 15, 21 + i, c)
-    # e
-    x = 42
-    ellipse(img, x + 13, 25, 13, 12, c)
-    ellipse(img, x + 13, 25, 6.5, 6, 0)
-    rect(img, x + 3, 23, x + 25, 27, c)
-    rect(img, x + 14, 28, x + 27, 31, 0)
-    # i
-    x = 75
-    rect(img, x, 15, x + 7, 36, c)
-    # highlight: the top two pixels of every painted run become light
-    for xx in range(len(img[0])):
-        for yy in range(len(img)):
-            if img[yy][xx] == c and (yy == 0 or img[yy - 1][xx] in (0,)):
-                img[yy][xx] = 1
-                if yy + 1 < len(img) and img[yy + 1][xx] == c:
-                    pass
-    outline(img)
-    heart = canvas(11, 10)
-    art(heart, 0, 0, HEART, KEY)
-    art(img, x - 2, 2, HEART, KEY)
-    return img, (x - 2, 2, 11, 10)
+    """The title, 160 x 72. Every span below is (row, first x, last x)."""
+    W, H, Y0 = LOGO_W * 8, LOGO_H * 8, 8         # Y0: the screen row of the picture's top
+    img = canvas(W, H)
+
+    def span(y, x0, x1, colour=WHITE):
+        for x in range(x0, x1 + 1):
+            img[y - Y0][x] = colour
+
+    X = 24                                       # the R's left corner
+    for y in range(21, 30):                      # R: the top bar, leaning
+        span(y, X + (y - 21), X + 30 + (y - 21))
+    for y in range(30, 43):                      #    the bowl's side
+        span(y, X + 31, X + 40)
+    for y in range(38, 43):                      #    the bowl's floor, cut at 45 degrees
+        span(y, X + 19 + (y - 38), X + 40)
+    for y in range(32, 63):                      #    the stem, its top cut the same way
+        span(y, X + 8, X + 8 + min(11, y - 32))
+    for y in range(43, 63):                      #    the leg
+        span(y, X + 24 + (y - 43), X + 31 + (y - 43))
+    for y in range(29, 34):                      # E: the top bar
+        span(y, X + 45 + (y - 29), X + 75)
+    for y in range(35, 55):                      #    the stem
+        span(y, X + 47, X + 47 + min(9, y - 35))
+    for y in range(43, 48):                      #    the middle bar
+        span(y, X + 47, X + 72)
+    for y in range(55, 63):                      #    the foot, leaning with the R
+        span(y, X + 48 + (y - 55), X + 73 + (y - 55))
+    for y in range(21, 63):                      # I, its corner cut away...
+        span(y, X + 82, X + 83 + min(11, y - 21))
+    for y in range(21, 32):                      # ...and given back in red
+        span(y, X + 86 + (y - 21), X + 96, RED)
+
+    # the line: corner to corner, behind the letters, not drawn between R and E
+    for x in range(W):
+        if X + 30 <= x <= X + 47:
+            continue
+        yl = 12 + (W - 1 - x) * 65 / (W - 1)
+        for y in (int(yl), int(yl) + 1):         # two pixels thick
+            if 0 <= y - Y0 < H and img[y - Y0][x] == 0:
+                img[y - Y0][x] = RED
+
+    for i, row in enumerate(KANJI):              # zero, and a rule under it
+        for j, v in enumerate(row):
+            if v == "#":
+                img[40 - Y0 + i][12 + j] = RED
+    span(56, 12, 22, RED)
+
+    tx = X + 99
+    tiny(img, tx, 34 - Y0, "A")
+    tiny(img, tx, 41 - Y0, "BEING")
+    tiny(img, tx, 48 - Y0, "IN A")
+    tiny(img, tx, 55 - Y0, "CARTRIDGE")
+    span(62, tx, tx + 7, RED)
+    return img
 
 
 # --- cutting pictures into tiles ---------------------------------------------
@@ -470,11 +512,9 @@ MAIN_PALETTES = [
     ("YOURS", [CREAM, (152, 200, 248), (48, 96, 208), (40, 72, 184)]),   # the player's lines in the log
 ]
 
-NIGHT = (32, 28, 64)
+NIGHT = (20, 30, 64)
 SPLASH_PALETTES = [
-    ("S_TEXT", [NIGHT, (96, 96, 160), (168, 176, 232), (248, 240, 216)]),
-    ("S_LOGO", [NIGHT, (200, 224, 255), (104, 152, 248), (16, 12, 40)]),
-    ("S_HEART", [NIGHT, (255, 184, 192), (240, 64, 96), (16, 12, 40)]),
+    ("S_TEXT", [NIGHT, (96, 104, 160), (240, 56, 64), (236, 236, 236)]),   # night, -, red, white
     ("S_DIM", [NIGHT, NIGHT, NIGHT, NIGHT]),                          # PRESS START, blinked off
 ]
 
@@ -495,27 +535,17 @@ def build():
 
     splash = TileSet()
     splash.add(canvas(8, 8), "S_BLANK")
-    t = canvas(8, 8)
-    art(t, 0, 0, SYMBOLS["ARROW_R"], KEY)
-    splash.add(t, "S_ARROW")                     # the menu's cursor
-    limg, heart_box = logo()
+    t = canvas(8, 8)                             # the menu's cursor, in red
+    for y in range(7):
+        for x in range(1, 2 + min(y, 6 - y)):
+            t[y][x] = RED
+    splash.add(t, "S_ARROW")
+    limg = logo()
     logo_map = splash.cut(limg)
-    hx, hy, hw, hh = heart_box
-    logo_attr = []
-    for ty in range(LOGO_H):
-        for tx in range(LOGO_W):
-            px = [(x, y) for y in range(ty * 8, ty * 8 + 8) for x in range(tx * 8, tx * 8 + 8)
-                  if limg[y][x]]
-            inside = [hx <= x < hx + hw and hy <= y < hy + hh for x, y in px]
-            if px and all(inside):
-                logo_attr.append(2)
-            else:
-                assert not any(inside) or not px or all(inside) or True
-                logo_attr.append(1)
-    return main, face_maps, mood_maps, splash, logo_map, logo_attr, limg
+    return main, face_maps, mood_maps, splash, logo_map, limg
 
 
-def emit(main, face_maps, mood_maps, splash, logo_map, logo_attr):
+def emit(main, face_maps, mood_maps, splash, logo_map):
     assert TILE_BASE + len(main.tiles) <= 256, len(main.tiles)
     assert TILE_BASE + len(splash.tiles) <= 256, len(splash.tiles)
     o = ["; Generated by py/gen_rei_art.py - do not edit.",
@@ -568,10 +598,6 @@ def emit(main, face_maps, mood_maps, splash, logo_map, logo_attr):
     maps("ReiFaceMaps", face_maps, 4)
     maps("ReiMoodMaps", mood_maps, BAND_W)
     maps("ReiLogoMap", [("Rei", logo_map)], LOGO_W)
-    o.append("ReiLogoAttr::")
-    for r in range(0, len(logo_attr), LOGO_W):
-        o.append("    db " + ",".join(str(v) for v in logo_attr[r:r + LOGO_W]))
-    o.append("")
     pals("ReiPalMain", MAIN_PALETTES)
     pals("ReiPalSplash", SPLASH_PALETTES)
     o.append("ENDC")
@@ -583,17 +609,17 @@ def emit(main, face_maps, mood_maps, splash, logo_map, logo_attr):
 def preview(face_maps_imgs, limg):
     from PIL import Image
     pal_face = MAIN_PALETTES[5][1]
-    pal_logo = SPLASH_PALETTES[1][1]
+    pal_logo = SPLASH_PALETTES[0][1]
     pal_red = MAIN_PALETTES[1][1]
     fs = faces()
     W = 34 * len(fs)
-    im = Image.new("RGB", (max(W, 300), 34 + 42 + 26 + 12), (255, 255, 255))
+    im = Image.new("RGB", (max(W, 300), 34 + 74 + 26 + 12), (255, 255, 255))
     for i, (_, img) in enumerate(fs):
         for y in range(32):
             for x in range(32):
                 im.putpixel((i * 34 + x, y), pal_face[img[y][x]])
-    for y in range(40):
-        for x in range(96):
+    for y in range(LOGO_H * 8):
+        for x in range(LOGO_W * 8):
             im.putpixel((x, 34 + y), pal_logo[limg[y][x]])
     for i, (w, s) in enumerate(MOODS):
         b = mood_band(s)
@@ -616,7 +642,7 @@ def preview(face_maps_imgs, limg):
 if __name__ == "__main__":
     import gen_rei_world                     # the beach has a generator of its own
     gen_rei_world.emit()
-    main, face_maps, mood_maps, splash, logo_map, logo_attr, limg = build()
-    emit(main, face_maps, mood_maps, splash, logo_map, logo_attr)
+    main, face_maps, mood_maps, splash, logo_map, limg = build()
+    emit(main, face_maps, mood_maps, splash, logo_map)
     if "--preview" in sys.argv:
         preview(face_maps, limg)

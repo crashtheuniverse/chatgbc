@@ -66,12 +66,12 @@ def test_pool_is_in_vocabulary():
 def test_splash_then_start(talk):
     r = talk.rom
     r.pyboy.tick(150, False)
-    assert ui.row_text(r, 10).strip() == "PRESS START"
-    assert "continue" not in ui.row_text(r, 9), "a blank cartridge has nothing to continue"
-    assert "v1.0.0" in ui.row_text(r, 14)
+    assert ui.row_text(r, 11).strip() == "PRESS START"
+    assert "continue" not in ui.row_text(r, 10), "a blank cartridge has nothing to continue"
+    assert "v1.0.0" in ui.row_text(r, 17)
     assert r.read("wReady")[0] == 0
     r.pyboy.tick(120, False)
-    assert ui.row_text(r, 10).strip() == "PRESS START", "the splash waits for START"
+    assert ui.row_text(r, 11).strip() == "PRESS START", "the splash waits for START"
     ui.press(r, "start", after=60)
     m = ui.tilemap(r)
     assert m[0][0] == ART["T_FR_TL"] and m[17][19] == ART["T_FR_BR"]
@@ -280,7 +280,7 @@ def test_speed_is_on_record(talk):
 def menu(r):
     """Boot to the splash; True if it offers to continue."""
     r.pyboy.tick(150, False)
-    return ui.row_text(r, 9).strip() == "# continue"
+    return ui.row_text(r, 10).strip() == "# continue"
 
 
 @pytest.fixture(scope="module")
@@ -316,8 +316,8 @@ def test_continue_is_exact(saved, twin):
     t.st, t.said, t.lines = copy.deepcopy(before.st), list(before.said), list(before.lines)
     r = t.rom
     assert menu(r)
-    assert ui.row_text(r, 12).split() == ["visits", "1"]
-    assert ui.row_text(r, 13).split() == ["lines", "1"]
+    assert ui.row_text(r, 13).split() == ["visits", "1"]
+    assert ui.row_text(r, 14).split() == ["lines", "1"]
     ui.press(r, "a", after=60)                      # continue
 
     assert r.read("wChatStarted")[0] == 1
@@ -334,8 +334,8 @@ def test_continue_is_exact(saved, twin):
     r.close()
     r = ui.boot(again)                              # the counters went up
     assert menu(r)
-    assert ui.row_text(r, 12).split() == ["visits", "2"]
-    assert ui.row_text(r, 13).split() == ["lines", "2"]
+    assert ui.row_text(r, 13).split() == ["visits", "2"]
+    assert ui.row_text(r, 14).split() == ["lines", "2"]
     r.close()
 
 
@@ -345,7 +345,7 @@ def test_a_corrupt_save_is_ignored(saved, where):
     sram[where] ^= 0x40                             # checksum, wH, the last byte, the magic
     r = ui.boot(bytes(sram))
     assert not menu(r)
-    assert ui.row_text(r, 10).strip() == "PRESS START"
+    assert ui.row_text(r, 11).strip() == "PRESS START"
     ui.press(r, "start", after=60)
     assert r.read("wChatStarted")[0] == 0 and r.read("wReiHistCount")[0] == 0
     assert ui.pane(r) == [" " * 12] * 7
@@ -356,11 +356,11 @@ def test_new_friend_forgets(saved):
     r = ui.boot(saved[0])
     assert menu(r)
     ui.press(r, "down")
-    assert ui.row_text(r, 10).strip() == "# new friend"
+    assert ui.row_text(r, 11).strip() == "# new friend"
     ui.press(r, "a")
-    assert ui.row_text(r, 9).strip() == "forget everything?"
+    assert ui.row_text(r, 10).strip() == "forget everything?"
     ui.press(r, "b")                                # no
-    assert ui.row_text(r, 10).strip() == "# new friend"
+    assert ui.row_text(r, 11).strip() == "# new friend"
     assert r.sram()[:4] == b"REI\x01"
     ui.press(r, "a")
     ui.press(r, "a", after=60)                      # yes
