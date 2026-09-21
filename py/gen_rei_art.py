@@ -221,9 +221,12 @@ BAND_W, BAND_H = 6, 3                 # tiles
 
 
 def mood_band(icon):
+    """The icon over a reminder in tiny capitals: START is the log."""
     img = canvas(BAND_W * 8, BAND_H * 8)
-    w, h = len(icon[0]), len(icon)
-    art(img, (BAND_W * 8 - w) // 2, (BAND_H * 8 - h) // 2, icon, KEY)
+    w = len(icon[0])
+    art(img, (BAND_W * 8 - w) // 2, 1, icon, KEY)
+    text = "START:LOG"
+    tiny(img, (BAND_W * 8 - (len(text) * 4 - 1)) // 2, 17, text, 3)
     return img
 
 
@@ -381,7 +384,9 @@ KANJI = [".#########.",
 TINY = {"A": "####.#####.##.#", "B": "##.#.###.#.###.", "E": "####..##.#..###",
         "I": "###.#..#..#.###", "N": "##.#.##.##.##.#", "G": "####..#.##.####",
         "C": "####..#..#..###", "R": "##.#.###.#.##.#", "T": "###.#..#..#..#.",
-        "D": "##.#.##.##.###.", " ": "." * 15}
+        "D": "##.#.##.##.###.", " ": "." * 15,
+        "S": "####..###..####", "L": "#..#..#..#..###", "O": "####.##.##.####",
+        ":": "....#.....#...."}
 
 
 def tiny(img, x, y, text, colour=WHITE):
@@ -509,8 +514,11 @@ MAIN_PALETTES = [
     ("PICK",  [(48, 144, 72), (168, 224, 144), (248, 236, 184), CREAM]),  # the key under the cursor
     ("FACE",  [CREAM, (248, 208, 176), (152, 96, 200), INK]),        # paper, skin, hair, ink
     ("AMBER", [CREAM, (248, 216, 96), (224, 144, 32), INK]),         # curious
-    ("YOURS", [CREAM, (152, 200, 248), (48, 96, 208), (40, 72, 184)]),   # the player's lines in the log
+    ("CURSOR", [(176, 224, 152), (120, 192, 112), (48, 144, 72), INK]),  # the row or cell under the cursor
 ]
+
+# The log screen borrows the cursor's slot while it is open: the player's lines.
+YOURS = ("YOURS", [CREAM, (152, 200, 248), (48, 96, 208), (40, 72, 184)])
 
 NIGHT = (20, 30, 64)
 SPLASH_PALETTES = [
@@ -564,6 +572,7 @@ def emit(main, face_maps, mood_maps, splash, logo_map):
         o.append(f"DEF T_{name} EQU {TILE_BASE + i}")
     for i, (name, _) in enumerate(MAIN_PALETTES):
         o.append(f"DEF PAL_{name} EQU {i}")
+    o.append("DEF PAL_YOURS EQU PAL_CURSOR")
     for i, (name, _) in enumerate(SPLASH_PALETTES):
         o.append(f"DEF PAL_{name} EQU {i}")
     for i, (name, _) in enumerate(face_maps):
@@ -600,6 +609,7 @@ def emit(main, face_maps, mood_maps, splash, logo_map):
     maps("ReiLogoMap", [("Rei", logo_map)], LOGO_W)
     pals("ReiPalMain", MAIN_PALETTES)
     pals("ReiPalSplash", SPLASH_PALETTES)
+    pals("ReiPalYours", [YOURS])
     o.append("ENDC")
     o.append("")
     DST.write_text("\n".join(o), encoding="utf-8", newline="\n")
