@@ -87,6 +87,43 @@ def test_splash_then_start(talk):
     assert ui.row_text(r, 0, 8, 11) == "REI"
 
 
+def art_map(label):
+    """The rows of tile numbers under `label` in src/rei_art.inc."""
+    text = (APP / "src" / "rei_art.inc").read_text(encoding="utf-8")
+    body = text.split(f"{label}::")[1].split("\n\n")[0]
+    return [[int(v) for v in line.split("db")[1].split(",")]
+            for line in body.splitlines() if line.strip().startswith("db")]
+
+
+def bar(name, page=None):
+    """The bar's twenty tiles as the generator drew them; `page` (0 or 1) lays
+    the "<>:PAGE n/2" span over the sentences' bar."""
+    tiles = list(art_map(f"ReiBar{name}")[0])
+    if page is not None:
+        x = ART["BAR_PAGE_X"]
+        tiles[x:x + ART["BAR_PAGE_W"]] = art_map("ReiBarPages")[page]
+    return tiles
+
+
+def bar_row(r):
+    return ui.tilemap(r)[12]
+
+
+def test_the_bars_say_what_they_should():
+    """The bar is tiny capitals drawn as tiles, so the screen tests below can
+    only compare tile numbers; this one reads the words."""
+    import gen_rei_art as art
+    assert art.BARS["TOPICS"].split() == ["TOPIC", "<^v>:MOVE", "A:SELECT", "SEL:KEYS"]
+    assert art.BARS["LINES"].split() == ["SAY", "A:SAY", "B:BACK", "SEL:KEYS"]
+    assert art.BARS["KEYS"].split() == ["KEYS", "A:TYPE", "B:DEL", "OK:SAY", "SEL:LIST"]
+    assert [t.strip() for t in art.BAR_PAGES] == ["<>:PAGE 1/2", "<>:PAGE 2/2"]
+    for text in art.BARS.values():
+        assert len(text) == 40 and text[0] == " " and text[-1] != " "
+    assert ART["REI_MAIN_TILES"] <= 152
+    assert len({tuple(bar("Topics")), tuple(bar("Lines")), tuple(bar("Lines", 0)),
+                tuple(bar("Lines", 1)), tuple(bar("Keys"))}) == 5
+
+
 def bar_is_solid(r):
     attrs = r.pyboy.memory[1, 0x9800 + 12 * 32: 0x9800 + 12 * 32 + 20]
     return all(a == ART["PAL_PICK"] for a in attrs)
@@ -106,7 +143,7 @@ def cursor_cells(r):
 def test_first_screen_is_the_topics(talk):
     r = talk.rom
     assert r.read("wReiMode")[0] == 0
-    assert ui.row_text(r, 12) == "TOPIC       A:select"
+    assert bar_row(r) == bar("Topics")
     assert bar_is_solid(r) and not frame_tiles_below_the_bar(r)
     names = [name for name, _ in rei_topics.TOPICS]
     for i in range(5):
@@ -140,15 +177,14 @@ def test_a_topic_opens_its_sentences(talk):
     ui.press(r, "a")
     lines = rei_topics.TOPICS[2][1]
     assert r.read("wReiMode")[0] == 1
-    assert ui.row_text(r, 12, 0, 3) == "SAY" and ui.row_text(r, 12, 14, 20) == "B:back"
-    assert ui.row_text(r, 12, 6, 9) == "1/2" and bar_is_solid(r)
+    assert bar_row(r) == bar("Lines", 0) and bar_is_solid(r)     # "<>:PAGE 1/2"
     assert [ui.row_text(r, 13 + i, 1, 20).rstrip() for i in range(5)] == lines[:5]
     assert cursor_cells(r) == {(x, 13) for x in range(20)}
     assert ui.row_text(r, 10, 1, 19).rstrip() == lines[0], "the prompt row shows what A sends"
     ui.press(r, "up")                               # wraps inside the page
     assert r.read("wReiPick")[0] == 4
     ui.press(r, "right")                            # the other page
-    assert ui.row_text(r, 12, 6, 9) == "2/2"
+    assert bar_row(r) == bar("Lines", 1)
     assert [ui.row_text(r, 13 + i, 1, 20).rstrip() for i in range(5)] == lines[5:]
     assert ui.row_text(r, 10, 1, 19).rstrip() == lines[9]
     ui.press(r, "left")
@@ -156,6 +192,7 @@ def test_a_topic_opens_its_sentences(talk):
     assert r.read("wReiMode")[0] == 0 and r.read("wReiTopic")[0] == 2
     assert ui.row_text(r, 10, 1, 19).strip() == ""
 
+    ui.choose(r, 0, 0)                              # hello: eight sentences, two pages too
     ui.choose(r, 9, 0)                              # kind: nine sentences, four on page 2
     ui.press_until(r, "down", lambda: r.read("wReiPick")[0] == 4)
     ui.press(r, "right")
@@ -227,7 +264,7 @@ def test_keyboard_and_the_ok_key(talk):
     ui.choose(r, 3, 1)                              # somewhere in the list
     ui.press(r, "select")
     assert r.read("wReiMode")[0] == 2
-    assert ui.row_text(r, 12) == "KEYS B:del  SEL:list" and bar_is_solid(r)
+    assert bar_row(r) == bar("Keys") and bar_is_solid(r)
     assert ui.row_text(r, 13, 1, 18) == "a b c d e f g h i"
     assert ui.tilemap(r)[16][17] == ART["T_OK"]
     assert ui.row_text(r, 17).strip() == "" and not frame_tiles_below_the_bar(r)

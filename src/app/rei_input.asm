@@ -1,7 +1,8 @@
 ; What the player says to Rei: the bottom third of the screen.
 ;
-; Row 12 is a solid bar, the title and the buttons of whatever is under it;
-; rows 13-17 are five full-width rows with no frame. Three states:
+; Row 12 is a solid bar, the title and the buttons of whatever is under it, in
+; tiny capitals drawn as tiles (py/gen_rei_art.py: forty columns of text in
+; twenty tiles); rows 13-17 are five full-width rows with no frame. Three states:
 ;   topics     ten names in a grid of two by five (src/rei_topics.inc). The
 ;              d-pad moves, wrapping; A opens the topic. The prompt row is
 ;              empty: nothing is chosen yet.
@@ -74,12 +75,6 @@ ReiKeys:
     db "jklmnopqr"
     db "stuvwxyz "
     db ".,!?'-;: "                   ; the last cell is the OK key, not a character
-
-sReiBarTopics: db "TOPIC       A:select", 0
-sReiBarLines:  db "SAY", 0
-sReiBarPages:  db T_ARROW_L + FONT_FIRST, T_ARROW_R + FONT_FIRST, 0
-sReiBarBack:   db "B:back", 0
-sReiBarKeys:   db "KEYS B:del  SEL:list", 0
 
 ; a = how many sentences the topic has.
 ReiIn_Count:
@@ -221,10 +216,8 @@ ReiIn_Draw:
     jp nc, .keys
 
     ; --- the topics ---
-    ld hl, sReiBarTopics
-    ld b, LIST_X
-    ld c, BAR_Y
-    call Rei_Print
+    ld hl, ReiBarTopics
+    call ReiIn_Bar
     ld hl, ReiTopicNames
     ld b, GRID_X0
 .column
@@ -259,30 +252,21 @@ ReiIn_Draw:
 
     ; --- a topic's sentences ---
 .lines
-    ld hl, sReiBarLines
-    ld b, LIST_X
-    ld c, BAR_Y
-    call Rei_Print
-    ld hl, sReiBarBack
-    ld b, LIST_X + LIST_W - 6
-    ld c, BAR_Y
-    call Rei_Print
+    ld hl, ReiBarLines
+    call ReiIn_Bar
     call ReiIn_OnPage
     dec b
     jr z, .onePage
-    ld hl, sReiBarPages             ; "<>1/2": there is another page
-    ld b, LIST_X + 4
-    ld c, BAR_Y
-    call Rei_Print
-    ld b, LIST_X + 6
-    ld c, BAR_Y
-    call Rei_CellAddr
+    ld hl, ReiBarPages              ; "<>:PAGE 1/2", or 2/2: there is another page
     ld a, [wReiPage]
-    add a, '1' - FONT_FIRST
-    ld [hl+], a
-    ld a, '/' - FONT_FIRST
-    ld [hl+], a
-    ld [hl], '2' - FONT_FIRST
+    or a
+    jr z, :+
+    ld hl, ReiBarPages + BAR_PAGE_W
+:   ld b, LIST_X + BAR_PAGE_X
+    ld c, BAR_Y
+    ld d, BAR_PAGE_W
+    ld e, 1
+    call Rei_DrawMap
 .onePage
     call ReiIn_OnPage
     push af
@@ -309,10 +293,8 @@ ReiIn_Draw:
 
     ; --- the keyboard ---
 .keys
-    ld hl, sReiBarKeys
-    ld b, LIST_X
-    ld c, BAR_Y
-    call Rei_Print
+    ld hl, ReiBarKeys
+    call ReiIn_Bar
     ld b, IN_KEY_X
     ld c, LIST_Y
     call Rei_CellAddr
@@ -344,6 +326,14 @@ ReiIn_Draw:
     call Rei_CellAddr
     ld [hl], T_OK
     ret
+
+; hl = a bar from src/rei_art.inc: twenty tiles of tiny capitals, into row 12.
+ReiIn_Bar:
+    ld b, LIST_X
+    ld c, BAR_Y
+    ld d, LIST_W
+    ld e, 1
+    jp Rei_DrawMap
 
 ; b = column, c = row of the chosen topic's name.
 ReiIn_TopicCell:
