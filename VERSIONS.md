@@ -1,7 +1,7 @@
 # Versions
 
 Every release is a tag on `master` (`v0.1`, `v0.2`, `v0.3`, `v0.4.1`,
-`v0.9`), and the ROM of each is attached to its GitHub release. Tags are the
+`v0.9`, `v1.0.0`), and the ROM of each is attached to its GitHub release. Tags are the
 checkpoints; `master` is the line. There are no per-version branches: a
 branch and a tag with the same name make every `git checkout v0.3`
 ambiguous, and a released version does not move. v0.5 through v0.8 do not
@@ -15,21 +15,22 @@ version trained on). Bits per character is the one quality figure two
 different tokenizers can share; seconds per character is the one the reader
 feels.
 
-| | v0.1 | v0.2 | v0.3 | v0.4.1 | **v0.9** |
-|---|---|---|---|---|---|
-| Released | 2026-08-23 | 2026-08-24 | 2026-09-02 | 2026-09-05 | 2026-09-14 |
-| Model | stories260K, 4-bit | stories260K, 4-bit | stories260K, 4-bit | **trained here**: minGRU + 4 ternary experts | same as v0.4.1 |
-| Parameters | 260K | 260K | 260K | 374K | 374K |
-| Context | 64-token window | 32-token window | 24-token window | recurrent state, no window | recurrent |
-| Cycles / token | 18,951,201 | 13,724,256 | 12,918,757 | 2,259,829 (2,271,104 with the teletype) | **963,792** with the teletype (972,744 on the lab's golden run) |
-| Seconds / token | 9.0 | 6.5 | 6.16 | 1.08 | **0.46** |
-| Characters / token (held-out text) | 2.10 | 2.10 | 2.10 | 3.46 | 3.46 |
-| Seconds / character (held-out text) | 4.3 | 3.1 | 2.94 | 0.31 | **0.133** |
-| Bits / character, as shipped | 1.200 | 1.231 | 1.149 | 1.146 | **1.126** |
-| Bits / character, its fp32 checkpoint | 0.876 | 0.876 | 0.876 | 1.123 | 1.123 |
-| Lost to quantization (and the window) | 37% | 41% | 31% | 2% | 0.3% |
-| ROM | 512 KB | 512 KB | 512 KB | 256 KB | 512 KB |
-| Kernel | 19 cycles / MAC, product tables | 19 | 19 | ~10.5, three MACs a lookup | output-major tables: 12 cycles per three MACs; w2 sparse; classifier 226 cycles a row |
+| | v0.1 | v0.2 | v0.3 | v0.4.1 | v0.9 | **v1.0** |
+|---|---|---|---|---|---|---|
+| Released | 2026-08-23 | 2026-08-24 | 2026-09-02 | 2026-09-05 | 2026-09-14 | 2026-09-25 |
+| Model | stories260K, 4-bit | stories260K, 4-bit | stories260K, 4-bit | **trained here**: minGRU + 4 ternary experts | same as v0.4.1 | same as v0.4.1 |
+| Parameters | 260K | 260K | 260K | 374K | 374K | 374K |
+| Context | 64-token window | 32-token window | 24-token window | recurrent state, no window | recurrent | recurrent |
+| Cycles / token | 18,951,201 | 13,724,256 | 12,918,757 | 2,259,829 (2,271,104 with the teletype) | 963,792 with the teletype (972,744 on the lab's golden run) | **962,790** with the teletype |
+| Seconds / token | 9.0 | 6.5 | 6.16 | 1.08 | 0.46 | **0.46** |
+| Seconds to the first token ("Once upon a time") | | | | | 6.8 | **1.8** |
+| Characters / token (held-out text) | 2.10 | 2.10 | 2.10 | 3.46 | 3.46 | 3.46 |
+| Seconds / character (held-out text) | 4.3 | 3.1 | 2.94 | 0.31 | 0.133 | **0.133** |
+| Bits / character, as shipped | 1.200 | 1.231 | 1.149 | 1.146 | 1.126 | **1.126** |
+| Bits / character, its fp32 checkpoint | 0.876 | 0.876 | 0.876 | 1.123 | 1.123 | 1.123 |
+| Lost to quantization (and the window) | 37% | 41% | 31% | 2% | 0.3% | 0.3% |
+| ROM | 512 KB | 512 KB | 512 KB | 256 KB | 512 KB | 512 KB |
+| Kernel | 19 cycles / MAC, product tables | 19 | 19 | ~10.5, three MACs a lookup | output-major tables: 12 cycles per three MACs; w2 sparse; classifier 226 cycles a row | v0.9's; the prompt's tokens stop at the state |
 
 v0.3's README quotes 2.26 s per character at 2.73 characters a token: that was
 measured on the ROM's own output, which uses shorter words than real
@@ -42,7 +43,8 @@ through 4-bit tables and a 24-token window intact, and v0.4's model gets
 through ternary weights and int8 state losing 2%, 0.3% on the v0.9 tree.
 v0.9 changes nothing in that row: same checkpoint, same 1.123. What it
 changes is the cycles row, by 2.3x, with the shipped row moving only by
-the two fixes described below.
+the two fixes described below. v1.0 changes neither: it shortens the wait
+before the first token.
 
 ## What each version changed
 
@@ -102,6 +104,30 @@ tags also ship: the residual stream is pinned to the grid the trainer used
 is folded into its gains. The first is what moves the score at dim 64 from
 1.146 to 1.126; the second is exact at this width. 512 KB ROM.
 
+**v1.0.0** - the engine sealed, and a second cartridge. The kernels are
+v0.9's and the golden sequence did not move; what changed is what happens
+before the first token. The encoder had two faults: it looked only for
+pieces up to 7 bytes long when both vocabularies have pieces of 11, so a
+line that needed one encoded differently from the Python tokenizer, and it
+scanned the whole vocabulary for every adjacent pair on every merge pass -
+8.3 million cycles, four seconds, for "Once upon a time". The exporter now
+builds a hash table of the vocabulary and measures its longest piece, and
+the merge loop keeps each pair's result, so a merge re-examines only its two
+neighbours: 55,552 cycles, and Python's tokens on every line tested. Then
+the prompt: every prompt token but the last has its argmax thrown away, so
+its forward pass now stops at the last layer's state update - no wo, no FFN
+in that layer, no final norm, no classifier - which is 44% of a token and
+changes no bit of the state. From START to the first token of a story, 6.8 s
+became 1.8. The second cartridge, **Rei** (`.\build.ps1 -Rei`), runs a
+conversational checkpoint on the same engine - 341K parameters, a 512-piece
+vocabulary, 0.40 s a token - behind a small game screen: a topic tree and a
+keyboard to talk with, her replies typed into her frame, a log of the whole
+conversation, a battery save that continues exactly where it stopped, and a
+world she walks about in when left alone, thinking now and then. She waits
+1.7 to 2.8 s before her first letter. She remembers little of what was said
+a few lines back: her model was trained on short windows, and a retrain is
+future work.
+
 ## The captures
 
 v0.1 to v0.3: one frame per token, roughly 100x the speed of the hardware,
@@ -118,9 +144,14 @@ took.
 |---|---|
 | ![v0.3](docs/versions/v0.3.gif) | ![v0.4.1](docs/versions/v0.4.gif) |
 
-| v0.9 | |
+| v0.9 | v1.0.0: Rei |
 |---|---|
-| ![v0.9](docs/versions/v0.9.gif) | |
+| ![v0.9](docs/versions/v0.9.gif) | ![v1.0](docs/versions/v1.0.gif) |
+
+The v1.0.0 story capture would look like v0.9's (same tokens, same speed,
+shorter wait before the first); the v1.0.0 capture is Rei instead: one
+frame per character of hers and per button press, the time she thinks
+before each reply cut.
 
 ## How the numbers were taken
 
@@ -144,5 +175,10 @@ took.
   float checkpoint with full context. A version is scored only with its own
   tag's code: v0.4.1's twin gives 1.146 and v0.9's gives 1.126 for the same
   weights, and both are right about their ROM.
+- **Seconds to the first token**: the ROM's own counters around the three
+  parts of the wait - the encode, the prompt tokens before the last, and the
+  pass that picks the first token - on the default prompt, summed. v0.9's
+  figure is the v1.0 ROM with the new encoder replaced by the old one and
+  the prefill shortcut switched off (`wPrefillFull`), which is the v0.9 code.
 - **Characters per token**: the version's tokenizer on the same stories
   (3.464 for the 1024-piece tokenizer, rounded in the table).

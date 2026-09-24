@@ -1,4 +1,48 @@
-# v0.9: the speed release
+# v1.0.0: the engine sealed
+
+v0.9 made the token 2.3x cheaper without touching the model. v1.0.0 closes
+the engine: the kernels are v0.9's and stay, the two slow parts before the
+first token are rebuilt, and a second cartridge ships on it. Measured on
+the ROM's own counters:
+
+| | v0.9 | v1.0.0 |
+|---|---|---|
+| story, cycles a token (teletype running) | 963,792 | 962,790 |
+| story, "Once upon a time" encoded | 8,321,536 cycles | 55,552 cycles |
+| story, the five prompt tokens before the last | 4,871,488 cycles | 2,694,016 cycles |
+| story, from START to the first token | 6.8 s | 1.8 s |
+| Rei, from the press to her first letter (four lines) | 3.0 to 6.9 s | 1.7 to 2.8 s |
+
+Both changes are exact. The encoder now gives the Python tokenizer's
+tokens on every line tested (the old one did not on lines needing a piece
+longer than 7 bytes), and a prompt token whose argmax is thrown away stops
+at the last layer's state update, which leaves the state byte-identical.
+The golden sequence did not move; the bits per character did not move.
+
+**Rei** is the engine's first conversational cartridge: `.\build.ps1 -Rei`.
+A checkpoint of the same shape as the story model's with a 512-piece
+vocabulary, 0.40 s a token, behind a screen made like a small Game Boy
+game - topics and a keyboard to talk with, a log, a battery save that
+continues a conversation exactly, and a world of three scenes she walks
+in when she is left alone. Every word on her screen is the model's, checked
+against the twin by the tests. She remembers little of what was said a few
+lines back: her model was trained on short windows, and a retrain is future
+work.
+
+## Left open
+
+- **Memory.** The engine carries a recurrent state with no window; what it
+  remembers is what training taught it to keep. Longer training windows are
+  the lever, and a retrain is the way to pull it.
+- **The items v0.9 left out** (below) stand: the norm as tables, a
+  hierarchical classifier, anything that changes the twin.
+- **The engine outside the cartridge.** The integer twin is the
+  specification; a small C implementation of the same inference, bit for
+  bit, would run any checkpoint on a PC.
+
+---
+
+## v0.9: the speed release
 
 v0.4.1 shipped 1.146 bits per character at 1.08 s a token, 0.31 s a
 character. v0.5 through v0.8 do not exist as releases: the work that was
@@ -10,7 +54,7 @@ is the same weights at 2.3x the speed, bit for bit**: 0.46 s a token,
 0.133 s a character, 1.126 bits per character, 61 KB of new tables. v1.0
 is what is done with the time that buys.
 
-## What the audit found
+### What the audit found
 
 Every stage of the token was read as a function: what inputs it takes,
 how many distinct outputs it can produce. Where the answer is small, the
@@ -63,7 +107,7 @@ release goal had been 0.5 s a token or better at v0.4.1's quality. The
 ladder every kernel passed: the twin unchanged, golden strict byte for byte,
 then the census.
 
-## What v0.9 leaves out, and why
+### What v0.9 leaves out, and why
 
 - **The norm as tables.** Another 280K cycles for 836 KB of planes that
   grow with width and depth, and a 2 MB ROM header. Ruled out by the
@@ -77,7 +121,7 @@ then the census.
 - **Anything that changes the twin.** Every new-semantics option measured
   was worth less than a retrain except the head above.
 
-## v1.0: the model, and where it runs
+### v1.0, as planned at v0.9
 
 With the token at half its price, v1.0 spends the time on the model and
 on getting it into more hands:
@@ -97,7 +141,7 @@ on getting it into more hands:
 4. **A first conversational brain** trained and shipped on the same
    engine, as the example of what a cartridge can hold beyond stories.
 
-## Not in v0.9 or v1.0
+### Not in v0.9 or v1.0
 
 Attention, in any form: the recurrent core is the point. Sampling:
 greedy with no-repeat is deterministic and testable. Anything that cannot

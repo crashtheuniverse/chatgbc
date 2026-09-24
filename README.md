@@ -2,14 +2,26 @@
 
 A language model that runs on a Game Boy Color written in Assembly.
 
-v0.9 is the same model as v0.4.1 on a faster cartridge. The weights are the
-v0.4.1 checkpoint, nothing was retrained, and the ROM emits the same tokens
-as its integer twin byte for byte. A token takes 0.46 s where v0.4.1 took
-1.08 s - 2.3x - because an audit of every stage of the token found that most
-of its arithmetic could only ever produce a few hundred distinct values, and
-a stage like that is a table, not a computation.
+v1.0 seals the engine and ships a second cartridge on it. The engine is
+v0.9's - the same kernels, the same weights, the same tokens out of the
+same twin - with the two parts of the wait that came before the first token
+rebuilt: the encoder now gives the Python tokenizer's tokens exactly and in
+a hundredth of the time, and a prompt token that only feeds the state stops
+there. The story starts in 1.8 s where it took 6.8.
+
+The second cartridge is **Rei**: the same engine with a conversational
+checkpoint, on a screen built like a small Game Boy game. You pick
+something to say from a list of topics, or type it, and she answers. See
+[Rei](#rei) below.
+
+v0.9 was the same model as v0.4.1 on a faster cartridge: a token takes
+0.46 s where v0.4.1 took 1.08 s - 2.3x - because an audit of every stage of
+the token found that most of its arithmetic could only ever produce a few
+hundred distinct values, and a stage like that is a table, not a
+computation.
 
 **some stats:**
+- 1.8 s from START to the first token of a story (6.8 s in v0.9): the prompt encodes in 55,552 cycles instead of 8.3 million, and its tokens run only as far as the state
 - 0.46 s/token, 0.133 s per character — measured by the ROM's own DIV/TIMA counter with the teletype running (v0.4.1: 1.08 s, 0.31 s per character on the same text)
 - 1.126 bits per character on held-out TinyStories, 0.3% off the fp32 checkpoint (v0.4.1 shipped the same checkpoint at 1.146)
 - Weights are −1, 0 or +1. Three of them pick one of 27 sums: no multiplier, no product tables. A row of 64 inputs is 22 lookups at 12 cycles each, summed in a register pair
@@ -33,6 +45,40 @@ You type a prompt on an on-screen keyboard (`A` types, `B` deletes, `SELECT`
 flips case, `START` generates, `SELECT` again stops the story). Tokenizer,
 weights and the whole inference stack are on the cartridge.
 
+## Rei
+
+`.\build.ps1 -Rei` builds `build\rei.gbc`: the v1.0 engine with a
+conversational checkpoint (3 layers, dim 64, 4 experts of 176, 512-piece
+vocabulary, 341K parameters) and her own screen:
+
+- **Topics.** Ten topics, up to ten lines each, every line one her
+  training taught her to answer. `A` picks, `B` goes back, `SELECT` opens a
+  keyboard for anything else (`A` types, `B` deletes, the last key sends).
+- **Her pane.** The reply is typed into her frame a character at a time,
+  from the VBlank interrupt while the next token computes; her face talks
+  while it arrives and settles into the mood of what she said.
+- **The log.** `START` shows the whole conversation, both sides, scrolled
+  with the d-pad.
+- **The save.** The cartridge has battery RAM. The conversation - the
+  model's state, the log, her last replies - is saved after every exchange,
+  and "continue" on the menu picks it up exactly where it stopped: the next
+  reply is the one it would have been without the power cycle.
+- **The world.** Leave her alone for twenty seconds and she wanders off to
+  a beach, a garden or a playroom and walks about. Now and then she thinks
+  something, and what she thinks is the model's; the conversation is put
+  aside for it and put back after, bit for bit.
+
+| | |
+|---|---|
+| Speed | 0.40 s/token (about 848,000 cycles a full pass) |
+| Waiting for her | 1.7 to 2.8 s from the press to her first letter on the four lines measured, where the v0.9 engine took 3.0 to 6.9 |
+| Limits | she remembers little of what was said a few lines back: the model was trained on short windows, and a retrain is future work |
+
+![Rei in conversation](docs/versions/v1.0.gif)
+
+*One frame per character of hers; the second or two she thinks before
+each reply is cut.*
+
 ## Numbers
 
 | | |
@@ -42,7 +88,8 @@ weights and the whole inference stack are on the cartridge.
 | Context | a recurrent state: 3 × 64 bytes, unbounded output, no window |
 | Weights | ternary with one power-of-two scale per row; classifier and router ternary at one scale |
 | Arithmetic | int8 activations and state, exact 16-bit sums, no floating point, no division, no multiply |
-| **Speed** | **0.46 s/token** (963,792 M-cycles with the teletype running, over 100 tokens; 972,744 on the lab ROM's 48 golden tokens), **0.133 s per character** at 3.46 characters a token |
+| **Speed** | **0.46 s/token** (962,790 M-cycles with the teletype running, over 70 tokens; 972,744 on the lab ROM's 48 golden tokens), **0.133 s per character** at 3.46 characters a token |
+| **First token** | **1.8 s** from START for "Once upon a time": encode 55,552 cycles, the five prompt tokens before the last 2,694,016, the first generated 983,104 (v0.9: 8,321,536 + 4,871,488 + 983,104, 6.8 s) |
 | **Quality** | **1.126 bits/char** on 200 held-out stories, teacher-forced. The same checkpoint in fp32: 1.123. v0.4.1 as shipped: 1.146 |
 | Kernel | output-major: 22 tables of 27 sums built once per input vector, 12 cycles per lookup of three MACs, the row summed and requantized in registers; w2 sparse; classifier 226 cycles a row |
 | ROM | 512 KB file (the MBC5 header rounds up); about 370 KB of it is weights, tables and code. New lookup tables: 60,416 B for the gate, 768 B for ReLU² |
@@ -76,6 +123,32 @@ cartridge computes with, and judged by the same twin that judges the assembly.
 v0.9 uses the loop the other way. The twin stayed fixed and every kernel was
 rewritten against it, so the cartridge got 2.3x faster without the model
 noticing.
+
+## What changed since v0.9
+
+Nothing in the model and nothing in the tokens: the golden sequence is
+byte-identical, and so is everything the twin says about every input. What
+moved is the wait before the first token.
+
+**The encoder is exact, and fast.** Both vocabularies have pieces up to 11
+bytes long, and the old encoder looked only as far as 7: on a line that
+needed a longer piece its tokens drifted from the Python tokenizer's (3 of
+Rei's 95 topic lines, for instance). It also scanned the whole vocabulary
+for every adjacent pair on every merge pass, which is why "Once upon a
+time" took 8.3 million cycles, four seconds, to encode. Now the exporter
+lays the vocabulary out as a hash table and measures the longest piece,
+and the merge loop remembers each pair's result, so a merge looks up only
+the two pairs it changed. 55,552 cycles, and the tokens are Python's -
+tested on every prompt the ROM and the tests use and on 300 lines of the
+validation stories.
+
+**A prompt token only feeds the state.** The argmax of every prompt token
+but the last is thrown away - the next token is the prompt's. So its
+forward pass stops at the last layer's state update: no wo and no FFN in
+that layer, no final norm, no classifier. The next token starts from its
+own embedding, so nothing skipped is ever read. About 44% of a token on the
+story model, 36% on Rei's; a test runs the prompt both ways on one ROM and
+compares the state after it byte for byte.
 
 ## What changed since v0.4.1
 
@@ -225,9 +298,14 @@ I expressly chose tools that can work this way.
 ```powershell
 .\bootstrap.ps1   # RGBDS, SameBoy, a .venv with PyBoy and torch
 .\build.ps1       # -> build\chatgbc.gbc
-.\test.ps1        # both builds (app and lab), then the headless test suite
+.\build.ps1 -Rei  # -> build\rei.gbc (and, with -Lab, rei-lab.gbc)
+.\test.ps1        # the story build and Rei, app and lab ROMs, each with its suite
 .\tools\sameboy\sameboy.exe build\chatgbc.gbc
 ```
+
+`-Rei` exports her checkpoint (`models\rei.bin`, `models\tok_rei.bin`),
+builds, and puts the tracked sources back in the story build's form, so
+`git status` is clean afterwards.
 
 ## Train it
 
@@ -249,10 +327,15 @@ during v0.9 - one constant that names the classifier's blocking moved, and
 it changes no integer; every kernel was rewritten to reproduce it. The tests boot the
 lab ROM headlessly and assert it emits an identical token sequence.
 
-31 tests: the golden run, strict; each kernel against the twin's own
-function on planted vectors; exhaustive proofs for the gate table and the
-add's byte rule; the classifier's retry path at 0 to 9 rejects; the
-layer-0 probes against the twin's layer-0 lines.
+39 tests on the story build: the golden run, strict; each kernel against
+the twin's own function on planted vectors; exhaustive proofs for the gate
+table and the add's byte rule; the classifier's retry path at 0 to 9
+rejects; the layer-0 probes against the twin's layer-0 lines; the encoder
+against the Python tokenizer; the prompt with and without the prefill
+shortcut. 74 on Rei's: the same engine tests on her checkpoint, and her
+screen driven button by button - every reply read back from her pane and
+compared with the twin's, the save continued across a power cycle, the
+world visited and left.
 
 Every bug becomes "at which layer do the two stop agreeing", which is a
 bisection with a definite answer.
@@ -276,7 +359,7 @@ capture a pic on original hardware.
   background needed
 - [Making of](docs/MAKING-OF.md) — how it was built, what was measured, and
   what was thrown away
-- [Roadmap](docs/ROADMAP.md) — what v0.9 shipped and what v1.0 is for
+- [Roadmap](docs/ROADMAP.md) — what v1.0 sealed and what is left open
 
 ## Credits
 
