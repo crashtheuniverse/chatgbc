@@ -5,9 +5,9 @@
 The pictures the reviews ask for - splash_menu (a save present), topics,
 sentences (and sentences_page2), reply_mid (the teletype running, her mouth
 open), reply_done (her reply up, the list back, START:LOG under the mood), log,
-keyboard, and the world: world_walk, world_idle, world_thought_mid,
+keyboard, and the world: world_walk, world_pause, world_thought_mid,
 world_thought_done, back_from_world - taken from one short conversation, a walk
-by the river and a power cycle. Needs `.\\build.ps1 -Rei`.
+on the beach and a power cycle. Needs `.\\build.ps1 -Rei`.
 
 The helpers here (boot, press, read the pane back, lay text out the way the
 pane and the log do) are also what the Rei test suites drive the ROM with.
@@ -181,7 +181,7 @@ def type_text(r, text, cell=0):
 
 # --- the world ---------------------------------------------------------------
 
-THINK_W, THINK_H = 18, 4                        # the thought box's text
+THINK_W, THINK_H = 18, 4                        # the thought box, on the window map
 
 
 def world_on(r):
@@ -203,7 +203,7 @@ def set_word(r, name, value):
 
 
 def thought_box(r):
-    """The thought panel's four rows of text, off the window's map."""
+    """The thought box's four rows of text, off the window's map."""
     rows = []
     for y in range(1, 1 + THINK_H):
         a = LOG_MAP + y * 32 + 1
@@ -248,7 +248,7 @@ def main():
     if not ROM.exists():
         sys.exit(f"{ROM} missing - run .\\build.ps1 -Rei")
     SHOTS.mkdir(parents=True, exist_ok=True)
-    for old in ("canned.png", "reply_done_input.png", "world_pause.png"):
+    for old in ("canned.png", "reply_done_input.png"):
         (SHOTS / old).unlink(missing_ok=True)
     r = boot()
     r.pyboy.tick(150, False)
@@ -287,16 +287,15 @@ def main():
     set_word(r, "wWorldThinkT", 60000)          # no thought until the walk is on film
     for _ in range(600):
         r.pyboy.tick(1, False)
-        if not r.read("wWorldAct")[0] and r.read("wWorldPose")[0] >> 1 == 5:
+        if not r.read("wWorldAct")[0] and r.pyboy.memory[0xFE02] == 16:
             break
-    r.pyboy.tick(2, False)
     r.screenshot(SHOTS / "world_walk.png")
     for _ in range(3000):
         r.pyboy.tick(1, False)
         if r.read("wWorldAct")[0]:
             break
     r.pyboy.tick(4, False)
-    r.screenshot(SHOTS / "world_idle.png")
+    r.screenshot(SHOTS / "world_pause.png")
     think_now(r)
     for _ in range(40000):
         r.pyboy.tick(1, False)

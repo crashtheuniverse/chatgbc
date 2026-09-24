@@ -147,6 +147,14 @@ SYMBOLS["OK"] = ["........",                # the keyboard's send key
                  "#######.",
                  ".##.....",
                  "..#....."]
+SYMBOLS["THINK"] = ["..####..",               # the thought box's title: a thought bubble
+                    ".#....#.",
+                    "#......#",
+                    "#......#",
+                    ".#....#.",
+                    "..####..",
+                    ".##.....",
+                    "#......."]
 SYMBOLS["ARROW_L"] = mirror(SYMBOLS["ARROW_R"])
 SYMBOLS["ARROW_DN"] = SYMBOLS["ARROW_UP"][::-1]
 
