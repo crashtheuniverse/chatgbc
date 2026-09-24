@@ -43,13 +43,13 @@ IF DEF(REI_UI)
     ld a, [wChatStarted]
     or a
     jr nz, .reiCont
-    call Encode
+    call Encode_Timed               ; a = 0: a fresh conversation
     call Generate
     ld a, 1
     ld [wChatStarted], a
     jr .reiAfter
 .reiCont
-    call EncodeCont
+    call Encode_Timed               ; a = 1: the stream goes on
     call Generate_Cont
 .reiAfter
     call Type_Drain                 ; the tail of the reply, typed out

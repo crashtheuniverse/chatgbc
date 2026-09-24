@@ -26,6 +26,17 @@ wGenTok::    dw                     ; tokens emitted this run, for the bar
 ; screen. Once the console scrolls, scraping the display stops being a faithful
 ; record of what was generated.
 wOutTokens:: ds OUT_MAX * 2
+IF CHAT_MODE
+; Where a reply's wait goes, from the ROM's own counter: the forced prompt
+; tokens that only feed the state (prefill), and the pass that picks her first
+; token. Reset per run; py/tests/test_prefill.py and the report read them.
+wPrefillCycles:: ds 4
+wFirstCycles::   ds 4
+wFirstDone:      db
+; The harness's switch: nonzero runs every prompt token's whole forward pass,
+; as before the fast prefill - so a test can compare the two.
+wPrefillFull::   db
+ENDC
 
 SECTION "Generate code", ROM0
 
@@ -99,6 +110,14 @@ Generate::
     ld [wGenTotal + 3], a
     ld [wPrev + 0], a
     ld [wPrev + 1], a
+IF CHAT_MODE
+    ld hl, wPrefillCycles
+    ld b, 9                         ; wPrefillCycles, wFirstCycles, wFirstDone
+.zeroTimeA
+    ld [hl+], a
+    dec b
+    jr nz, .zeroTimeA
+ENDC
 
     ld a, [wTokBuf + 0]             ; the prompt's first token starts the run
     ld [wToken + 0], a
@@ -106,6 +125,28 @@ Generate::
     ld [wToken + 1], a
 
 .step
+IF CHAT_MODE
+    ; Prefill. When the token after this one is forced from the prompt too,
+    ; this pass's argmax is thrown away: all it is for is the recurrent state.
+    ; wSkipTail tells Forward to stop once the last layer's state is updated -
+    ; no wo, no FFN in that layer, no final norm, no classifier. The next
+    ; token's pass starts from its own embedding, so nothing skipped is read.
+    ld a, [wRunStart]
+    ld b, a
+    ld a, [wAbsPos]
+    inc a
+    sub b
+    ld hl, wTokCount
+    cp [hl]
+    ld a, 0
+    jr nc, :+
+    inc a                           ; the next token is the prompt's
+:   ld hl, wPrefillFull
+    bit 0, [hl]
+    jr z, :+
+    xor a
+:   ld [wSkipTail], a
+ENDC
     ; Every token is profiled, not just the first. The ISR costs ~0.15%, and in
     ; exchange the status bar shows a live figure - which also makes the ring
     ; visible, since the cost climbs with the number of attended positions until
@@ -117,6 +158,9 @@ Generate::
     ld de, wTokCycles
     ld b, 4
     call CopyN
+IF CHAT_MODE
+    call Gen_TimeStep
+ENDC
 
     ; Prompt tokens are forced; after that the model's own argmax continues.
     ; The index is relative to this run: a continuation's buffer starts at
@@ -306,12 +350,57 @@ Generate_Cont::
     ld [wGenTotal + 3], a
     ld [wPrev + 0], a
     ld [wPrev + 1], a
+IF CHAT_MODE
+    ld hl, wPrefillCycles
+    ld b, 9                         ; wPrefillCycles, wFirstCycles, wFirstDone
+.zeroTimeB
+    ld [hl+], a
+    dec b
+    jr nz, .zeroTimeB
+ENDC
 
     ld a, [wTokBuf + 0]             ; the newline the stop left behind
     ld [wToken + 0], a
     ld a, [wTokBuf + 1]
     ld [wToken + 1], a
     jp Generate.step
+ENDC
+
+IF CHAT_MODE
+; Books this pass's cycles: to the prefill if the next token is the prompt's
+; (whether or not the tail was skipped), else - once - as the first token's.
+Gen_TimeStep:
+    ld a, [wRunStart]
+    ld b, a
+    ld a, [wAbsPos]
+    inc a
+    sub b
+    ld hl, wTokCount
+    cp [hl]
+    jr nc, .first
+    ld hl, wTokCycles
+    ld de, wPrefillCycles
+    ld c, 4
+    or a
+.add
+    ld a, [de]
+    adc a, [hl]
+    ld [de], a
+    inc hl
+    inc de
+    dec c
+    jr nz, .add
+    ret
+.first
+    ld a, [wFirstDone]
+    or a
+    ret nz
+    inc a
+    ld [wFirstDone], a
+    ld hl, wTokCycles
+    ld de, wFirstCycles
+    ld b, 4
+    jp CopyN
 ENDC
 
 ; hl -> de, b bytes.

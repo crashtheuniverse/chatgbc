@@ -28,6 +28,11 @@ def test_state_survives_and_cost_is_flat():
     tot, n = r.read_u32("wGenTotal"), r.read("wGenCount")[0]
     last = r.read_u32("wTokCycles")
     h = bytes(r.read("wH", 320))
+    if "wPrefillCycles" in r.syms:
+        # A chat ROM prefills: the prompt's tokens but its last stop at the
+        # state. Flat is a claim about whole passes, so those are left out.
+        k = r.read("wTokCount")[0] - 1
+        tot, n = tot - r.read_u32("wPrefillCycles"), n - k
     r.close()
     avg = tot // n
     assert abs(last - avg) < avg * 0.15, "cost should be flat without a ring"
