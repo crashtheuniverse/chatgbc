@@ -2,7 +2,7 @@
 
 Through the lab's encode-only entry (LAB_GO_ENC): the default prompt, the
 keyboard's eight openers, the calibration stories' openings, and 300 lines cut
-from the TinyStories validation text (when it is on this machine) - each as
+from the TinyStories validation text (py/tests/data/ts_valid_300.txt) - each as
 long as the keyboard allows. Before v1.0 the ROM stopped at 7-byte pieces
 (the story vocabulary has 41 longer ones) and scanned the whole vocabulary
 for every pair: see the header of src/encoder.asm.
@@ -10,6 +10,7 @@ for every pair: see the header of src/encoder.asm.
 The chat build has its own: py/tests/test_encoder_rei.py.
 """
 import random
+from pathlib import Path
 import re
 
 import pytest
@@ -31,8 +32,16 @@ def keyboard_prompts():
     return re.findall(r'^sP\d: db "([^"]*)", 0', text, re.M)
 
 
+# The 300 sentences valid_lines() draws from the full validation file, kept in
+# the repository so the test runs on a fresh clone; regenerate by pointing
+# VALID at TinyStories-valid.txt and writing valid_lines() out, one a line.
+SAMPLE = Path(__file__).resolve().parent / "data" / "ts_valid_300.txt"
+
+
 def valid_lines(n=300):
     if not VALID.exists():
+        if SAMPLE.exists():
+            return SAMPLE.read_text(encoding="utf-8").splitlines()[:n]
         return []
     lines = set()
     with open(VALID, encoding="utf-8") as f:

@@ -393,13 +393,7 @@ def nibble_luts():
     return bytes(hi), bytes(lo)
 
 
-CAL_TEXT = ROOT / "models" / "tinystories" / "ts_valid_v1.txt"
-CAL_FALLBACK = ["Once upon a time, there was a little girl named Lily. She "
-                "liked to play in the park with her dog.",
-                "Tom and Sam were best friends. One day they found a big red "
-                "ball under a tree.",
-                "The sun was warm and the sky was blue. A small bird sat on a "
-                "branch and sang."]
+CAL_TEXT = ROOT / "models" / "calibration.txt"   # the first six stories of TinyStories V1 validation
 
 
 def enc_hash(piece, slots):
@@ -413,9 +407,11 @@ def enc_hash(piece, slots):
 def cal_prompts(n=6):
     """Held-out stories: the exponents baked into the ROM must cover what the
     model will actually see, and the first stories of the V1 validation file
-    are text it never trained on. Without the corpus, three openers."""
+    are text it never trained on. They ship in models/calibration.txt; without
+    them the exponents - and so the ROM - would differ, so there is no quiet
+    fallback."""
     if not CAL_TEXT.exists():
-        return CAL_FALLBACK
+        raise SystemExit(f"{CAL_TEXT} is missing: the ROM's exponents are calibrated on it")
     text = CAL_TEXT.read_text(encoding="utf-8")
     stories = [s for s in text.split("\n\n") if s.strip()]
     return [s[:600] for s in stories[:n]]
