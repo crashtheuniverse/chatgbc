@@ -264,6 +264,23 @@ Rei_IdleFrame::
     ld a, [wJoyNew]
     ret
 
+; Back from the world: the chat's palettes, scroll and LCDC, in one VBlank. The
+; chat's map and tiles were never touched.
+ReiScr_Chat::
+    call Console_WaitVBlank
+    ld hl, ReiPalMain
+    call ReiScr_LoadPals
+    xor a
+    ldh [rSCX], a
+    ldh [rSCY], a
+    ld a, REI_LCDC
+    ldh [rLCDC], a
+    call Rei_PaneChat               ; the writer: her pane again
+    xor a
+    ld [wReiPaneDirty], a
+    ld [wReiTalking], a
+    ret
+
 ; Draws the whole main screen, LCD off, and switches it on. Once, after the
 ; splash: from then on the screen is only ever touched a rectangle at a time.
 ; A conversation continued from the save comes up as it was left.
@@ -274,7 +291,6 @@ ReiScr_Main::
     call ReiScr_LoadTiles
     ld hl, ReiPalMain
     call ReiScr_LoadPals
-    call ReiWorld_Load              ; the beach, in the other tile bank and the other map
     call ReiScr_Clear
     call Rei_PaneChat
 

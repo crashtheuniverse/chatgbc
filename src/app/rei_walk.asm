@@ -1,4 +1,4 @@
-; The world, frame by frame: Rei walking the beach, the camera, the sea, the
+; The world, frame by frame: Rei walking, the camera, what moves in the scene, the
 ; thought box's teletype - all of it from the VBlank handler, in ROM0.
 ;
 ; This is the deferred-computation principle. A thought is a forward pass, a
@@ -13,7 +13,7 @@
 ; A frame, in M-cycles (counted from the listing, worst path of each part):
 ;     SCX and the two OAM entries from their shadows        75
 ;     one VRAM job, never two:
-;         the sea: 32 tile numbers flipped, a row at a time   300  (2 frames in 32)
+;         the scene: up to 32 tile numbers flipped         530  (2 frames in 32)
 ;         or one row of the thought box, 18 cells             215  (4 frames after a wrap)
 ;         or the one cell a letter changed                     45
 ;     the pad (Joy_Read) and the quit flag                   105
@@ -21,7 +21,7 @@
 ;     walk, pause, turn; camera; the sprite's shadow         190
 ;     the teletype's tick                                     20
 ;         and, when a letter is due, Type_Step + Rei_PanePut 150, 330 on a wrap
-; Typical frame: about 450. Worst: about 1,050 (sea row + a wrapping letter),
+; Typical frame: about 450. Worst: about 1,280 (a moving row + a wrapping letter),
 ; of the 2,280 a double-speed VBlank has and the 35,112 of a frame. Measured on
 ; the ROM's own counter: a token costs 859,281 cycles in the world against
 ; 847,862 in the chat, over 24.5 frames - 466 cycles a frame, 1.3% of the
@@ -33,7 +33,7 @@
 ; to sea) 1-3 s; the choices come from an 8-bit generator whose seed, like the
 ; thought timer, the harness can set.
 ;
-; Cost: about 400 bytes of ROM0, 152 bytes of WRAM0 (128 of them the thought
+; Cost: about 450 bytes of ROM0, 164 bytes of WRAM0 (128 of them the thought
 ; box's shadow).
 
 IF DEF(REI_UI)
@@ -59,6 +59,7 @@ wWorldTimer::    db                 ; of this stretch or pause, in 4-frame units
 wWorldFrame::    db                 ; VBlanks, wrapping
 wWorldRows::     db                 ; rows of the thought box still to copy
 wWorldOam::      ds 8               ; the two objects, as OAM wants them
+wWorldAnim::     ds 2 * 6           ; the scene's two moving rows: a map address, a 32-bit mask
 wWorldBox::      ds THINK_H * CON_W ; the thought box's shadow: map rows 1-4
 
 SECTION "Rei world frame", ROM0
@@ -81,19 +82,30 @@ World_Frame::
     ld hl, wWorldFrame
     inc [hl]
     ld a, [hl]
-    and $0F                         ; the sea moves every 16 frames: the waves,
-    jr nz, .box                     ; then 16 frames later the shore
+    and $0F                         ; the scene moves every 16 frames: its first
+    jr nz, .box                     ; row, then 16 frames later its second
     bit 4, [hl]
-    ld hl, TILEMAP1 + (WORLD_MAP_Y + WORLD_ROW_WAVE) * CON_W
+    ld hl, wWorldAnim
     jr z, :+
-    ld hl, TILEMAP1 + (WORLD_MAP_Y + WORLD_ROW_SHORE) * CON_W
-:   ld b, CON_W
-.sea
-    ld a, [hl]
+    ld hl, wWorldAnim + 6
+:   ld a, [hl+]
+    ld e, a
+    ld a, [hl+]
+    ld d, a                         ; de = the row in the map
+    ld c, [hl]                      ; the mask, a byte at a time, cell 0 first
+REPT 4
+    ld b, 8
+:   rr c
+    jr nc, :+
+    ld a, [de]
     xor 1                           ; frame A is the even tile, frame B the odd
-    ld [hl+], a
+    ld [de], a
+:   inc e                           ; a row is 32-aligned: e never carries
     dec b
-    jr nz, .sea
+    jr nz, :--
+    inc hl
+    ld c, [hl]
+ENDR
     jr .logic
 
 .box

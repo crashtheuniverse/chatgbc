@@ -17,6 +17,7 @@ IF !DEF(REI_INC)
 DEF REI_INC EQU 1
 
 DEF REI_BANK    EQU 31              ; the UI has the last ROM bank to itself
+DEF REI_WORLD_BANK EQU 30           ; and the world, its scenes and their art, the one before
 
 DEF FACE_FX     EQU 0               ; the face frame
 DEF FACE_FY     EQU 0
@@ -81,9 +82,10 @@ DEF REI_LCDC EQU LCDC_ON | LCDC_BG_ON | LCDC_BLOCK01 | LCDC_BG_9800
 ; --- The world (src/app/rei_world.asm, rei_walk.asm) -------------------------
 ; The second BG map, $9C00, holds both halves of the world screen: the thought
 ; box in rows 0-5, which the window shows at the bottom of the screen, and the
-; beach strip in rows 20-31, which the BG shows at the top with SCY = 160. The
-; log screen shares the map but only ever writes rows 0-17, so the strip is
-; drawn once; the box is redrawn on the way in.
+; scene's strip in rows 20-31, which the BG shows at the top with SCY = 160. The
+; log screen shares the map but only ever writes rows 0-17; the box is redrawn
+; on the way in, and the strip with it: each visit is the next of three scenes -
+; the beach, a garden, a playroom - and brings its own tiles, map and palettes.
 DEF OAMRAM       EQU $FE00
 DEF WORLD_MAP_Y  EQU 20             ; the strip's first row in the map
 DEF WORLD_SCY    EQU WORLD_MAP_Y * 8
@@ -108,6 +110,13 @@ DEF WORLD_LCDC EQU LCDC_ON | LCDC_BG_ON | LCDC_BLOCK01 | LCDC_BG_9C00 | LCDC_WIN
 ; Maps the UI bank and calls into it. Only from ROM0.
 MACRO REI_FAR
     ld a, REI_BANK
+    ld [rROMB0], a
+    call \1
+ENDM
+
+; The same for the world's bank.
+MACRO WORLD_FAR
+    ld a, REI_WORLD_BANK
     ld [rROMB0], a
     call \1
 ENDM

@@ -1,13 +1,17 @@
-; The world: a beach Rei walks along, and what she thinks there.
+; The world: somewhere Rei walks, and what she thinks there.
 ;
 ; Leave the chat alone for twenty seconds - there is no button for it, it is
-; hers to do - and the dialogue bars are gone: the top twelve rows are the beach (the BG layer, scrolled by
-; SCX round a 32-tile strip), she is a sprite on the sand, and the bottom six
-; rows are a thought box on the window layer, empty most of the time. Any
-; button goes back to the chat exactly as it was: the chat screen is BG map
-; $9800 and its tiles are VRAM bank 0, and the world never touches either (the
-; world is map $9C00 and tile bank 1), so coming and going is eight palettes
-; and LCDC, inside one VBlank.
+; hers to do - and the dialogue bars are gone: the top twelve rows are a scene
+; (the BG layer, scrolled by SCX round a 32-tile strip), she is a sprite on its
+; ground, and the bottom six rows are a thought box on the window layer, empty
+; most of the time. Each visit is the next of three scenes - the beach, a
+; garden, a playroom (py/gen_rei_world.py) - loaded while the chat is still on
+; screen: its tiles into VRAM bank 1 and its strip and attributes into rows
+; 20-31 of the second map, by general DMA a kilobyte a VBlank, none of which the
+; chat reads. Any button goes back to the chat exactly as it was: the chat
+; screen is BG map $9800 and its tiles are VRAM bank 0, and the world never
+; touches either, so coming and going is eight palettes and LCDC, inside one
+; VBlank.
 ;
 ; The scene runs from the VBlank handler (src/app/rei_walk.asm). This file is
 ; the main context's side: the way in and out, and the thoughts.
@@ -26,12 +30,16 @@
 ; the twin (py/rei_muse.py) for answers that read as musing rather than as a
 ; reply to somebody. When the observation corpus exists, the hidden prompt will
 ; be built from what she is near - which is why each thought already records
-; the nearest object (wWorldNear, an index into ReiWorldObjects and its words),
+; the nearest object (wWorldNear, an index into the scene's object list),
 ; though nothing shows it and the model is not told.
 ;
-; Cost: nothing in ROM0 here (the loop is 70 bytes of src/app/main.asm); about
-; 700 bytes of the UI bank and 2.3 KB of beach; 4 bytes of WRAM0; 194 bytes of
-; WRAM bank 3 for the snapshot.
+; Each scene brings its own palettes, its own two rows that move (the ISR flips
+; the tiles a mask names: frame A is an even tile, frame B the odd one after it)
+; and its own list of things to be near; wWorldScene says which one she is in.
+;
+; Cost: nothing in ROM0 here (the loop is 70 bytes of src/app/main.asm); a ROM
+; bank of its own, 10.5 KB of it: 1.8 KB of code, pool and records, the rest the
+; three scenes; 26 bytes of WRAM0; 194 bytes of WRAM bank 3 for the snapshot.
 
 IF DEF(REI_UI)
 
@@ -41,8 +49,21 @@ INCLUDE "model.inc"
 INCLUDE "app/rei.inc"
 INCLUDE "rei_art.inc"
 
+; A scene's record in ReiScenes, and where its fields are.
+DEF SCENE_REC   EQU 2 + 2 + 2 + 2 + 2 + 5 + 5
+DEF REC_TILES   EQU 0               ; dw: its tiles, for VRAM bank 1 from tile 0
+DEF REC_COUNT   EQU 2               ; dw: how many
+DEF REC_MAP     EQU 4               ; dw: its map; the attributes follow it
+DEF REC_PALS    EQU 6               ; dw: its eight palettes
+DEF REC_OBJECTS EQU 8               ; dw: its object list, a count first
+DEF REC_ANIM    EQU 10              ; two moving rows: row, then four mask bytes
+DEF GDMA_STEP   EQU 64              ; 16-byte blocks a VBlank: a kilobyte, 600 us of 1,090
+
 SECTION "Rei world thoughts", WRAM0
-wWorldNear::  db                    ; NEAR_*: what she was nearest when she thought
+wWorldNear::  db                    ; NEAR_<scene>_*: what she was nearest when she thought
+wWorldScene:: db                    ; SCENE_*: where she is this visit
+wWorldTurn::  db                    ; the scene the next visit brings (a test can set it)
+wWorldRec:    ds SCENE_REC          ; this visit's scene, from ReiScenes
 wWorldMuse::  db                    ; which line of the pool it was
 wWorldSnap:   db                    ; the snapshot holds the conversation: put it back
 wWorldBeen:   db                    ; she has a place on the beach already
@@ -52,10 +73,11 @@ wSnapH:       ds N_LAYERS * DIM
 wSnapAbsPos:  db
 wSnapStarted: db
 
-SECTION "Rei world", ROMX, BANK[REI_BANK]
+SECTION "Rei world", ROMX, BANK[REI_WORLD_BANK]
 
 DEF REI_WORLD_DATA EQU 1
 INCLUDE "rei_world_art.inc"
+
 
 DEF MUSES EQU 9
 ; What she says to each (py/rei_muse.py: fresh state / after a chat):
@@ -89,58 +111,159 @@ ReiMuses:
 .m7: db "what is your favourite colour", 0
 .m8: db "tell me a story", 0
 
-; Once, with the LCD off (ReiScr_Main): the beach's tiles into VRAM bank 1, the
-; strip into the second map, her palette, and an OAM with nothing in it.
-ReiWorld_Load::
-    ld a, 1
-    ldh [rVBK], a
-    ld hl, ReiWorldTiles
-    ld de, TILEBLOCK0
-    ld bc, WORLD_TILES * 16
-    call CopyBytes
-    ld hl, ReiWorldAttr
-    ld de, TILEMAP1 + WORLD_MAP_Y * CON_W
-    ld bc, WORLD_W * WORLD_H
-    call CopyBytes
-    xor a
-    ldh [rVBK], a
-    ld hl, ReiWorldMap
-    ld de, TILEMAP1 + WORLD_MAP_Y * CON_W
-    ld bc, WORLD_W * WORLD_H
-    call CopyBytes
-
-    ld a, OBPI_AUTOINC
-    ldh [rOBPI], a
-    ld hl, ReiPalObj
-    ld b, 8
-.pal
+; hl = eight palettes. VBlank or LCD off.
+ReiWorld_Pals:
+    ld a, BGPI_AUTOINC
+    ldh [rBCPS], a
+    ld b, 8 * 8
+.loop
     ld a, [hl+]
-    ldh [rOBPD], a
+    ldh [rBCPD], a
     dec b
-    jr nz, .pal
-    ld hl, OAMRAM
-    ld b, OAM_SIZE
-    xor a
-.oam
-    ld [hl+], a
-    dec b
-    jr nz, .oam
+    jr nz, .loop
+    ret
 
-    ld a, [wWorldBeen]              ; where she starts, the first time
+; hl = a 16-byte-aligned source in this bank, de = its VRAM destination (the
+; bank already mapped), bc = 16-byte blocks. General DMA, GDMA_STEP blocks a
+; VBlank, so the chat on screen - which reads neither VRAM bank 1 nor rows
+; 20-31 of the second map - never sees it happen.
+ReiWorld_Gdma:
+    ld a, b
+    or c
+    ret z
+    push bc
+    call Console_WaitVBlank
+    pop bc
+    ld a, h
+    ldh [rHDMA1], a
+    ld a, l
+    ldh [rHDMA2], a
+    ld a, d
+    ldh [rHDMA3], a
+    ld a, e
+    ldh [rHDMA4], a
+    ld a, b                         ; this time: all of it, or GDMA_STEP
     or a
-    ret nz
+    jr nz, .step
+    ld a, c
+    cp GDMA_STEP + 1
+    jr c, .last
+.step
+    ld a, GDMA_STEP - 1
+    ldh [rHDMA5], a
+    push bc
+    ld bc, GDMA_STEP * 16
+    add hl, bc
+    push hl
+    ld h, d
+    ld l, e
+    add hl, bc
+    ld d, h
+    ld e, l
+    pop hl
+    pop bc
+    ld a, c
+    sub GDMA_STEP
+    ld c, a
+    jr nc, ReiWorld_Gdma
+    dec b
+    jr ReiWorld_Gdma
+.last
+    dec a
+    ldh [rHDMA5], a
+    ret
+
+; The next scene, into VRAM while the chat still shows: its tiles into bank 1,
+; its strip and attributes into rows 20-31 of the second map, and the two rows
+; that move told to the handler.
+ReiWorld_Scene:
+    ld a, [wWorldTurn]
+    cp WORLD_SCENES
+    jr c, :+
+    xor a                           ; a turn out of range is the first scene
+:   ld [wWorldScene], a
     inc a
-    ld [wWorldBeen], a
-    ld a, 112
-    ld [wWorldX], a
-    ld a, 40
-    ld [wWorldTimer], a
-    ld a, [wWorldRng]               ; a seed the harness set stays set
+    cp WORLD_SCENES
+    jr c, :+
+    xor a
+:   ld [wWorldTurn], a
+    ld a, [wWorldScene]             ; its record, into WRAM
+    ld hl, 0
     or a
-    ret nz
-    ldh a, [rDIV]
-    or 1
-    ld [wWorldRng], a
+    jr z, .rec
+    ld b, a
+.mul
+    ld de, SCENE_REC
+    add hl, de
+    dec b
+    jr nz, .mul
+.rec
+    ld de, ReiScenes
+    add hl, de
+    ld de, wWorldRec
+    ld bc, SCENE_REC
+    call CopyBytes
+
+    ld a, 1                         ; the tiles
+    ldh [rVBK], a
+    ld hl, wWorldRec + REC_TILES
+    ld a, [hl+]
+    ld h, [hl]
+    ld l, a
+    ld a, [wWorldRec + REC_COUNT + 0]
+    ld c, a
+    ld a, [wWorldRec + REC_COUNT + 1]
+    ld b, a
+    ld de, TILEBLOCK0
+    call ReiWorld_Gdma
+    ld hl, wWorldRec + REC_MAP      ; the attributes, after the map
+    ld a, [hl+]
+    ld h, [hl]
+    ld l, a
+    ld bc, WORLD_W * WORLD_H
+    add hl, bc
+    ld de, TILEMAP1 + WORLD_MAP_Y * CON_W
+    ld bc, WORLD_W * WORLD_H / 16
+    call ReiWorld_Gdma
+    xor a
+    ldh [rVBK], a
+    ld hl, wWorldRec + REC_MAP      ; the map
+    ld a, [hl+]
+    ld h, [hl]
+    ld l, a
+    ld de, TILEMAP1 + WORLD_MAP_Y * CON_W
+    ld bc, WORLD_W * WORLD_H / 16
+    call ReiWorld_Gdma
+
+    ld hl, wWorldRec + REC_ANIM     ; the handler's two groups: a map address and a mask
+    ld de, wWorldAnim
+    ld b, 2
+.group
+    ld a, [hl+]                     ; the row -> TILEMAP1 + (WORLD_MAP_Y + row) * CON_W
+    push hl
+    add a, WORLD_MAP_Y
+    ld l, a
+    ld h, 0
+REPT 5
+    add hl, hl
+ENDR
+    ld a, l
+    ld [de], a
+    inc de
+    ld a, h
+    add a, HIGH(TILEMAP1)
+    ld [de], a
+    inc de
+    pop hl
+    ld c, 4
+.mask
+    ld a, [hl+]
+    ld [de], a
+    inc de
+    dec c
+    jr nz, .mask
+    dec b
+    jr nz, .group
     ret
 
 ; hl = a row of the second map, b / c / d = its left, middle and right tiles.
@@ -177,6 +300,24 @@ ReiWorld_ClearBox:
 
 ; Chat -> world. Returns with interrupts on and the handler running the scene.
 ReiWorld_Enter::
+    call ReiWorld_Scene             ; this visit's scene, behind the chat
+
+    ld a, [wWorldBeen]              ; where she starts, the first time
+    or a
+    jr nz, .been
+    inc a
+    ld [wWorldBeen], a
+    ld a, 112
+    ld [wWorldX], a
+    ld a, 40
+    ld [wWorldTimer], a
+    ld a, [wWorldRng]               ; a seed the harness set stays set
+    or a
+    jr nz, .been
+    ldh a, [rDIV]
+    or 1
+    ld [wWorldRng], a
+.been
     call Console_WaitVBlank         ; the box, while the chat is still showing:
     ld hl, TILEMAP1                 ; the log screen may have been over these rows
     ld b, T_FR_TL
@@ -252,11 +393,32 @@ ReiWorld_Enter::
     sub (CAM_LEFT + CAM_RIGHT) / 2
     ld [wWorldScx], a
 
+    call Console_WaitVBlank         ; her palette, and an OAM with nothing in it
+    ld a, OBPI_AUTOINC
+    ldh [rOBPI], a
+    ld hl, ReiPalObj
+    ld b, 8
+.objPal
+    ld a, [hl+]
+    ldh [rOBPD], a
+    dec b
+    jr nz, .objPal
+    ld hl, OAMRAM
+    ld b, OAM_SIZE
+    xor a
+.oam
+    ld [hl+], a
+    dec b
+    jr nz, .oam
+
     call Console_WaitVBlank         ; the switch: palettes, scroll, window, LCDC
     ld a, [wWorldScx]
     ldh [rSCX], a
-    ld hl, ReiPalWorld
-    call ReiScr_LoadPals
+    ld hl, wWorldRec + REC_PALS
+    ld a, [hl+]
+    ld h, [hl]
+    ld l, a
+    call ReiWorld_Pals
     ld a, WORLD_SCY
     ldh [rSCY], a
     ld a, WORLD_WIN_Y
@@ -275,28 +437,16 @@ ReiWorld_Enter::
     ei
     ret
 
-; World -> chat, exactly as it was left. Whatever she was thinking is dropped.
+; World -> chat: interrupts off, whatever she was thinking dropped, the
+; conversation as it was.
 ReiWorld_Leave::
     di
     xor a
     ld [wWorldOn], a
     ld [wTypeOn], a
     ld [wWorldThinking], a
-    call ReiWorld_Restore
-    call Console_WaitVBlank
-    ld hl, ReiPalMain
-    call ReiScr_LoadPals
-    xor a
-    ldh [rSCX], a
-    ldh [rSCY], a
-    ld a, REI_LCDC
-    ldh [rLCDC], a
-    call Rei_PaneChat               ; the writer: her pane again
-    xor a
-    ld [wReiPaneDirty], a
-    ld [wReiTalking], a
     ld [wWorldQuit], a
-    ret
+    jp ReiWorld_Restore             ; ReiScr_Chat, in the UI bank, puts the screen back
 
 ; The conversation, as it was before she thought.
 ReiWorld_Restore:
@@ -341,8 +491,12 @@ ReiWorld_Muse::
     ldh [rSVBK], a
     ld [wWorldSnap], a
 
-    ld hl, ReiWorldObjects          ; what is she nearest? (for the retrain)
-    ld b, WORLD_OBJECTS
+    ld hl, wWorldRec + REC_OBJECTS  ; what is she nearest, here? (for the retrain)
+    ld a, [hl+]
+    ld h, [hl]
+    ld l, a
+    ld a, [hl+]
+    ld b, a                         ; the scene's count first
     ld c, 0
     ld d, $FF                       ; d = the least distance so far, e = whose
 .object

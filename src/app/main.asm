@@ -63,7 +63,7 @@ IF DEF(REI_UI)
 ; encode, generate, on a conversation that ReiWorld_Muse has put aside and
 ; ReiWorld_Settle puts back.
 .world
-    REI_FAR ReiWorld_Enter          ; returns with interrupts on
+    WORLD_FAR ReiWorld_Enter          ; returns with interrupts on
 .worldIdle
     ld a, [wWorldQuit]
     or a
@@ -74,7 +74,7 @@ IF DEF(REI_UI)
     halt                            ; until the next VBlank
     jr .worldIdle
 .worldThink
-    REI_FAR ReiWorld_Muse           ; the state aside, a hidden line staged
+    WORLD_FAR ReiWorld_Muse           ; the state aside, a hidden line staged
     call Chat_Stage
     ld a, CHAT_REPLY_MAX
     ld [wGenSteps], a
@@ -89,10 +89,11 @@ IF DEF(REI_UI)
     call EncodeCont
     call Generate_Cont
 .worldSettle
-    REI_FAR ReiWorld_Settle         ; typed out, left up a while, cleared; the state back
+    WORLD_FAR ReiWorld_Settle         ; typed out, left up a while, cleared; the state back
     jr .worldIdle
 .worldLeave
-    REI_FAR ReiWorld_Leave          ; interrupts off, the chat screen as it was
+    WORLD_FAR ReiWorld_Leave        ; interrupts off, the chat screen as it was
+    REI_FAR ReiScr_Chat             ; the chat's palettes, scroll and LCDC
     REI_FAR ReiUi_Resume            ; and the input loop where it left off
     jp .reiBack
 
