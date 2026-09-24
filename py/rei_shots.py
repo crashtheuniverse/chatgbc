@@ -284,6 +284,7 @@ def main():
     r.screenshot(SHOTS / "keyboard.png")
 
     r.pyboy.memory[r.addr("wWorldRng")] = 40
+    r.pyboy.memory[r.addr("wWorldTurn")] = 0        # the first scene is seeded at START: pin it
     for scene in ("beach", "garden", "playroom"):   # left alone: each visit the next scene
         to_world(r)
         set_word(r, "wWorldThinkT", 60000)      # no thought until the walk is on film

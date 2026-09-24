@@ -295,3 +295,29 @@ def test_the_chat_never_knew(talk):
     assert ui.log_screen(r)[:len(rows)] == rows
     assert ui.log_screen(r)[len(rows)] == (0, " " * 18)
     ui.press(r, "select", after=12)
+
+
+def first_scenes(wait):
+    """Power on, wait `wait` frames on the splash, press START; the scene of the
+    first two visits."""
+    r = ui.boot()
+    r.pyboy.tick(wait, False)
+    ui.press(r, "start", after=60)
+    scenes = []
+    for _ in range(2):
+        ui.to_world(r)
+        scenes.append(r.read("wWorldScene")[0])
+        ui.press(r, "b", after=10)
+    r.close()
+    return scenes
+
+
+def test_the_first_scene_is_the_players_timing():
+    """No clock on the cartridge: the frame START is pressed on picks the first
+    scene, and the visits rotate from there."""
+    seen = {}
+    for wait in (150, 151, 152, 153, 157, 163):
+        first, second = first_scenes(wait)
+        assert second == (first + 1) % 3, "and then the next, in turn"
+        seen.setdefault(first, wait)
+    assert len(seen) >= 2, f"every press timing gave the same first scene: {seen}"
