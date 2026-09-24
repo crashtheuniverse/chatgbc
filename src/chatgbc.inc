@@ -98,6 +98,10 @@ DEF LAB_GO_NORM EQU $D2
 ; wX+3, result to wXb+0..2 - the byte peel has no caller on this model's own
 ; shifts, so py/tests/test_regmath.py exercises every count this way.
 DEF LAB_GO_SHIFT EQU $E1
+; Chat builds: encode wPromptText and nothing else - Encode ($E2) or EncodeCont
+; ($E3) - timed into wEncCycles, for py/tests/test_encoder_rei.py.
+DEF LAB_GO_ENC  EQU $E2
+DEF LAB_GO_ENCC EQU $E3
 
 ; --- Input -----------------------------------------------------------------
 ; Joy_Read returns the d-pad in the high nibble and buttons in the low one.

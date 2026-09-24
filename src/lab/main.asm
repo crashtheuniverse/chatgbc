@@ -37,6 +37,12 @@ Run::
     jr z, .shift
     cp LAB_GO
     jr z, .run
+IF CHAT_MODE
+    cp LAB_GO_ENC
+    jr z, .enc
+    cp LAB_GO_ENCC
+    jr z, .enc
+ENDC
 IF CLS_TERNARY
     cp LAB_GO_CLS
     jr z, .cls
@@ -77,6 +83,17 @@ IF DEF(PROBES)
 ENDC
     call MeasureSelftest
     jr .done
+
+IF CHAT_MODE
+.enc                            ; the encoder alone: $E2 fresh, $E3 a continuation
+    sub LAB_GO_ENC
+    push af
+    xor a
+    ld [wLabState], a
+    pop af
+    call Encode_Timed
+    jr .done
+ENDC
 
 .norm                           ; one kernel, on the vector the harness wrote
     xor a
