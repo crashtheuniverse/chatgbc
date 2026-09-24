@@ -303,9 +303,11 @@ I expressly chose tools that can work this way.
 .\tools\sameboy\sameboy.exe build\chatgbc.gbc
 ```
 
-`-Rei` exports her checkpoint (`models\rei.bin`, `models\tok_rei.bin`),
-builds, and puts the tracked sources back in the story build's form, so
-`git status` is clean afterwards.
+The checkpoints, tokenizers and the six calibration stories the export
+needs are in `models\` (see [models/README.md](models/README.md)), so a fresh
+clone builds both ROMs byte for byte. `-Rei` exports her checkpoint
+(`models\rei.bin`, `models\tok_rei.bin`), builds, and puts the tracked
+sources back in the story build's form, so `git status` is clean afterwards.
 
 ## Train it
 

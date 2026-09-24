@@ -1,0 +1,5 @@
+# Checkpoints, tokenizers and the calibration text are hashed in models/README.md:
+# git must store and check them out byte for byte.
+models/** -text
+*.bin binary
+*.gbc binary
