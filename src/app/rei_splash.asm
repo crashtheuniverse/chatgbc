@@ -11,18 +11,15 @@
 ; The save is checked and loaded before the menu is drawn (the counters come
 ; from it); forgetting zeroes what was loaded.
 ;
-; The title is a picture, 20 x 9 tiles from the splash tile set (REI cut on the
-; diagonal, the red line behind it, the character for zero, the four small
-; words); the set shares its VRAM range with the main screen's, and leaving
-; the splash loads the other one. One palette does it all: night, red, white.
-; Everything under the picture hangs from one column: the items, the counters
-; under them (their numbers end where "new friend" ends), and the cursor two
-; cells to the left.
+; The logotype is 12 x 5 tiles from the splash tile set, which shares its VRAM
+; range with the main screen's set; leaving the splash loads the other one.
 ; The blink is a palette, not a redraw: PRESS START's cells switch between the
 ; text palette and one whose four colours are all the background.
+; The screen is 20 columns, so the two long lines are each set on two rows.
 ; Leaving wipes the screen down, a row a frame, and the main screen follows.
+; The moment of leaving also picks the first world scene (see .go).
 ;
-; Cost: nothing in ROM0; about 600 bytes of the UI bank, 2 bytes of WRAM0, and
+; Cost: nothing in ROM0; about 620 bytes of the UI bank, 3 bytes of WRAM0, and
 ; the splash art.
 
 IF DEF(REI_UI)
@@ -31,25 +28,27 @@ INCLUDE "hardware.inc"
 INCLUDE "chatgbc.inc"
 INCLUDE "app/rei.inc"
 INCLUDE "rei_art.inc"
+INCLUDE "rei_world_art.inc"
 
-DEF LOGO_X  EQU 0
-DEF LOGO_Y  EQU 1
+DEF LOGO_X  EQU (CON_VIS_W - REI_LOGO_W) / 2
+DEF LOGO_Y  EQU 0
 DEF START_X EQU 4
-DEF START_Y EQU 11
+DEF START_Y EQU 10
 DEF START_W EQU 11
 DEF MENU_X  EQU 6                   ; the items; the arrow is two to the left
-DEF MENU_Y  EQU 10
-DEF MENU_END EQU MENU_X + 10        ; one past "new friend"
-DEF STAT_X  EQU MENU_X
-DEF STAT_Y  EQU 13
-DEF ENGINE_Y EQU 16
+DEF MENU_Y  EQU 9
+DEF STAT_X  EQU 5
+DEF STAT_Y  EQU 12
 
 SECTION "Rei splash state", WRAM0
 wReiMenu:     db                    ; 1 = a save was found: the menu, not PRESS START
 wReiMenuPick: db                    ; 0 = continue, 1 = new friend
+wReiSplashT:  db                    ; frames on this screen, wrapping
 
 SECTION "Rei splash", ROMX, BANK[REI_BANK]
 
+sSplashA: db "a being", 0
+sSplashB: db "in a cartridge", 0
 sSplashStart: db "PRESS START", 0
 sSplashC: db "ChatGBC engine", 0
 sSplashD: db "v1.0.0", 0
@@ -60,8 +59,7 @@ sMenuLines:    db "lines", 0
 sMenuForget:   db "forget everything?", 0
 sMenuYesNo:    db "A yes    B no", 0
 
-; hl = a 16-bit counter, c = row: its decimal into the shadow, ending at the
-; column where the items end.
+; hl = a 16-bit counter, b = column, c = row: its decimal, into the shadow.
 ReiSplash_Number:
     ld a, [hl+]
     ld [wNum + 0], a
@@ -73,11 +71,6 @@ ReiSplash_Number:
     push bc
     call Dec32_Render
     pop bc
-    ld a, [wDigitLen]
-    ld b, a
-    ld a, MENU_END
-    sub b
-    ld b, a
     call Rei_CellAddr
     ld de, wDigits
     ld a, [wDigitLen]
@@ -147,6 +140,38 @@ ReiUi_Splash::
     ld d, REI_LOGO_W
     ld e, REI_LOGO_H
     call Rei_DrawMap
+    ld hl, ReiLogoAttr              ; the logotype's palettes, tile by tile
+    ld de, TILEMAP0 + LOGO_Y * CON_W + LOGO_X
+    ld a, 1
+    ldh [rVBK], a
+    ld c, REI_LOGO_H
+.attrRow
+    ld b, REI_LOGO_W
+.attrCell
+    ld a, [hl+]
+    ld [de], a
+    inc de
+    dec b
+    jr nz, .attrCell
+    ld a, e
+    add a, CON_W - REI_LOGO_W
+    ld e, a
+    jr nc, :+
+    inc d
+:   dec c
+    jr nz, .attrRow
+    xor a
+    ldh [rVBK], a
+
+    ld hl, sSplashA
+    ld b, 6
+    ld c, 6
+    call Rei_Print
+    ld hl, sSplashB
+    ld b, 3
+    ld c, 7
+    call Rei_Print
+
     xor a
     ld [wReiMenuPick], a
     call ReiSave_Check
@@ -154,6 +179,7 @@ ReiUi_Splash::
     jr nc, :+
     inc a
 :   ld [wReiMenu], a
+    ld c, 13                        ; the engine's two rows sit lower under a menu
     or a
     jr z, .pressStart
     call ReiSave_Load
@@ -163,6 +189,7 @@ ReiUi_Splash::
     ld c, STAT_Y
     call Rei_Print
     ld hl, wReiVisits
+    ld b, STAT_X + 7
     ld c, STAT_Y
     call ReiSplash_Number
     ld hl, sMenuLines
@@ -170,22 +197,27 @@ ReiUi_Splash::
     ld c, STAT_Y + 1
     call Rei_Print
     ld hl, wReiLines
+    ld b, STAT_X + 7
     ld c, STAT_Y + 1
     call ReiSplash_Number
+    ld c, 15
     jr .engine
 .pressStart
+    push bc
     ld hl, sSplashStart
     ld b, START_X
     ld c, START_Y
     call Rei_Print
+    pop bc
 .engine
+    push bc
     ld hl, sSplashC
     ld b, 3
-    ld c, ENGINE_Y
     call Rei_Print
+    pop bc
+    inc c
     ld hl, sSplashD
     ld b, 7
-    ld c, ENGINE_Y + 1
     call Rei_Print
     call ReiScr_LcdOn
 
@@ -193,6 +225,8 @@ ReiUi_Splash::
     ld [wReiBlinkT], a
 .wait
     call Console_WaitVBlank
+    ld hl, wReiSplashT              ; frames on the splash, for the first scene
+    inc [hl]
     ld a, [wReiMenu]
     or a
     jr nz, .menu
@@ -264,6 +298,29 @@ ReiUi_Splash::
     call ReiSave_Forget
 
 .go
+    ; The first world of this session: the moment of the press, which only
+    ; the player's hand decides - the frames spent on this screen, plus the
+    ; divider, which runs through its 256 values in under a frame. Their sum's
+    ; remainder by three picks the scene the first visit brings, and the
+    ; visits rotate from there.
+    ldh a, [rDIV]
+    ld hl, wReiSplashT
+    add a, [hl]
+    ld b, 0
+    jr nc, .third
+    inc b                           ; the carry out: 256, which is 1 more mod 3
+.third
+    cp WORLD_SCENES
+    jr c, .carry
+    sub WORLD_SCENES
+    jr .third
+.carry
+    add a, b
+    cp WORLD_SCENES
+    jr c, .seeded
+    sub WORLD_SCENES
+.seeded
+    ld [wWorldTurn], a
     ld hl, TILEMAP0                 ; a wipe: the night comes down a row a frame
     ld c, CON_H
 .wipe

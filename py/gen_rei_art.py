@@ -158,6 +158,18 @@ SYMBOLS["THINK"] = ["..####..",               # the thought box's title: a thoug
 SYMBOLS["ARROW_L"] = mirror(SYMBOLS["ARROW_R"])
 SYMBOLS["ARROW_DN"] = SYMBOLS["ARROW_UP"][::-1]
 
+# The small heart: the dot of the logotype's i.
+HEART = ["..##...##..",
+         ".#++#.#++#.",
+         "#+--+#++++#",
+         "#+-++++++##",
+         "#++++++++##",
+         ".#++++++##.",
+         "..#++++##..",
+         "...#++##...",
+         "....###....",
+         ".....#....."]
+
 # The mood icons, one a mood, each its own shape and its own colour.
 ICON_HAPPY = ["..###...###..",
               ".#+++#.#+++#.",
@@ -360,12 +372,51 @@ def faces():
     ]
 
 
-# --- the title ----------------------------------------------------------------
-# The maintainer's design, at the screen's own resolution: REI in slab letters
+# --- the logotype ------------------------------------------------------------
+LOGO_W, LOGO_H = 12, 5                # tiles
+
+
+def logo():
+    """'Rei', 96 x 40: fat round letters, a highlight along the top of each
+    stroke, an ink outline, and a heart for the dot of the i."""
+    img = canvas(LOGO_W * 8, LOGO_H * 8)
+    c = 2
+    # R
+    x = 9
+    rect(img, x, 3, x + 7, 36, c)
+    ellipse(img, x + 15, 12.5, 13, 9.5, c)
+    rect(img, x, 3, x + 15, 21, c)
+    ellipse(img, x + 15, 12.5, 6, 3.5, 0)
+    rect(img, x + 8, 10, x + 15, 15, 0)
+    for i in range(16):                                  # the leg
+        rect(img, x + 11 + i * 10 // 15, 21 + i, x + 19 + i * 10 // 15, 21 + i, c)
+    # e
+    x = 42
+    ellipse(img, x + 13, 25, 13, 12, c)
+    ellipse(img, x + 13, 25, 6.5, 6, 0)
+    rect(img, x + 3, 23, x + 25, 27, c)
+    rect(img, x + 14, 28, x + 27, 31, 0)
+    # i
+    x = 75
+    rect(img, x, 15, x + 7, 36, c)
+    # highlight: the top two pixels of every painted run become light
+    for xx in range(len(img[0])):
+        for yy in range(len(img)):
+            if img[yy][xx] == c and (yy == 0 or img[yy - 1][xx] in (0,)):
+                img[yy][xx] = 1
+    outline(img)
+    art(img, x - 2, 2, HEART, KEY)
+    return img, (x - 2, 2, 11, 10)
+
+
+# --- the next title (unused) ---------------------------------------------------
+# NOT SHIPPED in v1.0: the splash above is the one on the cartridge. Kept here
+# for the next iteration, as drawn: the maintainer's design, at the screen's
+# own resolution: REI in slab letters
 # cut on the diagonal, a red line that runs behind them from corner to corner,
 # the character for zero (rei) on the left, four small words on the right.
 # Colours: 0 night, 2 red, 3 white (the font's own colour).
-LOGO_W, LOGO_H = 20, 9                # tiles; the picture sits on tile row 1
+NEXT_W, NEXT_H = 20, 9                # tiles; the picture sits on tile row 1
 WHITE, RED = 3, 2
 
 KANJI = [".#########.",
@@ -431,9 +482,10 @@ def tiny(img, x, y, text, colour=WHITE):
         x += 4
 
 
-def logo():
-    """The title, 160 x 72. Every span below is (row, first x, last x)."""
-    W, H, Y0 = LOGO_W * 8, LOGO_H * 8, 8         # Y0: the screen row of the picture's top
+def logo_next():
+    """The next title, 160 x 72. Every span below is (row, first x, last x).
+    Colours: 0 night, 2 red, 3 white. Unused in v1.0 (see above)."""
+    W, H, Y0 = NEXT_W * 8, NEXT_H * 8, 8         # Y0: the screen row of the picture's top
     img = canvas(W, H)
 
     def span(y, x0, x1, colour=WHITE):
@@ -552,11 +604,15 @@ MAIN_PALETTES = [
 # The log screen borrows the cursor's slot while it is open: the player's lines.
 YOURS = ("YOURS", [CREAM, (152, 200, 248), (48, 96, 208), (40, 72, 184)])
 
-NIGHT = (20, 30, 64)
+NIGHT = (32, 28, 64)
 SPLASH_PALETTES = [
-    ("S_TEXT", [NIGHT, (96, 104, 160), (240, 56, 64), (236, 236, 236)]),   # night, -, red, white
+    ("S_TEXT", [NIGHT, (96, 96, 160), (168, 176, 232), (248, 240, 216)]),
+    ("S_LOGO", [NIGHT, (200, 224, 255), (104, 152, 248), (16, 12, 40)]),
+    ("S_HEART", [NIGHT, (255, 184, 192), (240, 64, 96), (16, 12, 40)]),
     ("S_DIM", [NIGHT, NIGHT, NIGHT, NIGHT]),                          # PRESS START, blinked off
 ]
+# logo_next()'s palette, for the next iteration:
+# ("S_TEXT", [(20, 30, 64), (96, 104, 160), (240, 56, 64), (236, 236, 236)])
 
 
 # --- output ------------------------------------------------------------------
@@ -580,17 +636,23 @@ def build():
 
     splash = TileSet()
     splash.add(canvas(8, 8), "S_BLANK")
-    t = canvas(8, 8)                             # the menu's cursor, in red
-    for y in range(7):
-        for x in range(1, 2 + min(y, 6 - y)):
-            t[y][x] = RED
-    splash.add(t, "S_ARROW")
-    limg = logo()
+    t = canvas(8, 8)
+    art(t, 0, 0, SYMBOLS["ARROW_R"], KEY)
+    splash.add(t, "S_ARROW")                     # the menu's cursor
+    limg, heart_box = logo()
     logo_map = splash.cut(limg)
-    return main, face_maps, mood_maps, splash, logo_map, limg
+    hx, hy, hw, hh = heart_box
+    logo_attr = []                               # the heart's tiles take its palette
+    for ty in range(LOGO_H):
+        for tx in range(LOGO_W):
+            px = [(x, y) for y in range(ty * 8, ty * 8 + 8) for x in range(tx * 8, tx * 8 + 8)
+                  if limg[y][x]]
+            inside = [hx <= x < hx + hw and hy <= y < hy + hh for x, y in px]
+            logo_attr.append(2 if px and all(inside) else 1)
+    return main, face_maps, mood_maps, splash, logo_map, logo_attr, limg
 
 
-def emit(main, face_maps, mood_maps, splash, logo_map):
+def emit(main, face_maps, mood_maps, splash, logo_map, logo_attr):
     assert TILE_BASE + len(main.tiles) <= 256, len(main.tiles)
     print(f"main tile set: {len(main.tiles)} of {256 - TILE_BASE}")
     assert TILE_BASE + len(splash.tiles) <= 256, len(splash.tiles)
@@ -650,6 +712,10 @@ def emit(main, face_maps, mood_maps, splash, logo_map):
         maps(f"ReiBar{name.capitalize()}", [(BARS[name].strip(), m)], 20)
     maps("ReiBarPages", main.pages, BAR_PAGE_W // 2)
     maps("ReiLogoMap", [("Rei", logo_map)], LOGO_W)
+    o.append("ReiLogoAttr::")
+    for r in range(0, len(logo_attr), LOGO_W):
+        o.append("    db " + ",".join(str(v) for v in logo_attr[r:r + LOGO_W]))
+    o.append("")
     pals("ReiPalMain", MAIN_PALETTES)
     pals("ReiPalSplash", SPLASH_PALETTES)
     pals("ReiPalYours", [YOURS])
@@ -662,11 +728,11 @@ def emit(main, face_maps, mood_maps, splash, logo_map):
 def preview(face_maps_imgs, limg):
     from PIL import Image
     pal_face = MAIN_PALETTES[5][1]
-    pal_logo = SPLASH_PALETTES[0][1]
+    pal_logo = SPLASH_PALETTES[1][1]
     pal_red = MAIN_PALETTES[1][1]
     fs = faces()
     W = 34 * len(fs)
-    im = Image.new("RGB", (max(W, 300), 34 + 74 + 26 + 12), (255, 255, 255))
+    im = Image.new("RGB", (max(W, 300), 34 + 42 + 26 + 12), (255, 255, 255))
     for i, (_, img) in enumerate(fs):
         for y in range(32):
             for x in range(32):
@@ -695,7 +761,7 @@ def preview(face_maps_imgs, limg):
 if __name__ == "__main__":
     import gen_rei_world                     # the beach has a generator of its own
     gen_rei_world.emit()
-    main, face_maps, mood_maps, splash, logo_map, limg = build()
-    emit(main, face_maps, mood_maps, splash, logo_map)
+    main, face_maps, mood_maps, splash, logo_map, logo_attr, limg = build()
+    emit(main, face_maps, mood_maps, splash, logo_map, logo_attr)
     if "--preview" in sys.argv:
         preview(face_maps, limg)
