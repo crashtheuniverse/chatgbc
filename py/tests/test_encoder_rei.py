@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 import export5                    # noqa: E402
-from conftest import APP, lab_rom
+from conftest import APP, lab_rom, lab_encode as rom_encode
 
 if not export5.CHAT:
     pytest.skip("the chat encoder is the chat export's", allow_module_level=True)
@@ -57,24 +57,6 @@ def rom():
     r.pyboy.tick(400, False)
     yield r
     r.close()
-
-
-def rom_encode(r, text, cont):
-    raw = text.encode("ascii")
-    assert len(raw) <= r.defs["PROMPT_MAX"]
-    idle, state, go = r.defs["LAB_IDLE"], r.addr("wLabState"), r.addr("wLabGo")
-    r._tick_until(lambda: r.pyboy.memory[state] == idle, 2000, "lab idle")
-    base = r.addr("wPromptText")
-    r.pyboy.memory[base:base + len(raw)] = list(raw)
-    r.pyboy.memory[r.addr("wPromptLen")] = len(raw)
-    ready = r.addr("wReady")
-    r.pyboy.memory[ready] = 0
-    r.pyboy.memory[go] = 0xE3 if cont else 0xE2
-    r._tick_until(lambda: r.pyboy.memory[ready] == r.defs["READY_MAGIC"], 3000, "encode")
-    r.pyboy.memory[go] = 0
-    n = r.read("wTokCount")[0]
-    buf = r.read("wTokBuf", 2 * n)
-    return [buf[2 * i] | (buf[2 * i + 1] << 8) for i in range(n)], r.read_u32("wEncCycles")
 
 
 def python_encode(tok, text, cont):

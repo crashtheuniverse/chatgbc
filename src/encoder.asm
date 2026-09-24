@@ -8,38 +8,27 @@
 ; "less than" instead of a float compare. Ranks are unique, so the first pair at
 ; a given rank wins - matching Python's strictly-greater test.
 ;
-; The vocabulary lookup is a linear scan of 512 entries. That sounds expensive
-; until you notice the longest piece is 7 bytes: any candidate longer than that
-; cannot exist, and every entry whose length differs is rejected on one compare.
-; A 16-character prompt encodes in well under a second.
-;
-; That was the story model's tokenizer as first measured, and it held for
-; neither model: both vocabularies have pieces of up to 11 bytes (41 of the
-; story's, 15 of the chat's: " favourite", " cartridge.", ...), so a scan that
-; stops at 7 never merges into them and the ROM's tokens drift from Python's.
-; And each merge pass looks up every adjacent pair, each lookup scanning the
-; whole vocabulary: a 17-character line cost 6 million cycles, three seconds,
-; longer than the prompt's own forward passes. The story ROM keeps both as
-; they are - its bytes are a contract, and its opening prompt has no long
-; piece - but the chat build (CHAT_MODE) takes its longest piece from the
-; exporter (ENC_PIECE_MAX, asserted there) and finds a piece by hash: the
-; exporter lays the vocabulary out in a 1,024-slot open-addressed table of
-; token id + 1 under h = h * 33 + byte (low ten bits, linear probing), so a
-; lookup hashes the candidate, probes a slot or two and compares one piece.
+; A piece is found by hash, not by scanning the vocabulary: the exporter lays
+; the vocabulary out in an open-addressed table of token id + 1 (twice as many
+; slots as pieces) under h = h * 33 + byte, linear probing, so a lookup hashes
+; the candidate, probes a slot or two and compares one piece. The longest piece
+; comes from the exporter too (ENC_PIECE_MAX: 11 bytes in both vocabularies).
 ; And the merge loop remembers each adjacent pair's result (Enc_Pairs): a merge
 ; changes only the pairs either side of it, so only those two are looked up
-; again, where every pass used to look up every pair. Both change only how
-; fast the answer comes: the tokens are Python's (py/tests/test_encoder_rei.py).
+; again.
+;
+; Until v1.0 the lookup was a linear scan that stopped at 7-byte pieces, and
+; every merge pass looked up every pair: the tokens drifted from Python's on
+; lines that needed a longer piece (" favourite", " cartridge.", ...), and the
+; story's opening prompt took 8.3 million cycles, four seconds, to encode. Now
+; it is 55 thousand, and the tokens are Python's (py/tests/test_encoder.py,
+; py/tests/test_encoder_rei.py).
 
 INCLUDE "hardware.inc"
 INCLUDE "chatgbc.inc"
 INCLUDE "model.inc"
 
-IF CHAT_MODE
 DEF ENC_MAX_PIECE EQU ENC_PIECE_MAX ; longest piece in the vocabulary (the exporter's)
-ELSE
-DEF ENC_MAX_PIECE EQU 7             ; the story encoder's limit, kept (see above)
-ENDC
 
 SECTION "Encoder state", WRAM0
 wPromptText:: ds PROMPT_MAX
@@ -48,27 +37,20 @@ wTokBuf::     ds TOK_MAX * 2        ; token IDs, little-endian
 wTokCount::   db
 wEncCand:     ds ENC_MAX_PIECE * 2  ; candidate merged piece
 wEncCandLen:  db
-wEncBestRank: dw
 wEncBestTok:  dw
 wEncBestIdx:  db
-wEncFound:    db
-wEncIdx:      dw                    ; scan cursor
-wEncPtr:      dw
 wEncPair:     db
-wEncAny:      db
 wEncChar:     db
 wEncNoBos:    db
-IF CHAT_MODE
+wEncCycles::  ds 4                  ; the last encode, from the ROM's own counter
 wEncHashN:    db                    ; bytes left to hash
 wEncTokLast:  db                    ; pairs left after a merge
-wEncCycles::  ds 4                  ; the last encode, from the ROM's own counter
 
 DEF ENC_PAIR_BANK EQU 4             ; a WRAM bank nothing else uses while encoding
 SECTION "Encoder pairs", WRAMX[$D000], BANK[ENC_PAIR_BANK]
 ; Pair i is tokens i and i + 1: the rank of their merged piece ($FFFF when it is
 ; not a piece) and the piece's id, four bytes a pair.
 wEncPairs:    ds TOK_MAX * 4
-ENDC
 
 SECTION "Encoder code", ROM0
 
@@ -88,7 +70,6 @@ Enc_Piece:
     ld e, l
     ret
 
-IF CHAT_MODE
 ; Searches the vocabulary for wEncCand (length wEncCandLen), by hash.
 ; Returns carry set with hl = token id, or carry clear if absent.
 Enc_Find::
@@ -115,7 +96,7 @@ ENDR
     dec a
     ld [wEncHashN], a
     jr nz, .hash
-    ld a, h                         ; the slot: low ten bits, two bytes each
+    ld a, h                         ; the slot: the hash's low bits, two bytes each
     and HIGH(ENC_HASH_SLOTS - 1)
     ld h, a
     add hl, hl
@@ -170,99 +151,6 @@ ENDR
     or a                            ; clear carry
     ret
 
-ELSE
-; Searches the vocabulary for wEncCand (length wEncCandLen).
-; Returns carry set with hl = token id, or carry clear if absent.
-Enc_Find::
-    ld a, [wEncCandLen]
-    cp ENC_MAX_PIECE + 1
-    jr nc, .none                    ; longer than any piece: cannot exist
-    xor a
-    ld [wEncIdx + 0], a
-    ld [wEncIdx + 1], a
-.entry
-    ld a, [wEncIdx + 0]
-    ld l, a
-    ld a, [wEncIdx + 1]
-    ld h, a
-    push hl
-    call Enc_Piece                  ; de -> [len][bytes]
-    ld a, [de]
-    ld hl, wEncCandLen
-    cp [hl]
-    jr nz, .miss                    ; length differs: rejected on one compare
-    inc de
-    ld hl, wEncCand
-    ld b, a
-    or a
-    jr z, .hit
-.bytes
-    ld a, [de]
-    cp [hl]
-    jr nz, .miss
-    inc de
-    inc hl
-    dec b
-    jr nz, .bytes
-.hit
-    pop hl
-    scf
-    ret
-.miss
-    pop hl
-    inc hl
-    ld a, l
-    ld [wEncIdx + 0], a
-    ld a, h
-    ld [wEncIdx + 1], a
-    cp HIGH(VOCAB)
-    jr nz, .entry
-    ld a, l
-    cp LOW(VOCAB)
-    jr nz, .entry
-.none
-    or a                            ; clear carry
-    ret
-ENDC
-
-; As Enc_Find, but keeps the hit only if it outranks the best pair so far.
-; Ranks are unique, so the first pair at a given rank wins - which is what
-; Python's strictly-greater score test does.
-Enc_Lookup:
-    call Enc_Find
-    ret nc
-    push hl
-    add hl, hl
-    ld de, enc_all + ENC_RANK_AT
-    add hl, de
-    ld a, [hl+]
-    ld c, a
-    ld a, [hl]
-    ld b, a                         ; bc = rank, lower is better
-    ld a, [wEncBestRank + 1]
-    cp b
-    jr c, .worse
-    jr nz, .better
-    ld a, [wEncBestRank + 0]
-    cp c
-    jr c, .worse
-    jr z, .worse
-.better
-    ld a, c
-    ld [wEncBestRank + 0], a
-    ld a, b
-    ld [wEncBestRank + 1], a
-    pop hl
-    ld a, l
-    ld [wEncBestTok + 0], a
-    ld a, h
-    ld [wEncBestTok + 1], a
-    ld a, 1
-    ld [wEncFound], a
-    ret
-.worse
-    pop hl
-    ret
 
 ; Appends the piece for token hl to wEncCand.
 Enc_AppendPiece:
@@ -290,7 +178,6 @@ Enc_AppendPiece:
     jr nz, .copy
     ret
 
-IF CHAT_MODE
 ; Encode or EncodeCont (a = 0 or 1), timed into wEncCycles. The timer is the
 ; profiler's, so this leaves interrupts as Prof_Stop does: off.
 Encode_Timed::
@@ -307,7 +194,6 @@ Encode_Timed::
     call Prof_Stop
     ld de, wEncCycles
     jp SaveCycles
-ENDC
 
 ; wPromptText/wPromptLen -> wTokBuf/wTokCount.
 Encode::
@@ -396,17 +282,8 @@ Enc_Body:
     jr nz, .chars
 
 .merge
-IF CHAT_MODE
     jp Enc_Pairs
-ELSE
-    call Enc_MergeOnce
-    ld a, [wEncFound]
-    or a
-    jr nz, .merge
-    ret
-ENDC
 
-IF CHAT_MODE
 ; The merge loop with every pair's result kept: look all pairs up once; then
 ; merge the best, and look up again only the two pairs the merge made. The
 ; best is the lowest rank, and the first of equals - Python's strictly-greater
@@ -603,94 +480,6 @@ Enc_MergeAt:
     dec a
     ld [wEncTokLast], a             ; pairs left
     ret
-ENDC
-
-; One merge pass: find the best-scoring adjacent pair and merge it.
-; Leaves wEncFound non-zero if anything merged.
-Enc_MergeOnce:
-    xor a
-    ld [wEncAny], a
-    ld [wEncFound], a               ; every exit path must report "nothing merged"
-    ld a, $FF                       ; rank 0 is best, so start at the worst
-    ld [wEncBestRank + 0], a
-    ld [wEncBestRank + 1], a
-
-    ld a, [wTokCount]
-    dec a
-    ret z                           ; fewer than two tokens: nothing to merge
-    ld b, a                         ; pairs to consider
-    xor a
-    ld [wEncPair], a
-.pair
-    push bc
-    xor a
-    ld [wEncCandLen], a
-    ld [wEncFound], a
-
-    ld a, [wEncPair]                ; piece(tok[i]) then piece(tok[i+1])
-    call Enc_TokenAt
-    call Enc_AppendPiece
-    ld a, [wEncPair]
-    inc a
-    call Enc_TokenAt
-    call Enc_AppendPiece
-    call Enc_Lookup
-
-    ld a, [wEncFound]
-    or a
-    jr z, .nextPair
-    ld a, [wEncPair]                ; this pair improved on the best so far
-    ld [wEncBestIdx], a
-    ld a, 1
-    ld [wEncAny], a
-.nextPair
-    ld a, [wEncPair]
-    inc a
-    ld [wEncPair], a
-    pop bc
-    dec b
-    jr nz, .pair
-
-    ld a, [wEncAny]
-    ld [wEncFound], a
-    or a
-    ret z
-
-    ; Replace tokens[best] with the merged id and delete tokens[best+1].
-    ld a, [wEncBestIdx]
-    call Enc_SlotAt
-    ld a, [wEncBestTok + 0]
-    ld [hl+], a
-    ld a, [wEncBestTok + 1]
-    ld [hl+], a                     ; hl now points at tokens[best+1]
-    ld d, h
-    ld e, l
-    inc hl
-    inc hl
-    ld a, [wTokCount]
-    ld b, a
-    ld a, [wEncBestIdx]
-    inc a
-    inc a
-    ld c, a
-    ld a, b
-    sub a, c                        ; tokens after the deleted one
-    jr z, .shrink
-    ld b, a
-.shift
-    ld a, [hl+]
-    ld [de], a
-    inc de
-    ld a, [hl+]
-    ld [de], a
-    inc de
-    dec b
-    jr nz, .shift
-.shrink
-    ld a, [wTokCount]
-    dec a
-    ld [wTokCount], a
-    ret
 
 ; a = index. Returns hl = &wTokBuf[index].
 Enc_SlotAt::
@@ -730,7 +519,5 @@ Encode_TestPrompt::
 
 sTestPrompt: db "Once upon a time", 0
 
-IF CHAT_MODE
-ASSERT ENC_MAX_PIECE * 2 < 256 && ENC_HASH_SLOTS == 1024, "the candidate and the hash table as the exporter built them"
+ASSERT ENC_MAX_PIECE * 2 < 256 && ENC_HASH_SLOTS >= 256 && (ENC_HASH_SLOTS & (ENC_HASH_SLOTS - 1)) == 0, "the candidate and the hash table as the exporter built them"
 ASSERT TOK_MAX * 4 <= $1000, "the pairs fit their bank"
-ENDC

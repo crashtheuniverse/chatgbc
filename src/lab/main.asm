@@ -37,12 +37,10 @@ Run::
     jr z, .shift
     cp LAB_GO
     jr z, .run
-IF CHAT_MODE
     cp LAB_GO_ENC
     jr z, .enc
     cp LAB_GO_ENCC
     jr z, .enc
-ENDC
 IF CLS_TERNARY
     cp LAB_GO_CLS
     jr z, .cls
@@ -63,7 +61,8 @@ ENDC
     xor a
     ld [wLabState], a           ; running; wGenSteps and the prompt are set
 
-    call Encode
+    xor a                       ; a fresh stream, timed into wEncCycles
+    call Encode_Timed
     call Console_Clear
     call Console_Flush
     call Generate
@@ -84,7 +83,6 @@ ENDC
     call MeasureSelftest
     jr .done
 
-IF CHAT_MODE
 .enc                            ; the encoder alone: $E2 fresh, $E3 a continuation
     sub LAB_GO_ENC
     push af
@@ -93,7 +91,6 @@ IF CHAT_MODE
     pop af
     call Encode_Timed
     jr .done
-ENDC
 
 .norm                           ; one kernel, on the vector the harness wrote
     xor a

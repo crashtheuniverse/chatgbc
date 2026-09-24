@@ -27,3 +27,24 @@ def booted():
     r.pyboy.tick(400, False)
     yield r
     r.close()
+
+
+def lab_encode(r, text, cont):
+    """The lab ROM's encode-only entry: `text` staged as the ROM stages it,
+    encoded fresh (Encode) or as a continuation (EncodeCont). Returns the
+    tokens and the cycles it took."""
+    raw = text.encode("ascii")
+    assert len(raw) <= r.defs["PROMPT_MAX"]
+    idle, state, go = r.defs["LAB_IDLE"], r.addr("wLabState"), r.addr("wLabGo")
+    r._tick_until(lambda: r.pyboy.memory[state] == idle, 2000, "lab idle")
+    base = r.addr("wPromptText")
+    r.pyboy.memory[base:base + len(raw)] = list(raw)
+    r.pyboy.memory[r.addr("wPromptLen")] = len(raw)
+    ready = r.addr("wReady")
+    r.pyboy.memory[ready] = 0
+    r.pyboy.memory[go] = 0xE3 if cont else 0xE2
+    r._tick_until(lambda: r.pyboy.memory[ready] == r.defs["READY_MAGIC"], 3000, "encode")
+    r.pyboy.memory[go] = 0
+    n = r.read("wTokCount")[0]
+    buf = r.read("wTokBuf", 2 * n)
+    return [buf[2 * i] | (buf[2 * i + 1] << 8) for i in range(n)], r.read_u32("wEncCycles")

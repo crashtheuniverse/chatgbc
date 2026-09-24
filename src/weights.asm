@@ -209,7 +209,7 @@ SECTION "vocab_data", ROMX
 vocab_data:: INCBIN "build/blobs/vocab_data.bin"   ; 7051 bytes
 
 SECTION "enc_all", ROMX
-enc_all:: INCBIN "build/blobs/enc_all.bin"   ; 9101 bytes
+enc_all:: INCBIN "build/blobs/enc_all.bin"   ; 13197 bytes
 
 SECTION "prompt", ROM0
 prompt:: INCBIN "build/blobs/prompt.bin"   ; 12 bytes

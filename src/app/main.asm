@@ -235,7 +235,8 @@ ELSE
 ; The story demo: keyboard, generate, report, repeat.
 .app
     call Keyboard_Run           ; blocks until START
-    call Encode
+    xor a                       ; a fresh story, its encode timed (wEncCycles)
+    call Encode_Timed
     call Console_Clear
     call StatusWin_Show
     call Console_Flush

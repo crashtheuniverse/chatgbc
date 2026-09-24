@@ -74,9 +74,7 @@ wBlocked::  ds NOREPEAT_TRIES * 2   ; those candidates, as tokens (cls4.asm keep
 ENDC
 wExpert::   db                      ; the expert the router chose this layer
 wExpIdx::   db                      ; layer * EXPERTS + expert: the matrix index
-IF CHAT_MODE
 wSkipTail:: db                      ; Generate: this pass only feeds the state
-ENDC
 IF !SWEEP
 wExpHi:     db                      ; scratch for the router's 16-bit compare
                                     ; (the sweep's router compares in registers)
@@ -302,7 +300,6 @@ ENDC
     CENSUS_START
     SNAPSHOT_L0 wH, wDbgAtt, DIM
     CENSUS_END 17
-IF CHAT_MODE
     ; Prefill: in the last layer nothing after the state update reaches the
     ; state - wo and the FFN only feed the stream, and the stream goes on to the
     ; final norm and the classifier, whose answer Generate would throw away.
@@ -313,7 +310,6 @@ IF CHAT_MODE
     cp N_LAYERS - 1
     ret z
 .whole
-ENDC
 IF SWEEP
     CENSUS_START
     ld hl, wH                       ; project the state back into the stream
@@ -791,11 +787,9 @@ Forward::
     ld [wLayer], a
     cp N_LAYERS
     jp c, .layer
-IF CHAT_MODE
     ld a, [wSkipTail]               ; prefill: the argmax would be thrown away
     or a
     ret nz
-ENDC
 
     CENSUS_START
     ld hl, rms_final

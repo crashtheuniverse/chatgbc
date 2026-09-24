@@ -111,7 +111,7 @@ Ui_Frame::
 IF CHAT_MODE
 sUiTitle: db " Rei v0.1 ", 0
 ELSE
-sUiTitle: db " ChatGBC v0.9 ", 0
+sUiTitle: db " ChatGBC v1.0 ", 0
 ENDC
 
 ENDC

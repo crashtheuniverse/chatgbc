@@ -402,15 +402,12 @@ CAL_FALLBACK = ["Once upon a time, there was a little girl named Lily. She "
                 "branch and sang."]
 
 
-ENC_HASH_SLOTS = 1024
-
-
-def enc_hash(piece):
-    """The chat encoder's hash (src/encoder.asm, Enc_Hash): 16-bit h * 33 + b."""
+def enc_hash(piece, slots):
+    """The encoder's hash (src/encoder.asm, Enc_Find): 16-bit h * 33 + b."""
     h = 0
     for b in piece:
         h = (h * 33 + b) & 0xFFFF
-    return h & (ENC_HASH_SLOTS - 1)
+    return h & (slots - 1)
 
 
 def cal_prompts(n=6):
@@ -828,32 +825,29 @@ def main():
     rank = np.empty(len(tok.scores), dtype="<u2")
     rank[order] = np.arange(len(tok.scores), dtype=np.uint16)
     off_bytes = np.array(enc_off, dtype="<u2").tobytes()
-    if CHAT:
-        # The chat encoder finds a piece by hash, not by scanning the vocabulary
-        # (src/encoder.asm): a 1,024-slot open-addressed table of token id + 1,
-        # built here with the ROM's own hash, h = h * 33 + byte over the piece,
-        # low ten bits, linear probing. Built from tok.lookup, so a duplicated
-        # piece resolves to the id the Python encoder uses. The ROM also sizes
-        # its candidate buffer from the longest piece, measured here.
-        assert len(tok.lookup) <= ENC_HASH_SLOTS * 3 // 4, "keep the hash table under 3/4 full"
-        assert 2 * max(len(p) for p in tok.vocab) < 256, "a merged pair must fit the ROM's candidate"
-        table = np.zeros(ENC_HASH_SLOTS, dtype="<u2")
-        for piece, i in tok.lookup.items():
-            slot = enc_hash(piece)
-            while table[slot]:
-                slot = (slot + 1) % ENC_HASH_SLOTS
-            table[slot] = i + 1
-        enc_extra = table.tobytes()
-    else:
-        enc_extra = b""                  # the story ROM is a contract: its encoder stays
-    blob("enc_all", off_bytes + rank.tobytes() + bytes(enc) + enc_extra, rom0=False)
+    # The encoder finds a piece by hash, not by scanning the vocabulary
+    # (src/encoder.asm): an open-addressed table of token id + 1, twice as many
+    # slots as pieces (rounded up to a power of two), built here with the
+    # ROM's own hash, h = h * 33 + byte over the piece, linear probing. Built
+    # from tok.lookup, so a duplicated piece resolves to the id the Python
+    # encoder uses. The ROM also sizes its candidate buffer from the longest
+    # piece, measured here.
+    slots = 1 << (2 * len(tok.vocab) - 1).bit_length()
+    assert len(tok.lookup) <= slots // 2, "keep the hash table at most half full"
+    assert 2 * max(len(p) for p in tok.vocab) < 256, "a merged pair must fit the ROM's candidate"
+    table = np.zeros(slots, dtype="<u2")
+    for piece, i in tok.lookup.items():
+        slot = enc_hash(piece, slots)
+        while table[slot]:
+            slot = (slot + 1) % slots
+        table[slot] = i + 1
+    blob("enc_all", off_bytes + rank.tobytes() + bytes(enc) + table.tobytes(), rom0=False)
     const("ENC_OFF_AT", 0)
     const("ENC_RANK_AT", len(off_bytes))
     const("ENC_VOCAB_AT", len(off_bytes) + len(rank.tobytes()))
-    if CHAT:
-        const("ENC_HASH_AT", len(off_bytes) + len(rank.tobytes()) + len(enc))
-        const("ENC_HASH_SLOTS", ENC_HASH_SLOTS)
-        const("ENC_PIECE_MAX", max(len(p) for p in tok.vocab))
+    const("ENC_HASH_AT", len(off_bytes) + len(rank.tobytes()) + len(enc))
+    const("ENC_HASH_SLOTS", slots)
+    const("ENC_PIECE_MAX", max(len(p) for p in tok.vocab))
     const("TOK_UNK", UNK)
     nl = tok.lookup.get(b"\n")
     if CHAT:

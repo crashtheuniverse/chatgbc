@@ -1,20 +1,21 @@
-"""Fast prefill changes how long the wait is, not a single bit of what she says.
+"""Fast prefill changes how long the wait is, not a single bit of what is said.
 
-A chat ROM runs a forced prompt token's forward pass only as far as the last
+The ROM runs a forced prompt token's forward pass only as far as the last
 layer's state update (src/forward.asm, wSkipTail): its argmax would be thrown
 away. wPrefillFull, a byte the harness can set, puts the whole pass back, so
 the two can be compared on one ROM: the recurrent state after the prompt, and
-the reply after it, must be identical - and the prompt must be cheaper.
+the text after it, must be identical - and the prompt must be cheaper. Story
+and chat builds alike.
 """
 import pytest
 
 import export5                    # noqa: E402
 from conftest import lab_rom
 
-if not export5.CHAT:
-    pytest.skip("only a chat ROM prefills", allow_module_level=True)
-
-PROMPTS = [export5.PROMPT, "> let us play chess\n", "> my favourite colour is blue\n"]
+if export5.CHAT:
+    PROMPTS = [export5.PROMPT, "> let us play chess\n", "> my favourite colour is blue\n"]
+else:
+    PROMPTS = [export5.PROMPT, "The little dog ran to the park", "Lily and Tom went to see the big tree"]
 
 
 def run(prompt, steps, full):
@@ -41,7 +42,7 @@ def test_the_state_after_the_prompt_is_the_same(prompt):
     assert fast["tokens"] == full["tokens"]
     k = n - 1                                       # passes whose argmax is thrown away
     assert fast["prefill"] < full["prefill"] * 0.75, (fast["prefill"], full["prefill"])
-    assert full["prefill"] // k > 700_000 > 600_000 > fast["prefill"] // k
+    assert full["prefill"] // k > 780_000 and fast["prefill"] // k < 620_000
 
 
 def test_the_reply_is_the_same():
