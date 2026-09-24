@@ -123,12 +123,75 @@ def test_a_button_keeps_her_in(talk):
     assert r.read("wReiIdle")[0] < 10
 
 
-def test_she_walks_and_the_camera_follows(talk):
+SCENES = ["beach", "garden", "playroom"]
+_objects = {}
+
+
+def scene_objects(i):
+    if i not in _objects:
+        _objects[i] = gen_rei_world.SCENES[i]().objects
+    return _objects[i]
+
+
+def art_rows(label, count=None):
+    """The db rows under `label` in src/rei_world_art.inc, as one list."""
+    text = (APP / "src" / "rei_world_art.inc").read_text(encoding="utf-8")
+    body = text.split(f"\n{label}:")[1].split("\n\n")[0]
+    out = []
+    for line in body.splitlines()[1:]:
+        if not line.strip().startswith("db"):
+            break
+        out += [int(v) for v in line.split("db")[1].split(";")[0].split(",")]
+    return out[:count] if count else out
+
+
+def strip_now(r, bank):
+    at = 0x9C00 + DEFS["WORLD_MAP_Y"] * 32
+    return [r.pyboy.memory[bank, at + i] for i in range(12 * 32)]
+
+
+def test_each_visit_is_the_next_scene(talk):
+    """Beach, garden, playroom, beach...: each visit loads its scene behind the
+    chat, and the map and attributes on screen are the generator's, cell for cell."""
     r = talk.rom
+    r.pyboy.memory[r.addr("wWorldTurn")] = 0
+    for turn in range(4):
+        before = chat_screen(r)
+        ui.to_world(r)
+        scene = r.read("wWorldScene")[0]
+        assert scene == turn % 3
+        name = SCENES[scene].capitalize()
+        moving = set()                              # cells the handler may have flipped since
+        anim = r.read("wWorldAnim", 12)
+        for g in range(2):
+            at = (anim[6 * g] | anim[6 * g + 1] << 8) - 0x9C00 - DEFS["WORLD_MAP_Y"] * 32
+            mask = int.from_bytes(anim[6 * g + 2:6 * g + 6], "little")
+            moving |= {at + x for x in range(32) if mask >> x & 1}
+        drop = [0 if i in moving else 1 for i in range(384)]          # frame A or B there
+        now = [v & ~1 if not d else v for v, d in zip(strip_now(r, 0), drop)]
+        want = [v & ~1 if not d else v for v, d in zip(art_rows(f"ReiMap{name}", 384), drop)]
+        assert now == want, SCENES[scene]
+        assert strip_now(r, 1) == art_rows(f"ReiAttr{name}", 384), SCENES[scene]
+        ui.press(r, "b", after=10)
+        assert chat_screen(r) == before, "loading a scene touched the chat"
+
+
+@pytest.mark.parametrize("scene", [0, 1, 2])
+def test_she_walks_and_the_camera_follows(talk, scene):
+    r = talk.rom
+    r.pyboy.memory[r.addr("wWorldTurn")] = scene
     ui.to_world(r)
+    assert r.read("wWorldScene")[0] == scene
     ui.set_word(r, "wWorldThinkT", 60000)           # no thought for now: just the walk
-    seen = {"x": set(), "scx": set(), "tile": set(), "wave": set(), "act": set(), "sx": set()}
-    wave = 0x9C00 + (DEFS["WORLD_MAP_Y"] + gen_rei_world.ROW_WAVE) * 32
+    seen = {"x": set(), "scx": set(), "tile": set(), "cells": set(), "act": set(), "sx": set()}
+    anim = r.read("wWorldAnim", 12)
+    moving = []                                     # the map cells the scene moves
+    for g in range(2):
+        at = anim[6 * g] | anim[6 * g + 1] << 8
+        mask = int.from_bytes(anim[6 * g + 2:6 * g + 6], "little")
+        moving += [at + x for x in range(32) if mask >> x & 1]
+    assert moving, "every scene moves somewhere"
+    start = [r.pyboy.memory[0, a] for a in moving]
     for _ in range(1500):
         r.pyboy.tick(1, False)
         x, tile = sprite(r)
@@ -136,14 +199,17 @@ def test_she_walks_and_the_camera_follows(talk):
         seen["tile"].add(tile & ~3)
         seen["x"].add(r.read("wWorldX")[0])
         seen["scx"].add(r.pyboy.memory[0xFF43])
-        seen["wave"].add(r.pyboy.memory[wave])
+        seen["cells"].add(tuple(r.pyboy.memory[0, a] ^ s for a, s in zip(moving, start)))
         seen["act"].add(r.read("wWorldAct")[0])
     assert len(seen["x"]) > 100 and len(seen["scx"]) > 60
     assert seen["tile"] == {12, 16, 20}, "two walking frames and the looking one"
     assert seen["act"] == {0, 1}, "she walks, and she stops to look"
-    assert seen["wave"] == {2, 3}, "the sea moves"
+    assert {v for c in seen["cells"] for v in c} == {0, 1}, "only frame A and frame B"
+    assert len(seen["cells"]) >= 3, "both rows move, each in turn"
     assert min(seen["sx"]) >= DEFS["CAM_LEFT"] - 1 and max(seen["sx"]) <= DEFS["CAM_RIGHT"] + 1
     assert ui.thought_box(r) == [" " * 18] * 4
+    if scene < 2:
+        ui.press(r, "b", after=10)                  # the last stays for the thought
 
 
 def test_a_thought_is_the_models_and_leaves_no_trace(talk):
@@ -177,7 +243,7 @@ def test_a_thought_is_the_models_and_leaves_no_trace(talk):
     rows = ui.wrap(want, ui.THINK_W)
     assert ui.thought_box(r) == rows + [" " * 18] * (4 - len(rows))
 
-    centres = [x for _, x, _ in gen_rei_world.OBJECTS]
+    centres = [x for _, x, _ in scene_objects(r.read("wWorldScene")[0])]
     ring = [min((x_at + 8 - c) % 256, (c - x_at - 8) % 256) for c in centres]
     assert ring[r.read("wWorldNear")[0]] <= min(ring) + 1, "the nearest thing is on record"
 

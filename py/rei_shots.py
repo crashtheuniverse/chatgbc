@@ -5,8 +5,8 @@
 The pictures the reviews ask for - splash_menu (a save present), topics,
 sentences (and sentences_page2), reply_mid (the teletype running, her mouth
 open), reply_done (her reply up, the list back, START:LOG under the mood), log,
-keyboard, and the world: world_walk, world_pause, world_thought_mid,
-world_thought_done, back_from_world - taken from one short conversation, a walk
+keyboard, and the world: world_beach, world_garden, world_playroom (walking),
+world_<scene>_thought, world_pause, world_thought_mid, back_from_world - taken from one short conversation, a walk
 on the beach and a power cycle. Needs `.\\build.ps1 -Rei`.
 
 The helpers here (boot, press, read the pane back, lay text out the way the
@@ -248,7 +248,8 @@ def main():
     if not ROM.exists():
         sys.exit(f"{ROM} missing - run .\\build.ps1 -Rei")
     SHOTS.mkdir(parents=True, exist_ok=True)
-    for old in ("canned.png", "reply_done_input.png"):
+    for old in ("canned.png", "reply_done_input.png", "world_walk.png", "world_thought_done.png",
+                "world_idle.png"):
         (SHOTS / old).unlink(missing_ok=True)
     r = boot()
     r.pyboy.tick(150, False)
@@ -283,27 +284,32 @@ def main():
     r.screenshot(SHOTS / "keyboard.png")
 
     r.pyboy.memory[r.addr("wWorldRng")] = 40
-    to_world(r)                                 # left alone: the beach
-    set_word(r, "wWorldThinkT", 60000)          # no thought until the walk is on film
-    for _ in range(600):
-        r.pyboy.tick(1, False)
-        if not r.read("wWorldAct")[0] and r.pyboy.memory[0xFE02] == 16:
-            break
-    r.screenshot(SHOTS / "world_walk.png")
-    for _ in range(3000):
-        r.pyboy.tick(1, False)
-        if r.read("wWorldAct")[0]:
-            break
-    r.pyboy.tick(4, False)
-    r.screenshot(SHOTS / "world_pause.png")
-    think_now(r)
-    for _ in range(40000):
-        r.pyboy.tick(1, False)
-        if r.read("wReiReplyLen")[0] >= 12:
-            break
-    r.screenshot(SHOTS / "world_thought_mid.png")
-    thought_done(r)
-    r.screenshot(SHOTS / "world_thought_done.png")
+    for scene in ("beach", "garden", "playroom"):   # left alone: each visit the next scene
+        to_world(r)
+        set_word(r, "wWorldThinkT", 60000)      # no thought until the walk is on film
+        for _ in range(600):
+            r.pyboy.tick(1, False)
+            if not r.read("wWorldAct")[0] and r.pyboy.memory[0xFE02] == 16:
+                break
+        r.screenshot(SHOTS / f"world_{scene}.png")
+        if scene == "beach":
+            for _ in range(3000):
+                r.pyboy.tick(1, False)
+                if r.read("wWorldAct")[0]:
+                    break
+            r.pyboy.tick(4, False)
+            r.screenshot(SHOTS / "world_pause.png")
+        think_now(r)
+        if scene == "beach":
+            for _ in range(40000):
+                r.pyboy.tick(1, False)
+                if r.read("wReiReplyLen")[0] >= 12:
+                    break
+            r.screenshot(SHOTS / "world_thought_mid.png")
+        thought_done(r)
+        r.screenshot(SHOTS / f"world_{scene}_thought.png")
+        if scene != "playroom":
+            press(r, "b", after=12)
     press(r, "b", after=12)
     r.screenshot(SHOTS / "back_from_world.png")
     saved = r.sram()
