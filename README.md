@@ -76,7 +76,7 @@ vocabulary, 341K parameters) and her own screen:
 |---|---|
 | Speed | 0.40 s/token (about 848,000 cycles a full pass) |
 | Waiting for her | 1.7 to 2.8 s from the press to her first letter on the four lines measured, where the v0.9 engine took 3.0 to 6.9 |
-| Limits | she remembers little of what was said a few lines back: the model was trained on short windows, and a retrain is future work |
+| Limits | she remembers your name for the rest of the conversation, reliably only for the sixteen names in her training; any other name she hears as the closest one she knows |
 
 ![Rei in conversation](docs/versions/v1.0.gif)
 

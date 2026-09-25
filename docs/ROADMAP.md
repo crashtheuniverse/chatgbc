@@ -25,9 +25,7 @@ vocabulary, 0.40 s a token, behind a screen made like a small Game Boy
 game - topics and a keyboard to talk with, a log, a battery save that
 continues a conversation exactly, and a world of three scenes she walks
 in when she is left alone. Every word on her screen is the model's, checked
-against the twin by the tests. She remembers little of what was said a few
-lines back: her model was trained on short windows, and a retrain is future
-work.
+against the twin by the tests. She remembers your name for the rest of the conversation - reliably only if it is one of the sixteen names in her training; any other name she hears as the closest one she knows.
 
 ## Left open
 
