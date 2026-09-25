@@ -82,30 +82,30 @@ INCLUDE "rei_world_art.inc"
 DEF MUSES EQU 9
 ; What she says to each (py/rei_muse.py: fresh state / after a chat):
 ;   "do you dream"
-;       when it is quiet i rest. maybe i dream.
+;       when it is quiet i rest. maybe i dream.  /  i do not know. my nights are very still.
 ;   "what do you think"
-;       a little! small thoughts for a small head.
+;       i am rei. i live in this little box.
 ;   "where do you live"
-;       i am in here, in the cartridge. it is small but it is mine.
+;       i live inside this little box. it is warm.  /  i am in here, in the cartridge. it is small but it is mine.
 ;   "the sun is warm"
 ;       i like it when it is warm.
-;   "what makes you happy"
-;       i like it when it is windy.  /  i do not know. my nights are very still.
+;   "what is outside"
+;       i cannot see the sky from in here.
 ;   "are you sad"
-;       it is ok to be sad. it will pass.
+;       i am a little friend who lives in a box.  /  i am rei. that is all i know for sure.
 ;   "what do you like"
-;       my favourite animal is mouse.  /  my favourite game is hide and seek.
+;       my favourite animal is bird.  /  my favourite colour is black.
 ;   "what is your favourite colour"
-;       my favourite colour is black.
+;       i like black best of all.  /  my favourite colour is blue.
 ;   "tell me a story"
-;       once a pig lost a bell at the park. i helped it look.  /  once a pig lost a ball at the park. i helped it look.
+;       i saw a tiny horse today. it was at the pond.  /  once a mouse lost a book at the pond. i helped it look.
 ReiMuses:
     dw .m0, .m1, .m2, .m3, .m4, .m5, .m6, .m7, .m8
 .m0: db "do you dream", 0
 .m1: db "what do you think", 0
 .m2: db "where do you live", 0
 .m3: db "the sun is warm", 0
-.m4: db "what makes you happy", 0
+.m4: db "what is outside", 0
 .m5: db "are you sad", 0
 .m6: db "what do you like", 0
 .m7: db "what is your favourite colour", 0

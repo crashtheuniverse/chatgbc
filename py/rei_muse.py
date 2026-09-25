@@ -51,7 +51,7 @@ ADDRESSED = ("you", "your", "tom", "tell", "hello", "hi", "bye", "hear", "too", 
 # refuses to print the table if any of them stops passing.
 POOL = [
     "do you dream", "what do you think", "where do you live", "the sun is warm",
-    "what makes you happy", "are you sad", "what do you like",
+    "what is outside", "are you sad", "what do you like",
     "what is your favourite colour", "tell me a story",
 ]
 
