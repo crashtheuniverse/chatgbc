@@ -18,6 +18,7 @@ import numpy as np
 import pytest
 
 import export5                    # noqa: E402
+import golden5                    # noqa: E402  (history - the decode rule's)
 import quant as Q                 # noqa: E402
 import twin5                      # noqa: E402
 from model5 import Model5, Tokenizer   # noqa: E402
@@ -107,12 +108,14 @@ def test_state_after_a_run_matches_the_twin_for_every_layer(q):
     tok = Tokenizer()
     ids = tok.encode(export5.PROMPT)
     st = twin5.QState5(q.cfg)
-    token, twin_toks = ids[0], []
+    token, twin_toks, own = ids[0], [], []
     for pos in range(steps):
         logits = twin5.forward_q5(q, st, token)
         forced = pos + 1 < len(ids)
-        nxt = ids[pos + 1] if forced else Q.pick_token(logits, twin_toks)
+        nxt = ids[pos + 1] if forced else Q.pick_token(logits, golden5.history(twin_toks, own))
         twin_toks.append(nxt)
+        if not forced:
+            own.append(nxt)
         token = nxt
     assert toks == twin_toks
     want = np.concatenate([st.h[l] for l in range(layers)]).astype(np.int8)

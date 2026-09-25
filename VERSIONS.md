@@ -123,7 +123,9 @@ conversational checkpoint on the same engine - 341K parameters, a 512-piece
 vocabulary, 0.40 s a token - behind a small game screen: a topic tree and a
 keyboard to talk with, her replies typed into her frame, a log of the whole
 conversation, a battery save that continues exactly where it stopped, and a
-world she walks about in when left alone, thinking now and then. She waits
+world she walks about in when left alone, thinking now and then. Her decode
+keeps the engine's rule against repeating a four-token run, but reads only
+her own words of the reply, so she can say the player's back. She waits
 1.7 to 2.8 s before her first letter. She remembers little of what was said
 a few lines back: her model was trained on short windows, and a retrain is
 future work.

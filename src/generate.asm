@@ -26,6 +26,16 @@ wGenTok::    dw                     ; tokens emitted this run, for the bar
 ; screen. Once the console scrolls, scraping the display stops being a faithful
 ; record of what was generated.
 wOutTokens:: ds OUT_MAX * 2
+IF CHAT_MODE
+; Where her own words of this turn start in wOutTokens: in a chat build the
+; no-repeat rule searches only those (NoRepeat_Ok). A turn opens with the
+; player's line, forced, and an echo of it is exactly a repeat of its 4-grams,
+; so the story rule forced her off the player's word mid-word ("do you like
+; ducks" -> "i do like duucks") and refused most names. Her own loops are
+; still refused. Cost: this byte, 44 bytes of ROM0 and ~36 cycles a token,
+; against ~38 a token of the player's line it no longer searches.
+wOwnFrom::   db
+ENDC
 ; Where a reply's wait goes, from the ROM's own counter: the forced prompt
 ; tokens that only feed the state (prefill), and the pass that picks her first
 ; token. Reset per run; py/tests/test_prefill.py and the report read them.
@@ -100,6 +110,9 @@ Generate::
     jr nz, .zeroState
     xor a
     ld [wGenCount], a
+IF CHAT_MODE
+    ld [wOwnFrom], a                ; and nothing of hers yet
+ENDC
     ld [wGenTok + 0], a
     ld [wGenTok + 1], a
     ld [wGenTotal + 0], a
@@ -214,8 +227,19 @@ Generate::
     ld de, wOutTokens
     ld bc, (OUT_MAX - 1) * 2
     call CopyBytes
+IF CHAT_MODE
+    ld hl, wOwnFrom                 ; her words moved down a slot with the rest
+    ld a, [hl]
+    or a
+    jr z, :+
+    dec [hl]
+:
+ENDC
     ld a, OUT_MAX - 1
 .record
+IF CHAT_MODE
+    ld b, a                         ; the slot, for wOwnFrom below
+ENDC
     ld l, a
     ld h, 0
     add hl, hl
@@ -225,6 +249,15 @@ Generate::
     ld [hl+], a
     ld a, [wToken + 1]
     ld [hl], a
+IF CHAT_MODE
+    ld a, [wFromModel]              ; the player's token: her words start after it
+    or a
+    jr nz, :+
+    ld a, b
+    inc a
+    ld [wOwnFrom], a
+:
+ENDC
 
 IF DEF(REI_UI)
     ; Every word in Rei's pane is the model's: the player's own turn, forced
@@ -334,6 +367,9 @@ Generate_Cont::
 
     xor a                           ; per-exchange stats and no-repeat history
     ld [wGenCount], a
+IF CHAT_MODE
+    ld [wOwnFrom], a                ; and nothing of hers yet
+ENDC
     ld [wGenTok + 0], a
     ld [wGenTok + 1], a
     ld [wGenTotal + 0], a

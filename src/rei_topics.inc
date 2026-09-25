@@ -20,7 +20,7 @@ ReiTopicNames::
     db "kind    "
 
 ReiTopicCounts::
-    db 8,8,10,10,10,10,10,8,10,9
+    db 8,8,10,10,10,10,10,10,10,9
 
 ReiTopicLists::
     dw .t0
@@ -79,7 +79,7 @@ ReiTopicLists::
     db 0
 .t4 ; sky
     db "how is the weather", 0
-    db "the day is sunny", 0
+    db "it is sunny today", 0
     db "the day is rainy", 0
     db "the day is windy", 0
     db "it is cold today", 0
@@ -111,24 +111,26 @@ ReiTopicLists::
     db "what about bread", 0
     db "what about peach", 0
     db "what about plum", 0
-    db "what about milk", 0
+    db "do you like honey", 0
     db 0
 .t7 ; animals
     db "do you like cats", 0
     db "what about dogs", 0
     db "what about birds", 0
-    db "what about frogs", 0
+    db "do you like horses", 0
     db "do you like bears", 0
+    db "what about bunnies", 0
+    db "do you like ducks", 0
     db "what about owls", 0
     db "do you like fishes", 0
     db "what about pigs", 0
     db 0
 .t8 ; things
-    db "what about books", 0
+    db "do you like books", 0
     db "what about boats", 0
     db "what about kites", 0
     db "what about bells", 0
-    db "what about balls", 0
+    db "what about drums", 0
     db "what about hats", 0
     db "do you like rocks", 0
     db "what about cups", 0

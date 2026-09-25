@@ -24,6 +24,12 @@ STEPS = 48
 PROMPT = export5.PROMPT
 
 
+def history(tokens, own):
+    """What the no-repeat rule searches: the whole run in a story build (as
+    ever), the model's own chosen tokens of the turn in a chat build."""
+    return own if export5.CHAT else tokens
+
+
 def chat_turn(q, tok, st, text, first, steps=48):
     """One exchange of a conversation on the twin, as the chat ROMs run it.
 
@@ -32,21 +38,25 @@ def chat_turn(q, tok, st, text, first, steps=48):
     dummy prefix (EncodeCont), its leading newline being the token the last
     reply stopped on. Returns the text of the model-chosen tokens only - what
     the Rei screen puts in her pane - the stop token's piece included.
+
+    The no-repeat rule sees her own tokens of this turn only (`own`), as the
+    chat ROMs keep it (wOwnFrom, src/generate.asm): the player's forced line
+    is not in it, so she can say their words back.
     """
     if first:
         ids = tok.encode("> " + text + "\n")
     else:
         ids = tok.encode("\n> " + text + "\n", bos=False, prefix=False)
-    token, tokens, said, prev = ids[0], [], "", None
+    token, own, said, prev = ids[0], [], "", None
     for pos in range(steps):
         logits = twin5.forward_q5(q, st, token)
         forced = pos + 1 < len(ids)
-        nxt = ids[pos + 1] if forced else Q.pick_token(logits, tokens)
+        nxt = ids[pos + 1] if forced else Q.pick_token(logits, own)
         if nxt == EOS:
             break
-        tokens.append(nxt)
         piece = tok.decode(nxt, prev)
         if not forced:
+            own.append(nxt)
             said += piece
         prev = token = nxt
         if not forced and nxt <= tok.lookup[b"\n"]:
@@ -64,6 +74,7 @@ def main():
     ids = tok.encode(PROMPT)
     token, tokens, text, first = ids[0], [], "", None
     prev = None
+    own = []                      # a chat build's no-repeat history (chat_turn)
     for pos in range(STEPS):
         logits = twin5.forward_q5(q, st, token)
         if pos == 0:
@@ -72,10 +83,12 @@ def main():
                 "argmax": int(logits.argmax()),
             }
         forced = pos + 1 < len(ids)
-        nxt = ids[pos + 1] if forced else Q.pick_token(logits, tokens)
+        nxt = ids[pos + 1] if forced else Q.pick_token(logits, history(tokens, own))
         if nxt == EOS:
             break
         tokens.append(nxt)
+        if not forced:
+            own.append(nxt)
         text += tok.decode(nxt, prev)
         prev = token = nxt
         # A chat ROM ends the turn on the first model-chosen id at or below

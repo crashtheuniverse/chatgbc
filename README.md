@@ -56,7 +56,11 @@ vocabulary, 341K parameters) and her own screen:
   keyboard for anything else (`A` types, `B` deletes, the last key sends).
 - **Her pane.** The reply is typed into her frame a character at a time,
   from the VBlank interrupt while the next token computes; her face talks
-  while it arrives and settles into the mood of what she said.
+  while it arrives and settles into the mood of what she said. The decode
+  rule that stops a small model looping - never complete a four-token run
+  already said - reads only her own words of the reply, not the player's,
+  so she can say theirs back ("do you like ducks" - "i do like ducks. do
+  you?").
 - **The log.** `START` shows the whole conversation, both sides, scrolled
   with the d-pad.
 - **The save.** The cartridge has battery RAM. The conversation - the
@@ -334,7 +338,7 @@ the twin's own function on planted vectors; exhaustive proofs for the gate
 table and the add's byte rule; the classifier's retry path at 0 to 9
 rejects; the layer-0 probes against the twin's layer-0 lines; the encoder
 against the Python tokenizer; the prompt with and without the prefill
-shortcut. 74 on Rei's: the same engine tests on her checkpoint, and her
+shortcut. 82 on Rei's: the same engine tests on her checkpoint, and her
 screen driven button by button - every reply read back from her pane and
 compared with the twin's, the save continued across a power cycle, the
 world visited and left.

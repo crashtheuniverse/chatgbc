@@ -1,0 +1,99 @@
+"""Rei can say the player's words back.
+
+The no-repeat rule refuses a token that completes a 4-gram already on record.
+In a chat build the record it searches is her own words of the turn only
+(wOwnFrom, src/generate.asm; golden5.history / chat_turn on the twin): when it
+held the player's forced line too, every echo was a repeat and she was pushed
+off the word mid-word - "i do like duucks", "it is sainy", "druts", "hors".
+These are the lines that did it: fresh on the chat lab ROM, and mid-chat on
+build/rei.gbc through the topic tree, each against the twin, the word spelled
+right.
+
+Only meaningful for the chat export; skipped otherwise.
+"""
+import re
+
+import pytest
+
+import export5                    # noqa: E402
+from conftest import APP, lab_rom
+
+if not export5.CHAT:
+    pytest.skip("the echo test needs the chat export", allow_module_level=True)
+
+import golden5                    # noqa: E402
+import rei_shots as ui            # noqa: E402
+import rei_topics                 # noqa: E402
+import twin5                      # noqa: E402
+from rei_talk import Talk, twin   # noqa: E402,F401  (twin is a fixture)
+
+# (the player's line, the word her reply must hold) - each was garbled before
+LINES = [
+    ("do you like ducks", "ducks"),
+    ("do you like books", "books"),
+    ("it is sunny today", "sunny"),
+    ("what about drums", "drums"),
+    ("it is windy today", "windy"),
+    ("do you like horses", "horses"),
+    ("what about bunnies", "bunnies"),
+]
+
+
+def words(text):
+    return re.findall(r"[a-z]+", text)
+
+
+@pytest.fixture(scope="module")
+def lab():
+    r = lab_rom()
+    yield r
+    r.close()
+
+
+def lab_reply(r, tok, prompt):
+    """One fresh turn on the lab ROM: her tokens after the forced prompt, as
+    text, the stop token's piece included (what chat_turn returns)."""
+    r.lab_run(steps=golden5.STEPS, prompt=prompt)
+    ids = tok.encode(prompt)
+    n = r.read("wGenCount")[0]
+    out = r.read("wOutTokens", 2 * n)
+    toks = [out[2 * i] | (out[2 * i + 1] << 8) for i in range(n)]
+    forced = len(ids) - 1
+    assert toks[:forced] == ids[1:], "the prompt is forced as encoded"
+    assert r.read("wOwnFrom")[0] == forced, "her history starts after the player's line"
+    said, prev = "", toks[forced - 1]
+    for t in toks[forced:]:
+        said += tok.decode(t, prev)
+        prev = t
+    return said
+
+
+@pytest.mark.parametrize("line,word", LINES)
+def test_a_fresh_turn_says_the_word(lab, twin, line, word):
+    q, tok = twin
+    want = golden5.chat_turn(q, tok, twin5.QState5(q.cfg), line, first=True)
+    assert lab_reply(lab, tok, "> " + line + "\n") == want
+    assert want.endswith("\n") and word in words(want), want
+
+
+def test_mid_conversation_on_the_cartridge(twin):
+    """The topic check's warm-up, then every echo line the topic tree holds,
+    in one conversation on build/rei.gbc; Talk.send checks each reply against
+    the twin's, pane included."""
+    if not (APP / "build" / "rei.gbc").exists():
+        pytest.skip("build/rei.gbc missing - run .\\build.ps1 -Rei")
+    where = {s: (t, i) for t, (_, lines) in enumerate(rei_topics.TOPICS)
+             for i, s in enumerate(lines)}
+    echo = [(s, w) for s, w in LINES if s in where]
+    assert len(echo) >= 5, "the topic tree holds the echo lines again"
+    t = Talk(twin)
+    try:
+        t.rom.pyboy.tick(150, False)
+        ui.press(t.rom, "start", after=60)
+        for s in rei_topics.WARMUP:
+            t.send(*where[s])
+        for s, word in echo:
+            reply = t.send(*where[s])
+            assert word in words(reply), (s, reply)
+    finally:
+        t.rom.close()

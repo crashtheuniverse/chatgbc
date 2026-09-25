@@ -879,8 +879,25 @@ NoRepeat_Ok::
 
     ld a, b
     sub NOREPEAT_N - 1              ; start positions to try
+IF CHAT_MODE
+    ; A chat build searches her own words only (wOwnFrom, src/generate.asm):
+    ; the trailing three are hers or there is nothing to find.
+    ld hl, wOwnFrom
+    sub [hl]
+    jr c, .fine
+    jr z, .fine
+ENDC
     ld c, a
     ld hl, wOutTokens
+IF CHAT_MODE
+    ld a, [wOwnFrom]
+    push bc
+    ld c, a
+    ld b, 0
+    add hl, bc
+    add hl, bc
+    pop bc
+ENDC
 .at
     push hl
     push de

@@ -48,6 +48,9 @@ IF CLS_TERNARY
     jr nz, .wait
     xor a
     ld [wLabState], a
+IF CHAT_MODE
+    ld [wOwnFrom], a            ; the planted history is all the model's
+ENDC
     call Cls4_Classify          ; wXb through the no-repeat retry, against
     jr .done                    ; the wOutTokens / wGenCount the harness set
 .cls

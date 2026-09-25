@@ -18,6 +18,7 @@ import numpy as np
 import pytest
 
 import export5                    # noqa: E402
+import golden5                    # noqa: E402  (history - the decode rule's)
 import twin5                      # noqa: E402
 import quant as Q                 # noqa: E402
 from model5 import Model5, Tokenizer   # noqa: E402
@@ -155,7 +156,7 @@ def test_tables_and_argmax_after_the_golden_prompt(twin):
     toks = [out[2 * i] | (out[2 * i + 1] << 8) for i in range(n)]
     g = json.loads((APP / "build" / "golden.json").read_text())
     assert toks == g["tokens"][:len(ids)]
-    assert toks[-1] == Q.pick_token(logits, toks[:-1])
+    assert toks[-1] == Q.pick_token(logits, golden5.history(toks[:-1], []))
 
 
 def test_probe_matches_the_twin_on_the_first_steps(twin):
