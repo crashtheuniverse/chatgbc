@@ -787,8 +787,14 @@ def main():
         # (measure_sparse_w2.py in the audit) - re-measure it for another
         # checkpoint - and it must be a real bound: below the width, or the
         # dense path is dead code.
-        assert 88 < w2_sparse_max < c.hidden, (
-            f"W2_SPARSE_MAX {w2_sparse_max} is out of range (88 is ts3L_v1024's measured max nonzero u)")
+        # Above the guard a token takes the dense path, so both sides are exact;
+        # the bound only decides speed. Hence a note, not a failure, when a
+        # checkpoint's guard falls under ts3L_v1024's measured 88.
+        assert 0 < w2_sparse_max < c.hidden, (
+            f"W2_SPARSE_MAX {w2_sparse_max} is out of range (the dense path would be dead or always taken)")
+        if w2_sparse_max <= 88:
+            print(f"note: W2_SPARSE_MAX {w2_sparse_max} is under ts3L_v1024's measured 88 nonzero u - "
+                  "tokens fuller than that take the dense path (exact, slower); re-measure for this checkpoint")
         const("W2_SPARSE_MAX", w2_sparse_max)
         print(f"w2 sparse: fullest column {col_nnz} nonzero, dense layer counted at "
               f"{dense_w2_cycles:,} cycles, guard at {w2_sparse_max} nonzero u")
