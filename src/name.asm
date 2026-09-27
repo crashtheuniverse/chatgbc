@@ -30,7 +30,8 @@
 ; and <N> when it wants to (py/tests/test_rei_name.py; golden5.chat_turn's
 ; `force`). Zero cost while it is empty: one test a model-chosen token.
 ;
-; Cost: about 110 bytes of ROM0, 32 bytes of WRAM0.
+; Cost: 136 bytes of ROM0 here and 23 in PrintToken and Generate, 30 bytes of
+; WRAM0.
 
 INCLUDE "hardware.inc"
 INCLUDE "chatgbc.inc"
