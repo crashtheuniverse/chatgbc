@@ -7,7 +7,9 @@
 Ten topics in a grid of two by five, up to ten sentences each, five to a page.
 Every sentence is a line her corpus taught her to answer (lower case, no
 question mark: that is how the corpus writes the player), fits the prompt row,
-and encodes without an unknown piece. The twin answers each one here so the
+and encodes without an unknown piece. None gives a name (gives_a_name): the
+player types their own on the keyboard, and "me" asks for it back instead
+("what is my name", "who am i", ...), which is the name opcode's <N>. The twin answers each one here so the
 list can be read before it is shipped; --emit refuses a line that fails. With
 REI_CORPUS set to her training text, a reply holding a word she was never
 taught (a garbled one) fails too.
@@ -29,7 +31,7 @@ PAGE = 5
 TOPICS = [
     ("hello", ["hello", "hi there", "good morning", "hey", "how are you",
                "are you ok", "how do you feel", "can you see me"]),
-    ("me", ["my name is tom", "call me ruby", "what is my name", "who am i",
+    ("me", ["what is my name", "who am i", "do you remember me", "say my name",
             "i love chess", "i like tag best", "i love gold", "what do i like"]),
     ("rei", ["what is your name", "who are you", "where do you live", "where are you",
              "who made you", "are you real", "are you a robot", "are you alive",
@@ -55,7 +57,26 @@ TOPICS = [
     ("kind", ["thank you", "that is kind", "sorry", "i am sorry", "i did not mean it",
               "i have to go", "see you", "goodbye", "bye"]),
 ]
+# The check's "after a chat" state. The player types a name on the keyboard:
+# no line of the tree gives one (NAME_GIVING), so this one is typed.
 WARMUP = ["hello", "my name is tom"]
+
+# A line that tells her a name. The player's own name is theirs to type, and a
+# tree line that gave one ("my name is tom") would name every player alike:
+# the name opcode stores the last word of what was sent (src/name.asm).
+# "i am X" with one word X is a name unless X is a state ("i am tired"): the
+# corpus answers her name question with "i'm adele" as often as with a phrase.
+NAME_GIVING = re.compile(r"\b(my name is|my name's|call me|i am called|i'm called|"
+                         r"they call me|name is)\b")
+I_AM = re.compile(r"^(?:i am|i'm|im) ([a-z]+)$")
+STATES = {"back", "bored", "cold", "excited", "fine", "good", "great", "happy", "hot",
+          "hungry", "lonely", "nervous", "ok", "proud", "sad", "scared", "sick", "sleepy",
+          "sorry", "tired", "well", "worried"}
+
+
+def gives_a_name(line):
+    m = I_AM.match(line)
+    return bool(NAME_GIVING.search(line)) or bool(m and m.group(1) not in STATES)
 
 
 def check_shape():
@@ -65,6 +86,9 @@ def check_shape():
         assert 1 <= len(lines) <= 2 * PAGE, name
         for s in lines:
             assert s == s.lower() and len(s) <= LINE_W and "?" not in s, s
+            assert not gives_a_name(s), f"{s!r} gives a name: the player types their own"
+    every = [s for _, lines in TOPICS for s in lines]
+    assert len(every) == len(set(every)), "a line twice"
 
 
 def ask_all():

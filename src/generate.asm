@@ -51,8 +51,8 @@ SECTION "Generate code", ROM0
 ; Prints one token's text. llama2.c strips the space that follows BOS.
 PrintToken::
 IF DEF(NAME_OPS)
-    ; The name opcodes are the engine's to act on (src/name.asm). Their pieces
-    ; are empty in vocab_data besides, so nothing could print "<SN>".
+    ; The name opcodes and the echo are the engine's to act on (src/name.asm).
+    ; Their pieces are empty in vocab_data besides, so nothing could print "<SN>".
     ld a, [wToken + 1]
     cp HIGH(TOK_SN)
     jr nz, .piece
@@ -61,6 +61,10 @@ IF DEF(NAME_OPS)
     jp z, Name_Store
     cp LOW(TOK_N)
     jp z, Name_Say
+IF DEF(TOK_W)
+    cp LOW(TOK_W)
+    jp z, Name_Echo
+ENDC
 .piece
 ENDC
     ld a, BANK(vocab_data)          ; offsets and pieces share the bank

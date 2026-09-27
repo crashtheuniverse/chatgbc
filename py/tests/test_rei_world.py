@@ -25,7 +25,7 @@ import golden5                    # noqa: E402
 import harness                    # noqa: E402
 import rei_muse                   # noqa: E402
 import rei_shots as ui            # noqa: E402
-from rei_talk import Talk, measured, twin   # noqa: E402,F401  (twin is a fixture)
+from rei_talk import Talk, measured, twin, where   # noqa: E402,F401  (twin is a fixture)
 
 DEFS = harness.load_defs(APP / "src" / "chatgbc.inc", APP / "src" / "hardware.inc",
                          APP / "src" / "app" / "rei.inc")
@@ -296,8 +296,8 @@ def test_a_button_cuts_a_thought_short(talk):
 def test_the_chat_never_knew(talk):
     """Two thoughts later, one abandoned: the conversation goes on exactly as
     the twin's does - and the twin never went to the beach."""
-    talk.send(1, 0)                                 # "my name is tom"
-    want = talk.send(1, 2)                          # "what is my name"
+    talk.type("my name is tom")                     # typed: no tree line gives a name
+    want = talk.send(*where("what is my name"))
     if measured():
         assert "tom" in want
     r = talk.rom

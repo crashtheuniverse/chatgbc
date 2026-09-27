@@ -48,6 +48,14 @@ def force(r, tokens):
     r.pyboy.memory[r.addr("wNameForceN")] = len(tokens)
 
 
+def where(text):
+    """(topic, line) of the topic tree's sentence `text`, for Talk.send."""
+    for t, (_, lines) in enumerate(rei_topics.TOPICS):
+        if text in lines:
+            return t, lines.index(text)
+    raise KeyError(f"{text!r} is not in the topic tree")
+
+
 def slot(name):
     """The bytes wName holds for `name`: its letters, zero-padded."""
     return name.encode("ascii").ljust(NAME["NAME_MAX"], b"\0")
@@ -90,4 +98,23 @@ class Talk:
         ui.wait_ready(r)
         assert self.rom_reply() == want
         assert ui.pane(r) == ui.layout(want)
+        return want
+
+    def type(self, text, forced=()):
+        """Through the keyboard, as a player gives their name (no line of the
+        topic tree does): `text` typed and sent with OK, her first picks
+        `forced` if given; the reply checked against the twin's, pane
+        included. Leaves the topic list up again."""
+        r = self.rom
+        if r.read("wReiMode")[0] != 2:
+            ui.press(r, "select")                   # the list -> the keyboard
+        cell = ui.type_text(r, text, r.read("wReiKey")[0])
+        want = self.expect(text, forced)
+        if forced:
+            force(r, forced)
+        ui.type_text(r, ui.OK, cell)
+        ui.wait_ready(r)
+        assert self.rom_reply() == want
+        assert ui.pane(r) == ui.layout(want)
+        ui.press(r, "select")                       # back to the list
         return want

@@ -46,7 +46,7 @@ MAGIC = b"REI" + bytes([2 if NAME_OPS else 1])
 
 
 import rei_topics                 # noqa: E402
-from rei_talk import Talk, measured, twin   # noqa: E402,F401  (twin is a fixture)
+from rei_talk import Talk, measured, twin, where   # noqa: E402,F401  (twin is a fixture)
 
 
 @pytest.fixture(scope="module")
@@ -248,8 +248,8 @@ def test_hello_lands_in_the_pane_only(talk):
 
 
 def test_the_state_carries(talk):
-    talk.send(1, 0)                                 # me: "my name is tom"
-    want = talk.send(1, 2)                          # "what is my name": a follow-up, same topic
+    talk.type("my name is tom")                     # typed: no tree line gives a name
+    want = talk.send(*where("what is my name"))     # me: a follow-up
     if measured():
         assert "tom" in want, "she forgot the name"
     talk.send(5, 7)                                 # play, second page: "tell me a story"
@@ -274,6 +274,9 @@ def test_keyboard_and_the_ok_key(talk):
     assert ui.row_text(r, 13, 1, 18) == "a b c d e f g h i"
     assert ui.tilemap(r)[16][17] == ART["T_OK"]
     assert ui.row_text(r, 17).strip() == "" and not frame_tiles_below_the_bar(r)
+    cell = r.read("wReiKey")[0]                     # where the name was typed left it
+    assert cursor_cells(r) == {(1 + 2 * (cell % 9), 13 + cell // 9)}
+    ui.move_key(r, cell, 0)
     assert cursor_cells(r) == {(1, 13)}
     ui.press(r, "up")                               # the keys wrap, top to bottom
     assert r.read("wReiKey")[0] == 27
@@ -378,7 +381,7 @@ def saved(twin):
     t = Talk(twin)
     assert not menu(t.rom)
     ui.press(t.rom, "start", after=60)
-    t.send(1, 0)                                    # "my name is tom"
+    t.type("my name is tom")
     sram = t.rom.sram()
     t.rom.close()
     return sram, t
@@ -411,7 +414,7 @@ def test_continue_is_exact(saved, twin):
 
     assert r.read("wChatStarted")[0] == 1
     assert ui.pane(r) == ui.layout(t.said[0]), "her last reply is back in the pane"
-    want = t.send(1, 2)                             # "what is my name"
+    want = t.send(*where("what is my name"))
     if measured():
         assert "tom" in want
 

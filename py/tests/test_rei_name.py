@@ -2,9 +2,11 @@
 
 When the model chooses <SN> the engine stores the last word of the player's
 line in the name slot and prints nothing; when it chooses <N> the engine
-prints the slot (src/name.asm). The capture rule is golden5.capture_name, one
-function for the twin and for these tests; golden5.chat_turn expands the
-opcodes as the ROM does and keeps the slot in the twin's state.
+prints the slot - "friend" while it is empty; when it chooses <W> (tokenizer
+v3) the engine prints that same last word and leaves the slot alone
+(src/name.asm). The rule is golden5.last_word, one function for the twin and
+for these tests; golden5.chat_turn expands the opcodes as the ROM does and
+keeps the slot in the twin's state.
 
 A model says <SN> and <N> when it wants to, so the ROM has a hook the suite
 plants her next picks in (wNameForce; chat_turn's `force` on the twin): the
@@ -14,7 +16,11 @@ twin as ever.
 
 This needs a chat export whose tokenizer carries the two pieces
 (models/tok_rei1024.bin); the story build and a 512-piece Rei assemble none of
-it, and skip. The capture rule's own test (test_name_rule.py) runs everywhere.
+it, and skip; the <W> cases skip with a tokenizer that has no <W>. The capture
+rule's own test (test_name_rule.py) runs everywhere.
+
+No line of the topic tree gives a name (rei_topics.gives_a_name): the player
+types theirs, and so does this suite (Talk.type).
 """
 import copy
 import random
@@ -37,9 +43,12 @@ import quant as Q                 # noqa: E402
 import rei_shots as ui            # noqa: E402
 import twin5                      # noqa: E402
 from model5 import Tokenizer      # noqa: E402
-from rei_talk import NAME, Talk, force, slot, twin   # noqa: E402,F401  (twin is a fixture)
+from rei_talk import NAME, Talk, force, slot, twin, where   # noqa: E402,F401  (twin is a fixture)
 
 SN, N = DEFS["TOK_SN"], DEFS["TOK_N"]
+W = DEFS.get("TOK_W")                                   # the echo, tokenizer v3
+OPS = {"SN": SN, "N": N, "W": W}
+needs_w = pytest.mark.skipif(W is None, reason="this tokenizer has no <W>")
 NAME_MAX = DEFS["NAME_MAX"]
 KEYBOARD = "abcdefghijklmnopqrstuvwxyz .,!?'-;:"         # rei_input.asm's keys
 
@@ -51,8 +60,12 @@ def test_the_opcodes_are_the_tokenizers():
     tok = Tokenizer()
     assert export5.name_ops(tok) == (SN, N)
     assert (tok.vocab[SN], tok.vocab[N]) == (b"<SN>", b"<N>")
+    assert export5.echo_op(tok) == W
+    ops = (SN, N) if W is None else (SN, N, W)
+    if W is not None:
+        assert tok.vocab[W] == b"<W>"
     blob = (APP / "build" / "blobs" / "vocab_data.bin").read_bytes()
-    for t in (SN, N):
+    for t in ops:
         at = int.from_bytes(blob[2 * t:2 * t + 2], "little")
         assert blob[at] == 0, "an opcode's piece is empty in the ROM"
     rng = random.Random(7)
@@ -63,7 +76,7 @@ def test_the_opcodes_are_the_tokenizers():
     for line in lines:
         for ids in (tok.encode("> " + line + "\n"),
                     tok.encode("\n> " + line + "\n", bos=False, prefix=False)):
-            assert SN not in ids and N not in ids, line
+            assert not set(ops) & set(ids), line
 
 
 # --- the lab ROM -------------------------------------------------------------
@@ -128,22 +141,31 @@ def console_rows(text):
     return [row.rstrip() for row in rows]
 
 
-@pytest.mark.parametrize("line,forced,name", [
-    ("my name is vince", ("SN", "N"), "vince"),
-    ("Vince!", ("N", "SN", "N", "N"), "vince"),     # <N> before any <SN>: nothing
-    ("?!", ("SN", "N"), ""),                        # no letter: nothing stored
-    ("call me mary ann", ("SN", "N", "SN", "N", "SN", "N"), "ann"),
-    ("my name is bartholomewxyz", ("SN", "N"), "bartholomewx"),
+@pytest.mark.parametrize("line,forced,name,starts", [
+    ("my name is vince", ("SN", "N"), "vince", "vince"),
+    ("Vince!", ("N", "SN", "N", "N"), "vince", "friendvincevince"),  # <N> before any <SN>: "friend"
+    ("?!", ("SN", "N"), "", "friend"),              # no letter: nothing stored
+    ("call me mary ann", ("SN", "N", "SN", "N", "SN", "N"), "ann", "annannann"),
+    ("my name is bartholomewxyz", ("SN", "N"), "bartholomewx", "bartholomewx"),
+    ("hello", ("N",), "", "friend"),
+    pytest.param("do you like CATS!", ("W",), "", "cats", marks=needs_w),
+    pytest.param("i like bartholomewxyz", ("W", "N"), "", "bartholomewxfriend", marks=needs_w),
+    pytest.param("?!", ("W", "N"), "", "friend", marks=needs_w),    # no letter: <W> says nothing
+    pytest.param("my name is vince", ("W", "SN", "W", "N"), "vince", "vincevincevince",
+                 marks=needs_w),
 ])
-def test_forced_opcodes_on_the_lab(lab, twin, line, forced, name):
+def test_forced_opcodes_on_the_lab(lab, twin, line, forced, name, starts):
     """A fresh turn with her first picks forced: her tokens, what the console
-    printed and the slot are the twin's. The repeated <SN> <N> of the fourth
-    are her history like any tokens: the no-repeat rule then works on them."""
+    printed and the slot are the twin's, and what the opcodes said is `starts`.
+    <W> says the line's last word and stores nothing; <N> says "friend" on an
+    empty slot. The repeated <SN> <N> of the fourth are her history like any
+    tokens: the no-repeat rule then works on them."""
     q, tok = twin
-    ids = [{"SN": SN, "N": N}[f] for f in forced]
+    ids = [OPS[f] for f in forced]
     st, mine = twin5.QState5(q.cfg), []
     said = golden5.chat_turn(q, tok, st, line, first=True, force=ids, record=mine)
     assert st.name == name
+    assert said.startswith(starts), said
 
     prompt = "> " + line + "\n"
     force(lab, ids)
@@ -244,32 +266,16 @@ def name_in_rom(r):
     return r.read("wName", NAME_MAX)
 
 
-def type_and_send(t, text, forced):
-    """The keyboard: `text` typed and sent with OK, her first picks forced."""
-    r = t.rom
-    if r.read("wReiMode")[0] != 2:
-        ui.press(r, "select")
-    cell = ui.type_text(r, text, r.read("wReiKey")[0])     # from where the cursor was left
-    want = t.expect(text, forced)
-    force(r, forced)
-    ui.type_text(r, ui.OK, cell)
-    ui.wait_ready(r)
-    assert t.rom_reply() == want
-    assert ui.pane(r) == ui.layout(want)
-    ui.press(r, "select")                           # back to the list
-    return want
-
-
 def test_she_stores_the_name_and_says_it(talk):
     r = talk.rom
-    want = talk.send(1, 0, forced=(SN, N))          # "my name is tom"
+    want = talk.type("my name is tom", forced=(SN, N))    # typed: no tree line gives a name
     assert want.startswith("tom") and talk.st.name == "tom"
     assert name_in_rom(r) == slot("tom")
     assert r.read("wReiMood")[0] == ui.mood_of(want)
 
 
 def test_she_says_it_a_turn_later(talk):
-    want = talk.send(1, 2, forced=(N,))             # "what is my name"
+    want = talk.send(*where("what is my name"), forced=(N,))
     assert want.startswith("tom")
     assert name_in_rom(talk.rom) == slot("tom")
 
@@ -278,12 +284,11 @@ def test_the_turn_after_a_name_has_the_header(talk):
     """The cartridge's own staging of the turn just sent: the continuation
     with <NK> after the newline, where the tokenizer has it (src/name.asm,
     Name_Header; golden5.staged_ids)."""
-    import rei_topics
     r = talk.rom
     n = r.read("wTokCount")[0]
     buf = r.read("wTokBuf", 2 * n)
     got = [buf[2 * i] | (buf[2 * i + 1] << 8) for i in range(n)]
-    text = rei_topics.TOPICS[1][1][2]
+    text = "what is my name"
     assert got == golden5.staged_ids(talk.tok, text, False, "tom")
     nk = export5.header_op(talk.tok)
     if nk is not None:
@@ -291,9 +296,27 @@ def test_the_turn_after_a_name_has_the_header(talk):
 
 
 def test_a_line_without_letters_leaves_it(talk):
-    want = type_and_send(talk, "?!", (SN, N))
+    want = talk.type("?!", forced=(SN, N))
     assert want.startswith("tom") and talk.st.name == "tom"
     assert name_in_rom(talk.rom) == slot("tom")
+
+
+@needs_w
+def test_she_echoes_the_word_and_keeps_the_name(talk):
+    """<W> through the teletype like <N>: the pane, the mood scan (a sad word
+    makes a sad reply) and, next, the log see the word - and the slot still
+    holds the name. From the tree too, and a line without a letter echoes
+    nothing."""
+    r = talk.rom
+    want = talk.type("i feel so sad", forced=(W,))
+    assert want.startswith("sad") and talk.st.name == "tom"
+    assert name_in_rom(r) == slot("tom")
+    assert r.read("wReiMood")[0] == ui.mood_of(want) == ui.MOOD_SAD
+    want = talk.send(*where("do you like cats"), forced=(W, N))
+    assert want.startswith("catstom") and name_in_rom(r) == slot("tom")
+    assert r.read("wReiMood")[0] == ui.mood_of(want)
+    want = talk.type("?!", forced=(W, N))
+    assert want.startswith("tom") and name_in_rom(r) == slot("tom")
 
 
 def test_the_log_has_the_name(talk):
@@ -306,6 +329,8 @@ def test_the_log_has_the_name(talk):
     else:
         assert ui.log_screen(r)[:len(rows)] == rows
     assert any("tom" in text for who, text in rows if not who)
+    if W is not None:                               # the echo, as the log keeps it
+        assert any(text.startswith("catstom") for who, text in ui.log_screen(r) if not who)
     ui.press(r, "select", after=12)
     assert not ui.log_open(r)
 
@@ -341,7 +366,7 @@ def test_a_thought_puts_the_name_back(talk):
 def test_the_mood_sees_the_name(talk):
     """<N> goes through the teletype like any piece: a name that is a sad
     word makes a sad reply."""
-    want = type_and_send(talk, "i am sad", (SN, N))
+    want = talk.type("i am sad", forced=(SN, N))
     assert want.startswith("sad") and talk.st.name == "sad"
     assert talk.rom.read("wReiMood")[0] == ui.mood_of(want) == ui.MOOD_SAD
 
@@ -384,7 +409,7 @@ def test_continue_keeps_the_name(saved, twin):
     t = resume(twin, before, sram)
     try:
         assert name_in_rom(t.rom) == slot("sad")
-        want = t.send(1, 2, forced=(N,))            # "what is my name"
+        want = t.send(*where("what is my name"), forced=(N,))
         assert want.startswith("sad")
     finally:
         t.rom.close()
@@ -405,7 +430,8 @@ def test_an_old_save_continues_with_no_name(saved, twin):
         assert r.read("wChatStarted")[0] == 1
         assert ui.pane(r) == ui.layout(t.said[-1]), "her last reply is back"
         t.st.name = ""
-        t.send(1, 2, forced=(N,))                   # <N> with nothing in the slot
+        want = t.send(*where("what is my name"), forced=(N,))   # <N> with nothing in the slot
+        assert want.startswith("friend")
         again = r.sram()
         assert again[:4] == b"REI\x02" and again[4:6] == checksum(again[6:6 + BODY])
         assert again[6 + BODY_V1:6 + BODY] == bytes(NAME_MAX)

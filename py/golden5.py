@@ -32,31 +32,44 @@ def history(tokens, own):
     return own if export5.CHAT else tokens
 
 
-def capture_name(line):
-    """The engine's capture rule for <SN> (Name_Store, src/name.asm): the last
-    run of letters in the player's line, lowercased, its first NAME_MAX
-    letters - or None if the line has no letter, and the slot keeps what it
-    had. Anything that is not a letter separates words and is dropped, so
-    "Vince!", "i'm vince" and "my name is vince." all give "vince", and
-    "call me mary ann" gives "ann". It is the rule her training corpus was
-    written to: <SN> follows a line only when this is the name. The turn marker and newlines the cartridge stages around the line are
-    not letters, so the staged line and the typed one capture the same."""
+def last_word(line):
+    """The engine's capture rule, shared by <SN> and <W> (Name_LastWord,
+    src/name.asm): the last run of letters in the player's line, lowercased,
+    its first NAME_MAX letters - or None if the line has no letter. Anything
+    that is not a letter separates words and is dropped, so "Vince!", "i'm
+    vince" and "my name is vince." all give "vince", and "call me mary ann"
+    gives "ann". It is the rule her training corpus was written to: <SN>
+    follows a line only when this is the name, <W> only when this is the word
+    she says back. The turn marker and newlines the cartridge stages around
+    the line are not letters, so the staged line and the typed one give the
+    same."""
     words = re.findall(r"[A-Za-z]+", line)
     return words[-1].lower()[:export5.NAME_MAX] if words else None
 
 
+# <SN>'s name for the rule: what it stores (None: the slot keeps what it had).
+capture_name = last_word
+
+# What <N> says while the name slot is empty (sNameFriend, src/name.asm).
+NO_NAME = "friend"
+
+
 def speak(tok, st, token, prev, line):
-    """What the cartridge prints for `token` - its piece, or for the name
-    opcodes the engine's action: <SN> stores capture_name(line) in st.name and
-    prints nothing, <N> prints st.name (nothing while it is empty)."""
+    """What the cartridge prints for `token` - its piece, or for the opcodes
+    the engine's action: <SN> stores last_word(line) in st.name and prints
+    nothing, <N> prints st.name ("friend" while it is empty), <W> prints
+    last_word(line) (nothing for a line without a letter) and leaves st.name
+    as it was."""
     ops = export5.name_ops(tok) if export5.CHAT else None
     if ops and token == ops[0]:
-        name = capture_name(line)
+        name = last_word(line)
         if name is not None:
             st.name = name
         return ""
     if ops and token == ops[1]:
-        return st.name
+        return st.name or NO_NAME
+    if ops and token == export5.echo_op(tok):
+        return last_word(line) or ""
     if ops and token in export5.silent_ids(tok):
         return ""                 # the header and the registers print nothing
     return tok.decode(token, prev)

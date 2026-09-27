@@ -185,15 +185,20 @@ def type_text(r, text, cell=0):
     Left and right run round the whole grid; up and down stay inside it (off
     the top or bottom row they page her replies instead)."""
     for ch in text:
-        target = KEYS.index(ch)
-        while cell % 9 != target % 9:
-            press(r, "right")
-            cell = (cell + 1) % 36
-        while cell != target:
-            step = "down" if cell < target else "up"
-            press(r, step)
-            cell += 9 if step == "down" else -9
+        cell = move_key(r, cell, KEYS.index(ch))
         press(r, "a")
+    return cell
+
+
+def move_key(r, cell, target):
+    """The keyboard's cursor from `cell` to `target`, nothing typed."""
+    while cell % 9 != target % 9:
+        press(r, "right")
+        cell = (cell + 1) % 36
+    while cell != target:
+        step = "down" if cell < target else "up"
+        press(r, step)
+        cell += 9 if step == "down" else -9
     return cell
 
 
@@ -285,10 +290,12 @@ def main():
     wait_ready(r)
     r.screenshot(SHOTS / "reply_done.png")      # a heart, START:LOG under it, the list back
 
-    choose(r, 1, 0)                             # me: "my name is tom"
-    press(r, "a", after=0)
+    press(r, "select")                          # the name is typed: no tree line gives one
+    cell = type_text(r, "my name is tom", r.read("wReiKey")[0])
+    type_text(r, OK, cell)
     wait_ready(r)
-    choose(r, 1, 2)                             # "what is my name"
+    press(r, "select")                          # back to the list
+    choose(r, 1, 0)                             # me: "what is my name"
     press(r, "a", after=0)
     wait_ready(r)
     choose(r, 2, 8)                             # rei, second page
@@ -298,7 +305,7 @@ def main():
     press(r, "select", after=12)
 
     press(r, "select")
-    type_text(r, "i like chess")
+    type_text(r, "i like chess", r.read("wReiKey")[0])
     r.screenshot(SHOTS / "keyboard.png")
 
     r.pyboy.memory[r.addr("wWorldRng")] = 40

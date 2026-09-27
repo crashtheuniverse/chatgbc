@@ -438,10 +438,14 @@ def name_ops(tok):
 # The header (py/header.py): the release tokenizer's ids 1016-1023 are the
 # engine's - <N> 1023, <SN> 1022, <NK> 1021 ("the name is known", the first
 # token of every player turn while the slot holds a name; src/name.asm,
-# Name_Header), <R0>..<R4> 1016-1020 kept for the register system. None of
-# them is typable and none is ever printed: a model that picks <NK> or a
-# register says nothing with it (empty pieces in the detokenizer; golden5.speak).
+# Name_Header), <W> 1016 (the echo: the engine prints the last word of the
+# player's line, src/name.asm Name_Echo; tokenizer v3), <R1>..<R4> 1017-1020
+# kept for the register system (v2 had <R0> where <W> is). None of them is
+# typable and none is printed as its piece: the opcodes' text is the
+# engine's, and a model that picks <NK> or a register says nothing with it
+# (empty pieces in the detokenizer; golden5.speak).
 HEADER_PIECE = b"<NK>"
+ECHO_PIECE = b"<W>"
 RESERVED_PIECES = tuple(f"<R{k}>".encode() for k in range(5))
 
 
@@ -450,10 +454,16 @@ def header_op(tok):
     return tok.lookup.get(HEADER_PIECE)
 
 
+def echo_op(tok):
+    """The id of <W>, or None if the tokenizer has no echo (v2 and older)."""
+    return tok.lookup.get(ECHO_PIECE)
+
+
 def silent_ids(tok):
-    """Every engine piece the tokenizer carries: the name opcodes, the header
-    and the reserved registers. The cartridge prints none of them as text."""
-    return {tok.lookup[p] for p in NAME_PIECES + (HEADER_PIECE,) + RESERVED_PIECES
+    """Every engine piece the tokenizer carries: the name opcodes, the echo,
+    the header and the reserved registers. The cartridge prints none of them
+    as its piece."""
+    return {tok.lookup[p] for p in NAME_PIECES + (ECHO_PIECE, HEADER_PIECE) + RESERVED_PIECES
             if p in tok.lookup}
 
 
@@ -469,6 +479,7 @@ def main():
         f"{CKPT.name} has {c.vocab} pieces, the tokenizer {len(tok.vocab)}")
     ops = name_ops(tok) if CHAT else None
     nk = header_op(tok) if ops else None
+    echo = echo_op(tok) if ops else None
     silent = silent_ids(tok) if ops else set()
     print(f"calibrating {CKPT.name}...", flush=True)
     sites = twin5.calibrate5(m, tok, cal_prompts())
@@ -857,8 +868,9 @@ def main():
         elif i == BOS:
             piece = b"\n"
         elif i in silent:
-            piece = b""             # PrintToken acts on the name opcodes; the
-                                    # header and the registers print nothing
+            piece = b""             # PrintToken acts on the name opcodes and
+                                    # the echo; the header and the registers
+                                    # print nothing
         offsets.append(len(pieces))
         pieces += bytes([len(piece)]) + piece
     # One banked blob: the offset table first (VOCAB words), the pieces
@@ -924,15 +936,53 @@ def main():
         if nk is not None:
             assert nk > nl, "the header must not end a turn"
             const("TOK_NK", nk)
+        if echo is not None:
+            assert echo >> 8 == ops[0] >> 8, "PrintToken tests the opcodes' high byte once"
+            assert echo > nl, "the echo must not end a turn"
+            const("TOK_W", echo)
 
     prompt_tokens = tok.encode(PROMPT)
     blob("prompt", np.array(prompt_tokens, dtype="<u2").tobytes())
     const("PROMPT_LEN", len(prompt_tokens))
 
     # --- bit-exact spot checks the ROM's selftest can assert ---
-    x0 = Q.requant(q.weights["tok_emb"][prompt_tokens[0]].astype(np.int64),
-                   q.wexp["tok_emb"], S("x"))
-    tx = Q.rmsnorm(x0, q.weights["rms_ffn"][0], q.wexp["rms_ffn"], S("xb_ffn", 0))
+    def test_vector(token):
+        x0 = Q.requant(q.weights["tok_emb"][token].astype(np.int64),
+                       q.wexp["tok_emb"], S("x"))
+        return Q.rmsnorm(x0, q.weights["rms_ffn"][0], q.wexp["rms_ffn"], S("xb_ffn", 0))
+
+    def synthetic_sweep(x):
+        """The sweep's epilogue on shifts the model never asks for (below):
+        w1's rows of layer 0, expert 0, over x, a third of them at s = 1 and a
+        third at s = 2. Returns (the rows, their shifts, the twin's output)."""
+        t = q.indices["w1"][0][0]
+        acc = Q.matvec_blocks(t, x, twin5.TERNARY_BLOCK, twin5.TERNARY_ACC_SHIFT)
+        sh = np.array(shift_bytes("w1", 0)[0], dtype=np.int64)
+        third = c.hidden // 3
+        sh[third:2 * third] = 1
+        sh[2 * third:] = 2
+        return t, sh, Q.requant_rows(acc, 0, -sh, 0)
+
+    def saturates_both_ways(x):
+        out = synthetic_sweep(x)[2]
+        return bool((out == 127).any() and (out == -127).any())
+
+    # The selftest vector: the golden prompt's first token, through layer 0's
+    # FFN norm. The synthetic sweep below should saturate both ways on it
+    # (coverage of the epilogue's clamps, py/tests/test_sweep.py). A quiet
+    # model may not (the 1,024-piece Rei: -354..243 on BOS), and then the
+    # first token whose vector does is the test vector instead - every
+    # expected answer here is computed from whichever it is, so exactness
+    # holds either way; the story model's is the first token's, as before.
+    test_token = prompt_tokens[0]
+    tx = test_vector(test_token)
+    if sweep and experts and not saturates_both_ways(tx):
+        for token in range(c.vocab):
+            if saturates_both_ways(test_vector(token)):
+                test_token, tx = token, test_vector(token)
+                break
+        print(f"test vector: token {test_token} (the prompt's first, {prompt_tokens[0]}, "
+              f"does not saturate the synthetic sweep both ways)")
     blob("test_x", tx.astype(np.int8).tobytes())
     want = twin5.mv(q, "w1", 0, tx, S("xb_ffn", 0), S("h1", 0),
                     e=0 if experts else None)          # expert 0, if experts
@@ -948,18 +998,14 @@ def main():
         # py/tests/test_sweep.py compares against the twin's requant of the
         # twin's own sums. The selftest also routes test_x through layer 0's
         # router rows; the twin's answer is the expected expert.
-        t = q.indices["w1"][0][0]
-        acc = Q.matvec_blocks(t, tx, twin5.TERNARY_BLOCK, twin5.TERNARY_ACC_SHIFT)
-        sw_sh = np.array(shift_bytes("w1", 0)[0], dtype=np.int64)
+        t, sw_sh, sw_out = synthetic_sweep(tx)
         third = c.hidden // 3
-        sw_sh[third:2 * third] = 1
-        sw_sh[2 * third:] = 2
-        sw_out = Q.requant_rows(acc, 0, -sw_sh, 0)
         n_sat = int((np.abs(sw_out) == 127).sum())
-        # Coverage, not correctness: the story model saturates both ways here;
-        # a quieter model (the chat checkpoint) may not, and the comparison
-        # against the twin holds either way.
-        if not (n_sat >= 8 and (sw_out == 127).any() and (sw_out == -127).any()):
+        # Coverage, not correctness: the test vector was chosen to saturate
+        # both ways where any token's can; where none can, test_sweep says so
+        # and skips only that line - the comparison against the twin holds
+        # either way.
+        if not (n_sat >= 8 and saturates_both_ways(tx)):
             print(f"note: the synthetic shifts saturate only {n_sat} rows on this model")
         assert (sw_sh[third:2 * third] == 1).all()
         blob("test_sw", sweep_rows(t, sw_sh), rom0=False)

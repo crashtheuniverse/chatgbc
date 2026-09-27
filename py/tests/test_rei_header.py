@@ -1,8 +1,8 @@
 """The header: while the engine holds the player's name, every player turn
 starts with <NK> (src/name.asm Name_Header; py/header.py is the rule).
 
-Two halves. The tokenizer's (every suite): models/tok_rei1024.bin v2 keeps
-ids 1016-1023 for the engine, nothing typable reaches them, and no piece joins
+Two halves. The tokenizer's (every suite): models/tok_rei1024.bin (v3: v2
+with id 1016 named <W>, the echo) keeps ids 1016-1023 for the engine, nothing typable reaches them, and no piece joins
 her reply's closing newline (or BOS) to the "> " of the next line, so the
 header has a place between them and a turn encoded in one piece is the same
 ids as its lines encoded apart, as a corpus packer does. The ROM's (a chat
@@ -27,7 +27,9 @@ from conftest import APP, lab_rom
 
 REI1024 = APP / "models" / "tok_rei1024.bin"
 REI512 = APP / "models" / "tok_rei.bin"
-RESERVED = [b"<R0>", b"<R1>", b"<R2>", b"<R3>", b"<R4>", b"<NK>", b"<SN>", b"<N>"]
+# v3 (2026-09-28): v2 with its <R0> renamed <W> - the echo opcode
+# (src/name.asm Name_Echo); nothing else changed.
+RESERVED = [b"<W>", b"<R1>", b"<R2>", b"<R3>", b"<R4>", b"<NK>", b"<SN>", b"<N>"]
 # The six merges v2 gave up for them: tok_rei1024 v1's last six (ids
 # 1016-1021), each used ~17,900 times on the friend5 mix (0.11% of its
 # tokens together). Only two merges were cheaper to drop ("gs", ".."), and
@@ -51,9 +53,10 @@ def cartridge_lines():
 
 # --- the tokenizer -----------------------------------------------------------
 
-def test_v2_is_v1_with_the_engine_ids():
+def test_v3_is_v1_with_the_engine_ids():
     """ids 0-1015 are v1's in order (0-511 tok_rei.bin's), 1016-1023 the
-    engine's; the dropped merges are gone and nothing else is."""
+    engine's (v3's <W> at 1016); the dropped merges are gone and nothing else
+    is."""
     tok, small = tok1024(), ref.Tokenizer(REI512)
     assert len(tok.vocab) == 1024
     assert tok.vocab[:512] == small.vocab and tok.scores[:512] == small.scores
@@ -90,7 +93,7 @@ def test_no_typed_line_reaches_the_engine_ids():
     lines = cartridge_lines()
     lines += ["".join(rng.choice(REI_KEYS) for _ in range(rng.randint(1, 44))) for _ in range(4000)]
     lines += ["".join(rng.choice(printable) for _ in range(rng.randint(1, 44))) for _ in range(2000)]
-    lines += ["<NK>", "<SN> <N>", "<R0><R4>", "a<NK>b", "> <NK>"]
+    lines += ["<NK>", "<SN> <N>", "<R0><R4>", "a<NK>b", "> <NK>", "<W>", "cats <W>"]
     for line in lines:
         for ids in (tok.encode("> " + line + "\n"),
                     tok.encode("\n> " + line + "\n", bos=False, prefix=False)):

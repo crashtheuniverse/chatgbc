@@ -2,9 +2,9 @@
 ;
 ; The model has no context window, only its state, and cannot spell back a
 ; name it was told - it holds that one was told, not the letters. So Rei's
-; tokenizer carries two pieces the keyboard can never produce, <SN> and <N>
-; (py/export5.py finds them; without both, as in the story build, none of this
-; is assembled), and the engine acts on them in PrintToken:
+; tokenizer carries pieces the keyboard can never produce, <SN> and <N> and
+; (v3) <W> (py/export5.py finds them; without <SN> and <N>, as in the story
+; build, none of this is assembled), and the engine acts on them in PrintToken:
 ;
 ;   <SN>  store: the last word of the player's line of this turn goes into the
 ;         name slot, and nothing is printed. The word is the last run of
@@ -14,11 +14,15 @@
 ;         not letters, so it captures what the player typed.
 ;   <N>   say: the slot's letters go out through Type_PutChar like any piece,
 ;         so her pane, its wrap, the mood scan, the history and the log all see
-;         the real name. An empty slot prints nothing.
+;         the real name. An empty slot says "friend".
+;   <W>   echo (a tokenizer with <W>, v3): the same last word of the player's
+;         line, by the same rule (Name_LastWord), printed like <N> prints -
+;         and the slot is not touched. A line with no letter prints nothing.
+;         "> cats" -> "<W>! cats are soft." says "cats! cats are soft."
 ;
-; Both are her tokens like any other: they are recorded in wOutTokens, the
-; no-repeat rule sees them, and the state is fed them. Only the printing is
-; the engine's. golden5.capture_name and golden5.speak are the twin's side.
+; All three are her tokens like any other: they are recorded in wOutTokens,
+; the no-repeat rule sees them, and the state is fed them. Only the printing
+; is the engine's. golden5.last_word and golden5.speak are the twin's side.
 ;
 ; The slot is part of the conversation: cleared when a conversation starts
 ; (Generate), kept in the battery save (src/app/rei_save.asm) and the world's
@@ -35,8 +39,9 @@
 ; player turn is fed with <NK> as its second token (py/header.py is the rule
 ; the corpus, the twin and this share).
 ;
-; Cost: 136 bytes of ROM0 here and 23 in PrintToken and Generate, 30 bytes of
-; WRAM0; the header 45 more here and 3 at each of the cartridge's four encodes.
+; Cost, as the map measures it: 155 bytes of ROM0 here and 23 in PrintToken
+; and Generate, 30 bytes of WRAM0; the header 45 more here and 3 at each of the
+; cartridge's four encodes; <W> 18 more here and 5 in PrintToken.
 
 INCLUDE "hardware.inc"
 INCLUDE "chatgbc.inc"
@@ -54,11 +59,13 @@ wNameForceBuf:: ds NAME_FORCE_MAX * 2   ; and the tokens
 
 SECTION "Name code", ROM0
 
-; <SN>: the last word of wPromptText into the slot.
-Name_Store::
+; The last word of wPromptText, the capture rule <SN> and <W> share: the last
+; run of letters, its first NAME_MAX. Carry set and hl = its first letter,
+; b = its length (1..NAME_MAX); carry clear if the line has no letter.
+Name_LastWord:
     ld a, [wPromptLen]
     or a
-    ret z
+    ret z                           ; nc: an empty line
     ld c, a                         ; c = characters up to and including hl
     ld e, a
     ld d, 0
@@ -71,26 +78,33 @@ Name_Store::
     jr c, .last
     dec c
     jr nz, .skip
-    ret                             ; no letter at all: the slot stays
+    ret                             ; nc: no letter at all
 .last
     ld b, 1                         ; b = the word's letters so far
 .back
     dec c
-    jr z, .copy                     ; hl is the first character of the line
+    jr z, .cap                      ; hl is the first character of the line
     dec hl
     ld a, [hl]
     call Name_Letter
     jr c, :+
     inc hl                          ; the word starts after this one
-    jr .copy
+    jr .cap
 :   inc b
     jr .back
-.copy
+.cap
     ld a, b
     cp NAME_MAX + 1
-    jr c, :+
+    ret c                           ; c: b letters
     ld b, NAME_MAX                  ; the first NAME_MAX letters
-:   call Name_Clear                 ; keeps hl and b
+    scf
+    ret
+
+; <SN>: the last word of wPromptText into the slot.
+Name_Store::
+    call Name_LastWord
+    ret nc                          ; no letter at all: the slot stays
+    call Name_Clear                 ; keeps hl and b
     ld de, wName
 .letter
     ld a, [hl+]
@@ -100,6 +114,25 @@ Name_Store::
     dec b
     jr nz, .letter
     ret
+
+IF DEF(TOK_W)
+; <W>: the same word, printed as a piece's would be - and the slot untouched.
+; A line with no letter prints nothing.
+Name_Echo::
+    call Name_LastWord
+    ret nc
+.char
+    ld a, [hl+]
+    or $20                          ; lowercased, as <SN> stores it
+    push hl
+    push bc
+    call Type_PutChar
+    pop bc
+    pop hl
+    dec b
+    jr nz, .char
+    ret
+ENDC
 
 ; Carry set if a is an ASCII letter. Clobbers a.
 Name_Letter:
@@ -121,10 +154,16 @@ Name_Clear::
     pop hl
     ret
 
-; <N>: the slot's letters, printed as a piece's would be.
+; <N>: the slot's letters, printed as a piece's would be - "friend" while the
+; slot is empty (nobody has said who they are, and "thank you, . you are kind"
+; reads worse than "thank you, friend.").
 Name_Say::
     ld hl, wName
-    ld b, NAME_MAX
+    ld a, [hl]
+    or a
+    jr nz, :+
+    ld hl, sNameFriend
+:   ld b, NAME_MAX
 .char
     ld a, [hl+]
     or a
@@ -137,6 +176,8 @@ Name_Say::
     dec b
     jr nz, .char
     ret
+
+sNameFriend: db "friend", 0
 
 ; The test hook, for a model-chosen step: the next planted token replaces the
 ; classifier's pick in wBestTok, if one is left.
@@ -208,6 +249,10 @@ ASSERT PROMPT_MAX + 3 <= TOK_MAX, "BOS, the dummy space, the line and the header
 ENDC
 
 ASSERT HIGH(TOK_SN) == HIGH(TOK_N), "PrintToken compares the high byte once"
+IF DEF(TOK_W)
+ASSERT HIGH(TOK_W) == HIGH(TOK_SN), "PrintToken compares the high byte once"
+ENDC
+ASSERT NAME_MAX >= 6, "the fallback name fits the slot"
 ASSERT NAME_MAX >= 1 && NAME_MAX <= 255 && PROMPT_MAX < 256, "byte counts"
 
 ENDC

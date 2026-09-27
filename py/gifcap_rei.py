@@ -2,8 +2,9 @@
 
     python py/gifcap_rei.py
 
-The splash, then three lines from the topic tree - "hello", "my name is tom",
-"what is my name" - and her answers as they are typed. One frame per character
+The splash, then "hello" from the topic tree, "my name is tom" on the
+keyboard (no tree line gives a name) and "what is my name" from the tree -
+and her answers as they are typed. One frame per character
 of hers and per button press; the time between presses is cut, and so is the
 time she spends thinking before her first character, which the caption has to
 say. Needs `.\\build.ps1 -Rei`.
@@ -60,6 +61,28 @@ def exchange(rec, topic, line):
     rec.frame("rest")
 
 
+def typed(rec, text):
+    """The player's own line: the keyboard, one frame a key, then OK."""
+    r = rec.rom
+    if r.read("wReiMode")[0] != 2:
+        rec.press("select")
+    cell = r.read("wReiKey")[0]
+    for ch in text + ui.OK:
+        cell = ui.type_text(r, ch, cell)
+        rec.frame("key")
+    seen = 0
+    ready = r.addr("wReady")
+    while r.pyboy.memory[ready] != r.defs["READY_MAGIC"]:
+        r.pyboy.tick(2, False)
+        n = r.read("wReiReplyLen")[0]
+        if n != seen:
+            seen = n
+            rec.frame("char")
+    r.pyboy.tick(8, False)
+    rec.frame("rest")
+    rec.press("select")                          # back to the list
+
+
 def main():
     if not ui.ROM.exists():
         sys.exit(f"{ui.ROM} missing - run .\\\\build.ps1 -Rei")
@@ -70,8 +93,8 @@ def main():
     ui.press(r, "start", after=60)
     rec.frame("hold")
     exchange(rec, 0, 0)                          # hello
-    exchange(rec, 1, 0)                          # my name is tom
-    exchange(rec, 1, 2)                          # what is my name
+    typed(rec, "my name is tom")
+    exchange(rec, 1, 0)                          # what is my name
     rec.frame("close")
     r.close()
 

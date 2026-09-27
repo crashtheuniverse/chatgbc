@@ -92,8 +92,11 @@ def test_mid_conversation_on_the_cartridge(twin):
     try:
         t.rom.pyboy.tick(150, False)
         ui.press(t.rom, "start", after=60)
-        for s in rei_topics.WARMUP:
-            t.send(*where[s])
+        for s in rei_topics.WARMUP:             # the name is typed: no tree line gives one
+            if s in where:
+                t.send(*where[s])
+            else:
+                t.type(s)
         for s, word in echo:
             reply = t.send(*where[s])
             if measured():

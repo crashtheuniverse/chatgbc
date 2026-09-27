@@ -44,10 +44,10 @@ ReiTopicLists::
     db "can you see me", 0
     db 0
 .t1 ; me
-    db "my name is tom", 0
-    db "call me ruby", 0
     db "what is my name", 0
     db "who am i", 0
+    db "do you remember me", 0
+    db "say my name", 0
     db "i love chess", 0
     db "i like tag best", 0
     db "i love gold", 0
