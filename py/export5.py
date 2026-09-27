@@ -435,6 +435,28 @@ def name_ops(tok):
     return None if None in ids else tuple(ids)
 
 
+# The header (py/header.py): the release tokenizer's ids 1016-1023 are the
+# engine's - <N> 1023, <SN> 1022, <NK> 1021 ("the name is known", the first
+# token of every player turn while the slot holds a name; src/name.asm,
+# Name_Header), <R0>..<R4> 1016-1020 kept for the register system. None of
+# them is typable and none is ever printed: a model that picks <NK> or a
+# register says nothing with it (empty pieces in the detokenizer; golden5.speak).
+HEADER_PIECE = b"<NK>"
+RESERVED_PIECES = tuple(f"<R{k}>".encode() for k in range(5))
+
+
+def header_op(tok):
+    """The id of <NK>, or None if the tokenizer has no header."""
+    return tok.lookup.get(HEADER_PIECE)
+
+
+def silent_ids(tok):
+    """Every engine piece the tokenizer carries: the name opcodes, the header
+    and the reserved registers. The cartridge prints none of them as text."""
+    return {tok.lookup[p] for p in NAME_PIECES + (HEADER_PIECE,) + RESERVED_PIECES
+            if p in tok.lookup}
+
+
 def main():
     BLOBS.mkdir(parents=True, exist_ok=True)
     m = Model5(CKPT)
@@ -446,6 +468,8 @@ def main():
     assert len(tok.vocab) == c.vocab, (
         f"{CKPT.name} has {c.vocab} pieces, the tokenizer {len(tok.vocab)}")
     ops = name_ops(tok) if CHAT else None
+    nk = header_op(tok) if ops else None
+    silent = silent_ids(tok) if ops else set()
     print(f"calibrating {CKPT.name}...", flush=True)
     sites = twin5.calibrate5(m, tok, cal_prompts())
     q = twin5.quantize5(m, sites)
@@ -832,8 +856,9 @@ def main():
             piece = bytes([int(mm.group(1), 16)])
         elif i == BOS:
             piece = b"\n"
-        elif ops and i in ops:
-            piece = b""             # PrintToken acts on these; it never prints them
+        elif i in silent:
+            piece = b""             # PrintToken acts on the name opcodes; the
+                                    # header and the registers print nothing
         offsets.append(len(pieces))
         pieces += bytes([len(piece)]) + piece
     # One banked blob: the offset table first (VOCAB words), the pieces
@@ -896,6 +921,9 @@ def main():
         const("TOK_SN", ops[0])
         const("TOK_N", ops[1])
         const("NAME_MAX", NAME_MAX)
+        if nk is not None:
+            assert nk > nl, "the header must not end a turn"
+            const("TOK_NK", nk)
 
     prompt_tokens = tok.encode(PROMPT)
     blob("prompt", np.array(prompt_tokens, dtype="<u2").tobytes())

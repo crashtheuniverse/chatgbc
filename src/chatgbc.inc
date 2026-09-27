@@ -105,6 +105,18 @@ DEF LAB_GO_ENCC EQU $E3
 ; Builds with the name opcodes (src/name.asm): <SN>'s capture alone - the last
 ; word of wPromptText into wName - for py/tests/test_rei_name.py.
 DEF LAB_GO_NAME EQU $E4
+; Chat builds: a turn's input as the cartridge makes it - Chat_Stage on the
+; line in wPromptText, Encode or EncodeCont by wChatStarted, then the header
+; (<NK> when wName holds a name) - for py/tests/test_rei_header.py.
+DEF LAB_GO_STAGE EQU $E5
+
+; After a chat turn is encoded: the header token, in a build whose tokenizer
+; has one (src/name.asm, Name_Header). Nothing is assembled without it.
+MACRO CHAT_HEADER
+IF DEF(TOK_NK)
+    call Name_Header
+ENDC
+ENDM
 
 ; --- Input -----------------------------------------------------------------
 ; Joy_Read returns the d-pad in the high nibble and buttons in the low one.

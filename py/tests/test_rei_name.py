@@ -274,6 +274,22 @@ def test_she_says_it_a_turn_later(talk):
     assert name_in_rom(talk.rom) == slot("tom")
 
 
+def test_the_turn_after_a_name_has_the_header(talk):
+    """The cartridge's own staging of the turn just sent: the continuation
+    with <NK> after the newline, where the tokenizer has it (src/name.asm,
+    Name_Header; golden5.staged_ids)."""
+    import rei_topics
+    r = talk.rom
+    n = r.read("wTokCount")[0]
+    buf = r.read("wTokBuf", 2 * n)
+    got = [buf[2 * i] | (buf[2 * i + 1] << 8) for i in range(n)]
+    text = rei_topics.TOPICS[1][1][2]
+    assert got == golden5.staged_ids(talk.tok, text, False, "tom")
+    nk = export5.header_op(talk.tok)
+    if nk is not None:
+        assert got[:2] == [talk.tok.lookup[b"\n"], nk] and DEFS["TOK_NK"] == nk
+
+
 def test_a_line_without_letters_leaves_it(talk):
     want = type_and_send(talk, "?!", (SN, N))
     assert want.startswith("tom") and talk.st.name == "tom"

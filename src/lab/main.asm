@@ -43,7 +43,12 @@ Run::
     jr z, .enc
 IF DEF(NAME_OPS)
     cp LAB_GO_NAME
-    jr z, .name
+    jp z, .name                 ; past the loop's end, so the jr's below
+                                ; stay in range
+ENDC
+IF CHAT_MODE
+    cp LAB_GO_STAGE
+    jp z, .stage
 ENDC
 IF CLS_TERNARY
     cp LAB_GO_CLS
@@ -99,14 +104,6 @@ ENDC
     call Encode_Timed
     jr .done
 
-IF DEF(NAME_OPS)
-.name                           ; <SN>'s capture alone, on wPromptText as written
-    xor a
-    ld [wLabState], a
-    call Name_Store
-    jr .done
-ENDC
-
 .norm                           ; one kernel, on the vector the harness wrote
     xor a
     ld [wLabState], a
@@ -140,6 +137,25 @@ ENDC
     or a                        ; (whichever entry it asked for)
     jr nz, .held
     jp .idle
+
+IF DEF(NAME_OPS)
+.name                           ; <SN>'s capture alone, on wPromptText as written
+    xor a
+    ld [wLabState], a
+    call Name_Store
+    jr .done
+ENDC
+
+IF CHAT_MODE
+.stage                          ; a turn's input: the typed line in wPromptText,
+    xor a                       ; wChatStarted (and wName) as the harness set
+    ld [wLabState], a           ; them -> wTokBuf / wTokCount
+    call Chat_Stage
+    ld a, [wChatStarted]
+    call Encode_Timed
+    CHAT_HEADER
+    jr .done
+ENDC
 
 Lab_DefaultPrompt:
     ld hl, sLabPrompt

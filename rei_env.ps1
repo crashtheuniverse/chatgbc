@@ -2,7 +2,7 @@
 #
 # The checkpoint is models/rei.bin. Its tokenizer follows its vocabulary: a
 # 1,024-piece Rei is trained on models/tok_rei1024.bin, the release tokenizer,
-# which carries the name opcodes <SN> and <N> (src/name.asm); a 512-piece one
+# which carries the name opcodes <SN> and <N> and the header <NK> (src/name.asm); a 512-piece one
 # (v1.0.0's) on models/tok_rei.bin. py/export5.py refuses a pair that differs
 # in size.
 #

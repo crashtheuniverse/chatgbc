@@ -16,6 +16,7 @@ import numpy as np
 APP = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import export5                    # noqa: E402  (CKPT + cal_prompts)
+import header                     # noqa: E402  (header_tokens: the staged turn)
 import twin5                      # noqa: E402
 import quant as Q                 # noqa: E402  (pick_token - same decode rule)
 from model5 import Model5, Tokenizer, EOS   # noqa: E402
@@ -56,7 +57,20 @@ def speak(tok, st, token, prev, line):
         return ""
     if ops and token == ops[1]:
         return st.name
+    if ops and token in export5.silent_ids(tok):
+        return ""                 # the header and the registers print nothing
     return tok.decode(token, prev)
+
+
+def staged_ids(tok, text, first, name):
+    """The ids the cartridge feeds for the player's turn `text` (Chat_Stage,
+    the encoder, Name_Header): "> text(nl)" behind BOS and the dummy space on
+    a first turn, "(nl)> text(nl)" on a later one, and <NK> as the second id
+    while the name slot `name` is not empty - in a chat build whose tokenizer
+    has the header (export5.header_op). header.header_tokens is the rule."""
+    known = (bool(name) and export5.CHAT and export5.name_ops(tok) is not None
+             and export5.header_op(tok) is not None)
+    return header.header_tokens(not first, known, text, tok)
 
 
 def chat_turn(q, tok, st, text, first, steps=48, force=(), record=None):
@@ -65,7 +79,8 @@ def chat_turn(q, tok, st, text, first, steps=48, force=(), record=None):
     `st` carries the recurrent state from turn to turn, and the name slot. The
     first turn is "> text(nl)" behind BOS; a later one is "(nl)> text(nl)" with
     no BOS and no dummy prefix (EncodeCont), its leading newline being the
-    token the last reply stopped on. Returns the text of the model-chosen
+    token the last reply stopped on; while the slot holds a name, <NK> is the
+    turn's second token (staged_ids). Returns the text of the model-chosen
     tokens only - what the Rei screen puts in her pane - the stop token's
     piece included, and a name opcode expanded as the engine does it (speak).
 
@@ -79,10 +94,7 @@ def chat_turn(q, tok, st, text, first, steps=48, force=(), record=None):
     a forced token is hers - history, turn end, what it prints. `record`, a
     list, receives her token ids.
     """
-    if first:
-        ids = tok.encode("> " + text + "\n")
-    else:
-        ids = tok.encode("\n> " + text + "\n", bos=False, prefix=False)
+    ids = staged_ids(tok, text, first, st.name)
     token, own, said, prev = ids[0], [], "", None
     for pos in range(steps):
         logits = twin5.forward_q5(q, st, token)

@@ -30,8 +30,13 @@
 ; and <N> when it wants to (py/tests/test_rei_name.py; golden5.chat_turn's
 ; `force`). Zero cost while it is empty: one test a model-chosen token.
 ;
+; The header (Name_Header, with a tokenizer that has <NK>): the model cannot
+; hold "a name was given" in its state, so while the slot holds a name every
+; player turn is fed with <NK> as its second token (py/header.py is the rule
+; the corpus, the twin and this share).
+;
 ; Cost: 136 bytes of ROM0 here and 23 in PrintToken and Generate, 30 bytes of
-; WRAM0.
+; WRAM0; the header 45 more here and 3 at each of the cartridge's four encodes.
 
 INCLUDE "hardware.inc"
 INCLUDE "chatgbc.inc"
@@ -154,6 +159,53 @@ Name_Forced::
     ld a, [hl]
     ld [wBestTok + 1], a
     ret
+
+IF DEF(TOK_NK)
+; The header. She cannot hold "a name was given" across a conversation in her
+; state, so the engine tells her every turn: while the slot holds a name,
+; the player's turn starts with <NK>. It is the turn's second token - after
+; BOS on a first turn, after the newline her last reply stopped on on a
+; continuation - and right before the tokens of "> ", which is where her
+; training corpus puts it (golden5.staged_ids, py/header.py). Called after
+; the encoder: no piece joins BOS or the newline to anything, so the tokens
+; either side are the ones a separate encode gives, and it is forced like
+; every prompt token. An empty slot: no header, the turn as before.
+Name_Header::
+    ld a, [wName]
+    or a
+    ret z
+    ld a, [wTokCount]               ; n >= 1: BOS or the newline is always there
+    ld e, a
+    ld d, 0
+    ld hl, wTokBuf
+    add hl, de
+    add hl, de                      ; hl = one past the last token
+    ld d, h
+    ld e, l
+    inc de
+    inc de                          ; de = the same, a token further on
+    dec a
+    jr z, .put
+    add a, a                        ; the n - 1 tokens after the first, moved
+    ld c, a                         ; up one slot, back to front
+.move
+    dec hl
+    dec de
+    ld a, [hl]
+    ld [de], a
+    dec c
+    jr nz, .move
+.put
+    ld hl, wTokBuf + 2
+    ld a, LOW(TOK_NK)
+    ld [hl+], a
+    ld [hl], HIGH(TOK_NK)
+    ld hl, wTokCount
+    inc [hl]
+    ret
+
+ASSERT PROMPT_MAX + 3 <= TOK_MAX, "BOS, the dummy space, the line and the header fit wTokBuf"
+ENDC
 
 ASSERT HIGH(TOK_SN) == HIGH(TOK_N), "PrintToken compares the high byte once"
 ASSERT NAME_MAX >= 1 && NAME_MAX <= 255 && PROMPT_MAX < 256, "byte counts"
