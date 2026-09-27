@@ -4,11 +4,8 @@
 $ErrorActionPreference = 'Stop'
 Push-Location $PSScriptRoot
 $python = Join-Path $PSScriptRoot '.venv/Scripts/python.exe'
-$chat = @{
-    CHATGBC_CHAT      = '1'
-    PIP5              = (Join-Path $PSScriptRoot 'models/rei.bin')
-    CHATGBC_TOKENIZER = (Join-Path $PSScriptRoot 'models/tok_rei.bin')
-}
+. (Join-Path $PSScriptRoot 'rei_env.ps1')
+$chat = Get-ReiEnv $PSScriptRoot         # what build.ps1 -Rei exports
 try {
     Write-Host '--- story ---'
     # Whatever an interrupted run left behind, start from the story export.

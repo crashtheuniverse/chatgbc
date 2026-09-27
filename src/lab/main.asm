@@ -41,6 +41,10 @@ Run::
     jr z, .enc
     cp LAB_GO_ENCC
     jr z, .enc
+IF DEF(NAME_OPS)
+    cp LAB_GO_NAME
+    jr z, .name
+ENDC
 IF CLS_TERNARY
     cp LAB_GO_CLS
     jr z, .cls
@@ -94,6 +98,14 @@ ENDC
     pop af
     call Encode_Timed
     jr .done
+
+IF DEF(NAME_OPS)
+.name                           ; <SN>'s capture alone, on wPromptText as written
+    xor a
+    ld [wLabState], a
+    call Name_Store
+    jr .done
+ENDC
 
 .norm                           ; one kernel, on the vector the harness wrote
     xor a

@@ -8,15 +8,14 @@
 # src/model.inc and src/weights.asm are back in story form and `git status`
 # is clean. -Keep skips that last step and leaves the tree (and build/blobs)
 # in chat form, which the Rei test suite needs; test.ps1 restores it.
+# The chat checkpoint and its tokenizer: rei_env.ps1 (models/rei.bin, or
+# $env:REI_PIP5 / $env:REI_TOKENIZER).
 param([switch]$Quiet, [switch]$Lab, [switch]$Census, [switch]$Rei, [switch]$Keep)
 $ErrorActionPreference = 'Stop'
 $root  = $PSScriptRoot
 $python = Join-Path $root '.venv/Scripts/python.exe'
-$chatEnv = @{
-    CHATGBC_CHAT      = '1'
-    PIP5              = (Join-Path $root 'models/rei.bin')
-    CHATGBC_TOKENIZER = (Join-Path $root 'models/tok_rei.bin')
-}
+. (Join-Path $root 'rei_env.ps1')
+$chatEnv = Get-ReiEnv $root
 function Export-Model {
     Push-Location $root
     try {

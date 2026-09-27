@@ -339,6 +339,10 @@ def route(q, l, xf):
 class QState5:
     def __init__(self, cfg):
         self.h = np.zeros((cfg.layers, cfg.dim), dtype=np.int64)
+        # The engine's name slot (src/name.asm; golden5.chat_turn): what <SN>
+        # stored and <N> prints. The model never reads it; it is kept here
+        # because it is part of a conversation, as the ROM keeps it beside wH.
+        self.name = ""
 
 
 def forward_q5(q, st, token):

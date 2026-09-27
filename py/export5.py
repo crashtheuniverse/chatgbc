@@ -417,11 +417,35 @@ def cal_prompts(n=6):
     return [s[:600] for s in stories[:n]]
 
 
+# The name opcodes. A tokenizer that carries both
+# pieces - Rei's 1024-piece release tokenizer, as its last two ids - switches
+# the feature on: the model chooses <SN> and the engine stores the last word of
+# the player's line in a slot, it chooses <N> and the engine prints the slot
+# (src/name.asm; golden5.capture_name and chat_turn on the twin). Neither piece
+# can come out of the encoder - "<" is not a key, and the encoder only makes a
+# piece from what was typed - so only the model ever produces them. Without
+# both (the story tokenizer, Rei's 512) nothing of it is assembled.
+NAME_PIECES = (b"<SN>", b"<N>")
+NAME_MAX = 12               # letters the slot keeps
+
+
+def name_ops(tok):
+    """(id of <SN>, id of <N>) if the tokenizer carries both, else None."""
+    ids = [tok.lookup.get(p) for p in NAME_PIECES]
+    return None if None in ids else tuple(ids)
+
+
 def main():
     BLOBS.mkdir(parents=True, exist_ok=True)
     m = Model5(CKPT)
     tok = Tokenizer()
     c = m.cfg
+    # A tokenizer of another size would not fail anywhere loudly: the
+    # detokenizer and the encoder would be built for it and the classifier for
+    # the checkpoint, and the text would just be wrong.
+    assert len(tok.vocab) == c.vocab, (
+        f"{CKPT.name} has {c.vocab} pieces, the tokenizer {len(tok.vocab)}")
+    ops = name_ops(tok) if CHAT else None
     print(f"calibrating {CKPT.name}...", flush=True)
     sites = twin5.calibrate5(m, tok, cal_prompts())
     q = twin5.quantize5(m, sites)
@@ -808,6 +832,8 @@ def main():
             piece = bytes([int(mm.group(1), 16)])
         elif i == BOS:
             piece = b"\n"
+        elif ops and i in ops:
+            piece = b""             # PrintToken acts on these; it never prints them
         offsets.append(len(pieces))
         pieces += bytes([len(piece)]) + piece
     # One banked blob: the offset table first (VOCAB words), the pieces
@@ -861,6 +887,15 @@ def main():
     const("TOK_BOS", BOS)
     const("TOK_EOS", EOS)
     const("TOK_SPACE", tok.lookup[b" "])
+    if ops:
+        # Only here: a model.inc without them assembles no name code at all,
+        # so the story build's stays what it was, byte for byte.
+        assert ops[0] >> 8 == ops[1] >> 8, "PrintToken tests the two ids' high byte once"
+        assert min(ops) > (nl if nl is not None else 3), "an opcode must not end a turn"
+        const("NAME_OPS", 1)
+        const("TOK_SN", ops[0])
+        const("TOK_N", ops[1])
+        const("NAME_MAX", NAME_MAX)
 
     prompt_tokens = tok.encode(PROMPT)
     blob("prompt", np.array(prompt_tokens, dtype="<u2").tobytes())

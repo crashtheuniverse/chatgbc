@@ -116,6 +116,24 @@ def log_rows(lines):
     return out
 
 
+MOOD_CALM, MOOD_HAPPY, MOOD_CURIOUS, MOOD_SAD = range(4)   # src/app/rei.inc
+
+
+def mood_of(text):
+    """Python's copy of ReiFace_Scan (src/app/rei_face.asm): the mood her
+    words give - "forget", "sorry" or "sad" anywhere, else a '!', else a '?',
+    else calm. `text` is her reply as the ROM keeps it (wReiReply: no
+    newline, at most 96 characters)."""
+    text = text.replace("\n", "")[:96]
+    if any(w in text for w in ("forget", "sorry", "sad")):
+        return MOOD_SAD
+    if "!" in text:
+        return MOOD_HAPPY
+    if "?" in text:
+        return MOOD_CURIOUS
+    return MOOD_CALM
+
+
 def log_screen(r):
     """The log screen's text rows, as (who, text); who from the row's palette."""
     rows = []

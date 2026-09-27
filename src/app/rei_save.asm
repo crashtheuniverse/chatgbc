@@ -16,6 +16,13 @@
 ;          N_LAYERS * DIM   wH, the model's recurrent state - its whole memory
 ;          8 * 97           her last eight replies, as text
 ;          64 * 19          the log: a who byte and 18 tiles a line
+;          NAME_MAX         wName, the name slot (src/name.asm): version 2,
+;                           the builds with the name opcodes
+;
+; Version 2 only appends the slot, so a version 1 body is a version 2 body
+; without its tail. A version 1 save is still accepted - checked over its own
+; length, loaded, and continued with an empty slot ("no name") - and the next
+; exchange writes it back as version 2.
 ;
 ; wH, wAbsPos and wChatStarted are all that Generate_Cont and EncodeCont carry
 ; from one exchange to the next: every other generator variable (wPrev, the
@@ -25,14 +32,16 @@
 ;
 ; The history and the log live in the image already; the WRAM0 variables are
 ; gathered into it before a save and scattered from it after a load, by one
-; table. A save clears the magic first and writes it last, so a save cut short
-; by the power switch is a save that does not exist. SRAM is enabled only
-; inside these routines, never from an interrupt, and the RAM bank register is
-; left at 0. rROMB0 is not touched: the forward pass's bank writes go to
-; $2000-$3FFF and cannot reach RAMG ($0000-$1FFF) or RAMB ($4000-$5FFF).
+; table (and the slot by a second, at the image's end). A save clears the magic
+; first and writes it last, so a save cut short by the power switch is a save
+; that does not exist. SRAM is enabled only inside these routines, never from
+; an interrupt, and the RAM bank register is left at 0. rROMB0 is not touched:
+; the forward pass's bank writes go to $2000-$3FFF and cannot reach RAMG
+; ($0000-$1FFF) or RAMB ($4000-$5FFF).
 ;
-; Cost: nothing in ROM0; about 290 bytes of the UI bank, 5 bytes of WRAM0,
-; 2,195 bytes of WRAM bank 2 and 2,201 of the cartridge's 8,192 of SRAM.
+; Cost: nothing in ROM0; about 340 bytes of the UI bank, 7 bytes of WRAM0,
+; 2,207 bytes of WRAM bank 2 and 2,213 of the cartridge's 8,192 of SRAM
+; (2,195 and 2,201 without the slot).
 
 IF DEF(REI_UI)
 
@@ -41,7 +50,11 @@ INCLUDE "chatgbc.inc"
 INCLUDE "model.inc"
 INCLUDE "app/rei.inc"
 
+IF DEF(NAME_OPS)
+DEF SAVE_VERSION EQU 2
+ELSE
 DEF SAVE_VERSION EQU 1
+ENDC
 DEF SAVE_SEED    EQU $5A17          ; so that an all-zero body does not sum to zero
 DEF SAVE_VARS    EQU 2 + 2 + 1 + 1 + 1 + 1 + 1 + 1 + 1   ; ReiSaveTable, less wH
 
@@ -49,6 +62,7 @@ SECTION "Rei save state", WRAM0
 wReiVisits:: dw
 wReiLines::  dw
 wReiSaveOut: db                     ; ReiSave_Move's direction
+wReiSaveLen: dw                     ; the body ReiSave_Check accepted: its length
 
 SECTION "Rei save image", WRAMX[$D000], BANK[REI_HIST_BANK]
 wReiImage::
@@ -56,8 +70,13 @@ wReiImgVars: ds SAVE_VARS
 wReiImgH:    ds N_LAYERS * DIM
 wReiHist::   ds REI_HIST * (REI_REPLY_MAX + 1)
 wReiLog::    ds REI_LOG_LINES * REI_LOG_SLOT
+wReiImageV1:                        ; where a version 1 body ends
+IF DEF(NAME_OPS)
+wReiImgName: ds NAME_MAX
+ENDC
 wReiImageEnd:
 DEF SAVE_BODY EQU wReiImageEnd - wReiImage
+DEF SAVE_BODY_V1 EQU wReiImageV1 - wReiImage
 
 SECTION "Rei cartridge RAM", SRAM[$A000], BANK[0]
 sReiMagic: ds 4
@@ -93,11 +112,28 @@ ReiSaveTable:
     dw 0
 ASSERT N_LAYERS * DIM < 256, "the table's lengths are bytes"
 
+IF DEF(NAME_OPS)
+; The same for the image's tail, from wReiImgName.
+ReiSaveTail:
+    dw wName
+    db NAME_MAX
+    dw 0
+ENDC
+
 ; a = 0: WRAM0 -> image. a = 1: image -> WRAM0. The image's bank must be mapped.
 ReiSave_Move:
     ld [wReiSaveOut], a
     ld de, wReiImage
     ld hl, ReiSaveTable
+IF DEF(NAME_OPS)
+    call ReiSave_Walk
+    ld de, wReiImgName
+    ld hl, ReiSaveTail
+ENDC
+    ; fall through
+
+; One table: hl = its entries, de = where they start in the image.
+ReiSave_Walk:
 .entry
     ld a, [hl+]
     ld c, a
@@ -126,10 +162,10 @@ ReiSave_Move:
     pop hl
     jr .entry
 
-; de = the checksum of the body in SRAM. SRAM must be enabled.
+; bc = a body length -> de = the checksum of that much of the body in SRAM.
+; SRAM must be enabled.
 ReiSave_Sum:
     ld hl, sReiBody
-    ld bc, SAVE_BODY
     ld de, SAVE_SEED
 .loop
     ld a, [hl+]
@@ -168,6 +204,7 @@ ReiSave_Write::
     ld de, sReiBody
     ld bc, SAVE_BODY
     call CopyBytes
+    ld bc, SAVE_BODY
     call ReiSave_Sum
     ld a, e
     ld [sReiSum + 0], a
@@ -182,12 +219,13 @@ ReiSave_Write::
     ldh [rSVBK], a
     ret
 
-; Carry set if the cartridge holds a whole save of this version.
+; Carry set if the cartridge holds a whole save this build can load: this
+; version, or with the name slot, version 1. wReiSaveLen = its body's length.
 ReiSave_Check::
     call ReiSave_Open
     ld hl, ReiSaveMagic
     ld de, sReiMagic
-    ld b, 4
+    ld b, 3
 .magic
     ld a, [de]
     cp [hl]
@@ -196,6 +234,21 @@ ReiSave_Check::
     inc de
     dec b
     jr nz, .magic
+    ld a, [de]                      ; the version
+    ld bc, SAVE_BODY
+    cp SAVE_VERSION
+    jr z, .sum
+IF DEF(NAME_OPS)
+    ld bc, SAVE_BODY_V1
+    cp 1
+    jr z, .sum
+ENDC
+    jr .none
+.sum
+    ld a, c
+    ld [wReiSaveLen + 0], a
+    ld a, b
+    ld [wReiSaveLen + 1], a
     call ReiSave_Sum
     ld a, [sReiSum + 0]
     cp e
@@ -215,10 +268,22 @@ ReiSave_Check::
 ReiSave_Load::
     ld a, REI_HIST_BANK
     ldh [rSVBK], a
+IF DEF(NAME_OPS)
+    ld hl, wReiImgName              ; a version 1 body stops short of the slot
+    ld b, NAME_MAX
+    xor a
+.clear
+    ld [hl+], a
+    dec b
+    jr nz, .clear
+ENDC
     call ReiSave_Open
     ld hl, sReiBody
     ld de, wReiImage
-    ld bc, SAVE_BODY
+    ld a, [wReiSaveLen + 0]
+    ld c, a
+    ld a, [wReiSaveLen + 1]
+    ld b, a
     call CopyBytes
     call ReiSave_Close
     ld a, 1                         ; scatter

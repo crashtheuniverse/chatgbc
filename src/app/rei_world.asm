@@ -72,6 +72,9 @@ SECTION "Rei world snapshot", WRAMX, BANK[REI_SNAP_BANK]
 wSnapH:       ds N_LAYERS * DIM
 wSnapAbsPos:  db
 wSnapStarted: db
+IF DEF(NAME_OPS)
+wSnapName:    ds NAME_MAX           ; a thought may store a name; it is put back too
+ENDC
 
 SECTION "Rei world", ROMX, BANK[REI_WORLD_BANK]
 
@@ -463,6 +466,12 @@ ReiWorld_Restore:
     ld [wAbsPos], a
     ld a, [wSnapStarted]
     ld [wChatStarted], a
+IF DEF(NAME_OPS)
+    ld hl, wSnapName
+    ld de, wName
+    ld bc, NAME_MAX
+    call CopyBytes
+ENDC
     ld a, 1
     ldh [rSVBK], a
     xor a
@@ -487,6 +496,12 @@ ReiWorld_Muse::
     ld [wSnapAbsPos], a
     ld a, [wChatStarted]
     ld [wSnapStarted], a
+IF DEF(NAME_OPS)
+    ld hl, wName
+    ld de, wSnapName
+    ld bc, NAME_MAX
+    call CopyBytes
+ENDC
     ld a, 1
     ldh [rSVBK], a
     ld [wWorldSnap], a

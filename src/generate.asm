@@ -50,6 +50,19 @@ SECTION "Generate code", ROM0
 
 ; Prints one token's text. llama2.c strips the space that follows BOS.
 PrintToken::
+IF DEF(NAME_OPS)
+    ; The name opcodes are the engine's to act on (src/name.asm). Their pieces
+    ; are empty in vocab_data besides, so nothing could print "<SN>".
+    ld a, [wToken + 1]
+    cp HIGH(TOK_SN)
+    jr nz, .piece
+    ld a, [wToken + 0]
+    cp LOW(TOK_SN)
+    jp z, Name_Store
+    cp LOW(TOK_N)
+    jp z, Name_Say
+.piece
+ENDC
     ld a, BANK(vocab_data)          ; offsets and pieces share the bank
     ld [rROMB0], a
     ld a, [wToken + 0]              ; offset table is indexed by token * 2
@@ -108,6 +121,9 @@ Generate::
     ld a, b
     or c
     jr nz, .zeroState
+IF DEF(NAME_OPS)
+    call Name_Clear                 ; nobody has said who they are yet
+ENDC
     xor a
     ld [wGenCount], a
 IF CHAT_MODE
@@ -198,6 +214,9 @@ ENDC
 .useModel
     ld a, 1
     ld [wFromModel], a
+IF DEF(NAME_OPS)
+    call Name_Forced                ; the suite's hook; nothing while it is empty
+ENDC
 .picked
 
     ld a, [wBestTok + 1]            ; stop at EOS

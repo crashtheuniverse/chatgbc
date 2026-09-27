@@ -102,6 +102,9 @@ DEF LAB_GO_SHIFT EQU $E1
 ; ($E3) - timed into wEncCycles, for py/tests/test_encoder_rei.py.
 DEF LAB_GO_ENC  EQU $E2
 DEF LAB_GO_ENCC EQU $E3
+; Builds with the name opcodes (src/name.asm): <SN>'s capture alone - the last
+; word of wPromptText into wName - for py/tests/test_rei_name.py.
+DEF LAB_GO_NAME EQU $E4
 
 ; --- Input -----------------------------------------------------------------
 ; Joy_Read returns the d-pad in the high nibble and buttons in the low one.

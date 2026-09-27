@@ -38,11 +38,15 @@ PANE = {(x, y) for x in range(7, 19) for y in range(1, 8)}
 FACE = {(x, y) for x in range(1, 5) for y in range(1, 5)}
 MOOD = {(x, y) for x in range(0, 6) for y in range(6, 9)}
 MARKER = {(x, 8) for x in range(13, 18)}
-SAVE_BODY = 11 + 192 + 8 * 97 + 64 * 19        # src/app/rei_save.asm: 2,195 bytes
+# src/app/rei_save.asm: 2,195 bytes, and the name slot's twelve with the name
+# opcodes (version 2)
+NAME_OPS = "NAME_OPS" in harness.load_defs(APP / "src" / "model.inc")
+SAVE_BODY = 11 + 192 + 8 * 97 + 64 * 19 + (12 if NAME_OPS else 0)
+MAGIC = b"REI" + bytes([2 if NAME_OPS else 1])
 
 
 import rei_topics                 # noqa: E402
-from rei_talk import Talk, twin   # noqa: E402,F401  (twin is a fixture)
+from rei_talk import Talk, measured, twin   # noqa: E402,F401  (twin is a fixture)
 
 
 @pytest.fixture(scope="module")
@@ -236,8 +240,9 @@ def test_hello_lands_in_the_pane_only(talk):
 
     assert talk.rom_reply() == want
     assert ui.pane(r) == ui.layout(want)
-    assert "rei" in want
-    assert r.read("wReiMood")[0] == HAPPY          # "hello!"
+    assert r.read("wReiMood")[0] == ui.mood_of(want)
+    if measured():
+        assert "rei" in want and ui.mood_of(want) == HAPPY     # "hello! i am rei."
     assert ui.face_shown(r) in (0, 1)
     assert ui.row_text(r, 10, 1, 19).rstrip() == "hello", "the prompt row shows what A would send"
 
@@ -245,7 +250,8 @@ def test_hello_lands_in_the_pane_only(talk):
 def test_the_state_carries(talk):
     talk.send(1, 0)                                 # me: "my name is tom"
     want = talk.send(1, 2)                          # "what is my name": a follow-up, same topic
-    assert "tom" in want, "she forgot the name"
+    if measured():
+        assert "tom" in want, "she forgot the name"
     talk.send(5, 7)                                 # play, second page: "tell me a story"
 
 
@@ -313,8 +319,13 @@ def bg_palette(r, slot):
 
 def test_the_log_shows_both_sides(talk):
     r = talk.rom
-    talk.send(2, 8)                                 # "do you dream": enough rows to scroll
-    rows = ui.log_rows(talk.lines)
+    # "do you dream", and more of the rei topic until the log has rows to
+    # scroll - how many that takes is up to the model
+    for line in (8, 9, 1, 3, 5, 6):
+        talk.send(2, line)
+        rows = ui.log_rows(talk.lines)
+        if len(rows) > ui.LOG_H:
+            break
     assert len(rows) > ui.LOG_H
     main = ui.tilemap(r)
     attrs = bytes(r.pyboy.memory[1, 0x9800:0x9800 + 18 * 32])
@@ -375,7 +386,7 @@ def saved(twin):
 
 def test_a_save_is_written(saved):
     sram, _ = saved
-    assert sram[:4] == b"REI\x01"
+    assert sram[:4] == MAGIC
     body = sram[6:6 + SAVE_BODY]
     assert int.from_bytes(sram[4:6], "little") == (0x5A17 + sum(body)) & 0xFFFF
     assert body[0:2] == b"\x01\x00" and body[2:4] == b"\x01\x00", "one visit, one line"
@@ -401,7 +412,8 @@ def test_continue_is_exact(saved, twin):
     assert r.read("wChatStarted")[0] == 1
     assert ui.pane(r) == ui.layout(t.said[0]), "her last reply is back in the pane"
     want = t.send(1, 2)                             # "what is my name"
-    assert "tom" in want
+    if measured():
+        assert "tom" in want
 
     ui.press(r, "start", after=12)                  # and the log has all of it
     assert ui.log_screen(r)[:len(ui.log_rows(t.lines))] == ui.log_rows(t.lines)
@@ -465,7 +477,7 @@ def test_new_friend_forgets(saved):
     assert ui.row_text(r, 9).strip() == "forget everything?"
     ui.press(r, "b")                                # no
     assert ui.row_text(r, 10).strip() == "# new friend"
-    assert r.sram()[:4] == b"REI\x01"
+    assert r.sram()[:4] == MAGIC
     ui.press(r, "a")
     ui.press(r, "a", after=60)                      # yes
     assert r.sram()[0] == 0, "the save is gone from the cartridge"
