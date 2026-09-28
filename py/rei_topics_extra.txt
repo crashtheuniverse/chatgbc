@@ -1,0 +1,256 @@
+# Hand-written candidates for the topic tree, reviewed beside the pool
+# (py/rei_topics_pool.txt): `review CHECKPOINT --pool py/rei_topics_pool.txt
+# py/rei_topics_extra.txt`. Written for Rei v1 (friend5c) when the pool's own
+# lines left food, things and feeling short of six that make sense in all four
+# conversations: the forms her corpus answers best ("i like X", "what about X"
+# with an echo), and the questions her banks answer. The same shape rules as
+# the pool: lower case, no "?", the prompt row, no name given.
+
+== hello
+hello there
+nice to meet you
+
+== me
+i like cats
+i love dogs
+i like pizza
+
+== rei
+what are you
+are you happy
+
+== feeling
+i am sad
+i feel sad
+i feel happy
+i feel good
+i am good
+i feel great
+i am great
+i am sick
+i feel sick
+i am bored
+i am hungry
+i feel sleepy
+i am sleepy
+i am lonely
+i feel ok
+i feel bad
+i feel silly
+i feel proud
+
+== sky
+it is raining
+is it raining
+the sun is out
+it is windy
+it is snowing
+look at the stars
+i see the stars
+the sky is blue
+i like the rain
+i like the sun
+i see a cloud
+look at the sea
+the sea is big
+is it sunny
+it is hot today
+it is a nice day
+
+== play
+let us play a game
+play with me
+let us play i spy
+
+== food
+i like soup
+i love cake
+i like cake
+i like honey
+i love pie
+i like apples
+i like cookies
+i love cookies
+i like pizza too
+i like pears
+i like bread
+i like cheese
+i like rice
+i like jam
+i like milk
+i like tea
+i love candy
+i like peas
+are you hungry
+do you eat
+i am hungry now
+do you like soup
+do you like pizza
+what about cake
+what about pie
+what about tea
+what about cheese
+what about cookies
+what about apples
+i ate an apple
+i made a cake
+
+== animals
+i like horses
+i love bunnies
+i like owls
+i like ducks
+i like penguins
+i like zebras
+i like birds
+i love cats
+what about cats
+what about horses
+what about zebras
+what about crabs
+do you like crabs
+do you like birds
+do you like dogs
+do you like owls
+i saw a bird
+i saw a cat
+i have a dog
+i have a cat
+do you have a pet
+
+== things
+i like books
+i love kites
+i like kites
+i like drums
+i like hats
+i like boats
+i like blocks
+i like trains
+i love clocks
+do you like kites
+do you like balls
+do you like clocks
+do you like trains
+do you like boats
+do you like hats
+what about books
+what about balls
+what about trains
+what about clocks
+i have a kite
+i have a ball
+i have a book
+i like red
+i love blue
+do you have toys
+do you have a ball
+
+== kind
+thank you rei
+thanks rei
+you are my friend
+you are sweet
+you are kind
+see you later
+i love you
+well done
+great job
+sorry rei
+i am sorry rei
+you are the best
+you are lovely
+i have to go now
+bye rei
+bye bye
+good night rei
+see you soon
+take care
+
+# v1.0.0s tree (py/rei_topics.py before Rei v1): its lines that neither the pool
+# nor the candidates above hold, so the review judges the tree it replaces too.
+
+== hello
+good morning
+how do you feel
+can you see me
+
+== me
+i love chess
+i like tag best
+i love gold
+
+== rei
+what is your name
+who are you
+where do you live
+who made you
+are you a robot
+do you dream
+can you think
+
+== feeling
+i am proud
+i feel excited
+i feel lonely
+i feel better now
+i am ok now
+
+== sky
+how is the weather
+it is sunny today
+the day is rainy
+the day is windy
+it is cold today
+the day is warm
+what can you see
+
+== play
+can we play
+let us play chess
+let us play tag
+let us play cards
+let us play catch
+can you run
+can you sing
+say something nice
+can you help me
+
+== food
+do you like cake
+what about honey
+what about soup
+what about jam
+what about rice
+what about bread
+what about peach
+what about plum
+
+== animals
+do you like cats
+what about dogs
+what about birds
+do you like horses
+do you like bears
+what about bunnies
+do you like ducks
+what about owls
+do you like fishes
+what about pigs
+
+== things
+do you like books
+what about boats
+what about kites
+what about bells
+what about drums
+what about hats
+do you like rocks
+what about cups
+do you like keys
+what about socks
+
+== kind
+i am sorry
+see you
+goodbye

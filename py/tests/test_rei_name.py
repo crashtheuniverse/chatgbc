@@ -312,7 +312,7 @@ def test_she_echoes_the_word_and_keeps_the_name(talk):
     assert want.startswith("sad") and talk.st.name == "tom"
     assert name_in_rom(r) == slot("tom")
     assert r.read("wReiMood")[0] == ui.mood_of(want) == ui.MOOD_SAD
-    want = talk.send(*where("do you like cats"), forced=(W, N))
+    want = talk.send(*where("i love cats"), forced=(W, N))
     assert want.startswith("catstom") and name_in_rom(r) == slot("tom")
     assert r.read("wReiMood")[0] == ui.mood_of(want)
     want = talk.type("?!", forced=(W, N))

@@ -20,7 +20,7 @@ ReiTopicNames::
     db "kind    "
 
 ReiTopicCounts::
-    db 8,8,10,10,10,10,10,10,10,9
+    db 10,10,10,10,10,10,10,10,9,10
 
 ReiTopicLists::
     dw .t0
@@ -36,115 +36,119 @@ ReiTopicLists::
 .t0 ; hello
     db "hello", 0
     db "hi there", 0
-    db "good morning", 0
     db "hey", 0
+    db "good morning", 0
+    db "good evening", 0
     db "how are you", 0
     db "are you ok", 0
     db "how do you feel", 0
     db "can you see me", 0
+    db "i am back", 0
     db 0
 .t1 ; me
     db "what is my name", 0
     db "who am i", 0
+    db "what am i called", 0
     db "do you remember me", 0
     db "say my name", 0
     db "i love chess", 0
-    db "i like tag best", 0
     db "i love gold", 0
-    db "what do i like", 0
+    db "i like balls", 0
+    db "i like starfish", 0
+    db "i like pizza", 0
     db 0
 .t2 ; rei
-    db "what is your name", 0
-    db "who are you", 0
     db "where do you live", 0
-    db "where are you", 0
     db "who made you", 0
-    db "are you real", 0
+    db "are you a person", 0
     db "are you a robot", 0
-    db "are you alive", 0
-    db "do you dream", 0
     db "can you think", 0
+    db "do you dream", 0
+    db "what do you know", 0
+    db "do you get bored", 0
+    db "can you hear me", 0
+    db "will you miss me", 0
     db 0
 .t3 ; feeling
     db "i am so happy", 0
+    db "i am excited", 0
     db "i am proud", 0
-    db "i feel excited", 0
-    db "i am a bit sad", 0
-    db "i feel lonely", 0
-    db "i am scared", 0
-    db "i am tired", 0
-    db "i feel cold", 0
+    db "i am fine", 0
+    db "i feel ok", 0
     db "i feel better now", 0
-    db "i am ok now", 0
+    db "i feel good", 0
+    db "very happy", 0
+    db "i am bored", 0
+    db "my day was bad", 0
     db 0
 .t4 ; sky
-    db "how is the weather", 0
     db "it is sunny today", 0
-    db "the day is rainy", 0
-    db "the day is windy", 0
-    db "it is cold today", 0
-    db "the day is warm", 0
-    db "is it dark outside", 0
+    db "is it sunny", 0
+    db "it is a nice day", 0
+    db "the sky is blue", 0
+    db "i like the sun", 0
+    db "i see a rainbow", 0
+    db "i see the stars", 0
+    db "the moon is out", 0
     db "is it night", 0
-    db "what can you see", 0
-    db "do you sleep", 0
+    db "where are you", 0
     db 0
 .t5 ; play
     db "can we play", 0
-    db "let us play chess", 0
+    db "play with me", 0
     db "let us play tag", 0
-    db "let us play cards", 0
-    db "let us play catch", 0
-    db "can you run", 0
-    db "can you sing", 0
+    db "let us play chess", 0
+    db "let us play i spy", 0
     db "tell me a story", 0
-    db "say something nice", 0
-    db "can you help me", 0
+    db "story time", 0
+    db "tell me a joke", 0
+    db "ask me a question", 0
+    db "talk to me", 0
     db 0
 .t6 ; food
-    db "do you like cake", 0
-    db "do you like pie", 0
-    db "what about honey", 0
+    db "what do you eat", 0
     db "what about soup", 0
-    db "what about jam", 0
-    db "what about rice", 0
-    db "what about bread", 0
-    db "what about peach", 0
-    db "what about plum", 0
-    db "do you like honey", 0
+    db "what about cookies", 0
+    db "do you like peas", 0
+    db "i like apples", 0
+    db "i like bread", 0
+    db "i like cheese", 0
+    db "i like pears", 0
+    db "i like rice", 0
+    db "i like tea", 0
     db 0
 .t7 ; animals
-    db "do you like cats", 0
-    db "what about dogs", 0
-    db "what about birds", 0
     db "do you like horses", 0
-    db "do you like bears", 0
-    db "what about bunnies", 0
-    db "do you like ducks", 0
-    db "what about owls", 0
-    db "do you like fishes", 0
-    db "what about pigs", 0
+    db "what about crabs", 0
+    db "what about zebras", 0
+    db "i have a cat", 0
+    db "i love cats", 0
+    db "i love bunnies", 0
+    db "i like birds", 0
+    db "i like ducks", 0
+    db "i like owls", 0
+    db "i like penguins", 0
     db 0
 .t8 ; things
+    db "do you have toys", 0
+    db "the playroom", 0
     db "do you like books", 0
-    db "what about boats", 0
-    db "what about kites", 0
-    db "what about bells", 0
-    db "what about drums", 0
-    db "what about hats", 0
-    db "do you like rocks", 0
-    db "what about cups", 0
-    db "do you like keys", 0
-    db "what about socks", 0
+    db "what about books", 0
+    db "do you like clocks", 0
+    db "what about clocks", 0
+    db "i like drums", 0
+    db "i like trains", 0
+    db "i love blue", 0
     db 0
 .t9 ; kind
-    db "thank you", 0
-    db "that is kind", 0
-    db "sorry", 0
-    db "i am sorry", 0
-    db "i did not mean it", 0
-    db "i have to go", 0
-    db "see you", 0
-    db "goodbye", 0
     db "bye", 0
+    db "bye bye", 0
+    db "goodbye", 0
+    db "i have to go", 0
+    db "good night", 0
+    db "you are funny", 0
+    db "you are lovely", 0
+    db "you are my friend", 0
+    db "i like you a lot", 0
+    db "you are weird", 0
     db 0

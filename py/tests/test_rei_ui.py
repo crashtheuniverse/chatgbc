@@ -196,11 +196,13 @@ def test_a_topic_opens_its_sentences(talk):
     assert r.read("wReiMode")[0] == 0 and r.read("wReiTopic")[0] == 2
     assert ui.row_text(r, 10, 1, 19).strip() == ""
 
-    ui.choose(r, 0, 0)                              # hello: eight sentences, two pages too
-    ui.choose(r, 9, 0)                              # kind: nine sentences, four on page 2
+    ui.choose(r, 0, 0)                              # hello: two pages too
+    short = [t for t, (_, lines) in enumerate(rei_topics.TOPICS) if 5 < len(lines) < 10]
+    assert short, "a topic whose second page is shorter than the first"
+    ui.choose(r, short[0], 0)                       # things: nine sentences, four on page 2
     ui.press_until(r, "down", lambda: r.read("wReiPick")[0] == 4)
     ui.press(r, "right")
-    assert r.read("wReiPick")[0] == 3, "the cursor stays on a sentence"
+    assert r.read("wReiPick")[0] == len(rei_topics.TOPICS[short[0]][1]) - 6,         "the cursor stays on a sentence"
     assert ui.row_text(r, 17, 1, 20).strip() == ""
     ui.press(r, "b")
 
@@ -252,7 +254,7 @@ def test_the_state_carries(talk):
     want = talk.send(*where("what is my name"))     # me: a follow-up
     if measured():
         assert "tom" in want, "she forgot the name"
-    talk.send(5, 7)                                 # play, second page: "tell me a story"
+    talk.send(*where("tell me a story"))            # play, second page
 
 
 def test_up_and_down_belong_to_the_list(talk):
@@ -324,7 +326,7 @@ def test_the_log_shows_both_sides(talk):
     r = talk.rom
     # "do you dream", and more of the rei topic until the log has rows to
     # scroll - how many that takes is up to the model
-    for line in (8, 9, 1, 3, 5, 6):
+    for line in (5, 6, 7, 1, 0, 4):
         talk.send(2, line)
         rows = ui.log_rows(talk.lines)
         if len(rows) > ui.LOG_H:

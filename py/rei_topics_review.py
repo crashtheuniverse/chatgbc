@@ -2,11 +2,13 @@
 for a reviewer to judge.
 
     python py/rei_topics_review.py review CHECKPOINT [--corpus FILE_OR_DIR ...]
+                                   [--pool FILE ...] [--sense SHEET.csv] [--out STEM]
     python py/rei_topics_review.py pool LEDGER_DIR --banks BANKS_DIR
 
 `review` loads CHECKPOINT on the integer twin (golden5.chat_turn, exactly as
 the cartridge runs a turn: the header, the name opcodes, the echo) and asks it
-every line of the candidate pool (py/rei_topics_pool.txt) and of the tree
+every line of the candidate pool (py/rei_topics_pool.txt, or the --pool files:
+py/rei_topics_extra.txt holds hand-written candidates) and of the tree
 (py/rei_topics.py) in four conversations:
 
     fresh        the line opens a conversation; the name slot is empty
@@ -20,13 +22,17 @@ It writes a review sheet - build/review/topics_<checkpoint>.csv and .md - one
 row per line: its topic, whether the tree has it, how often her corpus
 teaches it (the pool's count; empty for a tree line the pool does not hold),
 the four replies, and the WORD check: an unknown piece in the
-line, a reply that is empty, runs out of steps, speaks for the player (">")
+line, a reply that stores a name (her turn holds <SN>: the line would name
+the player), is empty, runs out of steps, speaks for the player (">")
 or shows an opcode ("<"), and with --corpus (her training text: .md
 conversation files, or a directory of them) a word she was never taught.
 The word check cannot see SENSE: "i like gold" -> "the sky is blue because
-the air scatters the light." passes it. The sheet's `sense` column is the
-reviewer's - ok / off / wrong / garbled, a line that fails there does not go
-in the tree. `--lines` limits the run to the given lines (a quick look).
+the air scatters the light." passes it. The sheet's `sense` and `note`
+columns are the reviewer's - ok / off / wrong / garbled, a line that fails
+there does not go in the tree; --sense carries a filled sheet's judgements
+into a new run (docs/review/ keeps the sheets the tree was built from).
+`--lines` limits the run to the given lines (a quick look). rei_topics.py
+--emit asks the tree's lines the same way (conversations, ask).
 
 The tokenizer follows the checkpoint's vocabulary as rei_env.ps1 has it
 (models/tok_rei1024.bin for 1,024 pieces, models/tok_rei.bin for 512), or
@@ -48,6 +54,7 @@ import collections
 import copy
 import csv
 import glob
+import hashlib
 import json
 import os
 import re
@@ -200,7 +207,7 @@ def read_pool(path=POOL):
             topic = raw[3:].strip()
             continue
         line, _, n = raw.partition("\t")
-        out.append((topic, line, int(n or 0)))
+        out.append((topic, line, int(n) if n else ""))     # no count: a hand-written candidate
     return out
 
 
@@ -234,8 +241,11 @@ def corpus_words(paths):
     return known
 
 
-def word_check(reply, known):
-    """The word check of one reply: '' if it passes."""
+def word_check(reply, known, stored=False):
+    """The word check of one reply: '' if it passes. `stored`: her turn held
+    <SN>, so the line made her keep its last word as the player's name."""
+    if stored:
+        return "stores a name (<SN>)"
     if not reply.endswith("\n"):
         return "no end (ran out of steps)" if reply.strip() else "empty"
     if not reply.strip():
@@ -251,6 +261,59 @@ def word_check(reply, known):
     return ""
 
 
+def conversations(q, tok, steps=48):
+    """The four conversations a line is asked in, each built once: ({condition:
+    (twin state, first turn?)}, {condition: note})."""
+    import golden5
+    import twin5
+    start, notes = {}, {}
+    st = twin5.QState5(q.cfg)
+    start["fresh"] = (st, True)
+    st = twin5.QState5(q.cfg)
+    st.name = NAME
+    start["fresh+name"] = (st, True)
+    for cond, warm in WARM.items():
+        st = twin5.QState5(q.cfg)
+        for i, w in enumerate(warm):
+            golden5.chat_turn(q, tok, st, w, first=(i == 0), steps=steps)
+        if cond == "chat+name" and st.name != NAME:
+            notes[cond] = f"she did not store the name ({st.name!r}); the engine's slot set to {NAME!r}"
+            st.name = NAME
+        start[cond] = (st, False)
+    return start, notes
+
+
+def ask(q, tok, start, line, known=None, steps=48):
+    """`line` asked in each of the conversations `start`: ({condition: reply,
+    newline stripped}, [the word check's failures])."""
+    import export5
+    import golden5
+    ops = export5.name_ops(tok)
+    replies, fails = {}, []
+    if 0 in golden5.staged_ids(tok, line, True, ""):
+        fails.append("unknown piece in the line")
+    for cond in CONDITIONS:
+        st0, first = start[cond]
+        st = copy.deepcopy(st0)
+        said = []
+        reply = golden5.chat_turn(q, tok, st, line, first=first, steps=steps, record=said)
+        why = word_check(reply, known, stored=bool(ops) and ops[0] in said)
+        if why:
+            fails.append(f"{cond}: {why}")
+        replies[cond] = reply.rstrip("\n")
+    return replies, fails
+
+
+def read_sense(path):
+    """{line: (sense, note)} from a filled sheet (any csv with the columns
+    line, sense and note - the review's own csv, say), so a re-run keeps the
+    reviewer's judgements; {} without one."""
+    if not path:
+        return {}
+    with open(path, encoding="utf-8", newline="") as f:
+        return {r["line"]: (r.get("sense", ""), r.get("note", "")) for r in csv.DictReader(f)}
+
+
 def review(args):
     ckpt = Path(args.checkpoint).resolve()
     tok_path = args.tokenizer or ROOT / "models" / (
@@ -259,7 +322,6 @@ def review(args):
     os.environ["PIP5"] = str(ckpt)
     os.environ["CHATGBC_TOKENIZER"] = str(tok_path)
     import export5                # noqa: F401  (reads the environment above)
-    import golden5
     import twin5
     from model5 import Model5, Tokenizer
 
@@ -269,10 +331,13 @@ def review(args):
     q = twin5.quantize5(m, twin5.calibrate5(m, tok, export5.cal_prompts()))
     known = corpus_words(args.corpus)
 
+    sense = read_sense(args.sense)
+
     tree = {s: name for name, lines in rei_topics.TOPICS for s in lines}
     rows = {}
-    for topic, s, n in read_pool(args.pool):
-        rows.setdefault(s, {"topic": topic, "line": s, "count": n})
+    for pool in args.pool:
+        for topic, s, n in read_pool(pool):
+            rows.setdefault(s, {"topic": topic, "line": s, "count": n})
     for s, topic in tree.items():            # a tree line the pool does not hold: no count
         rows.setdefault(s, {"topic": topic, "line": s, "count": ""})
     if args.lines:
@@ -281,39 +346,13 @@ def review(args):
     rows = sorted(rows.values(), key=lambda r: (order.get(r["topic"], 99), r["line"] not in tree,
                                                 -(r["count"] or 0), r["line"]))
 
-    # The conversations the lines are asked in, each built once.
-    start = {}
-    notes = {}
-    st = twin5.QState5(q.cfg)
-    start["fresh"] = (st, True)
-    st = twin5.QState5(q.cfg)
-    st.name = NAME
-    start["fresh+name"] = (st, True)
-    for cond, warm in WARM.items():
-        st = twin5.QState5(q.cfg)
-        for i, w in enumerate(warm):
-            golden5.chat_turn(q, tok, st, w, first=(i == 0), steps=args.steps)
-        if cond == "chat+name" and st.name != NAME:
-            notes[cond] = f"she did not store the name ({st.name!r}); the engine's slot set to {NAME!r}"
-            st.name = NAME
-        start[cond] = (st, False)
-
+    start, notes = conversations(q, tok, args.steps)
     for r in rows:
-        fails = []
         r["in_tree"] = "yes" if r["line"] in tree else ""
-        if 0 in golden5.staged_ids(tok, r["line"], True, ""):
-            fails.append("unknown piece in the line")
-        for cond in CONDITIONS:
-            st0, first = start[cond]
-            st = copy.deepcopy(st0)
-            reply = golden5.chat_turn(q, tok, st, r["line"], first=first, steps=args.steps)
-            why = word_check(reply, known)
-            if why:
-                fails.append(f"{cond}: {why}")
-            r[cond] = reply.rstrip("\n")
+        replies, fails = ask(q, tok, start, r["line"], known, args.steps)
+        r.update(replies)
         r["word_check"] = "ok" if not fails else "; ".join(fails)
-        r["sense"] = ""
-        r["note"] = ""
+        r["sense"], r["note"] = sense.get(r["line"], ("", ""))
 
     OUT.mkdir(parents=True, exist_ok=True)
     stem = args.out or OUT / f"topics_{ckpt.stem}"
@@ -324,13 +363,21 @@ def review(args):
         w.writeheader()
         w.writerows(rows)
 
+    sha = hashlib.sha256(ckpt.read_bytes()).hexdigest()
     md = [f"# Topic tree review: {ckpt.name}", "",
-          f"Tokenizer {Path(tok_path).name}; {len(rows)} lines, each in four conversations "
+          f"Checkpoint sha256 `{sha}`, tokenizer {Path(tok_path).name}; "
+          f"{len(rows)} lines, each in four conversations "
           f"({', '.join(CONDITIONS)}; warm-ups: " +
           "; ".join(f"{c} = {' / '.join(w)}" for c, w in WARM.items()) + ").",
           "The word check is mechanical; judge SENSE in the csv's `sense` column "
           "(ok / off / wrong / garbled): a reply on another subject passes the word check.", ""]
     md += [f"- {c}: {n}" for c, n in notes.items()]
+    if any(r["sense"] for r in rows):
+        judged = collections.Counter(r["sense"] or "(not judged)" for r in rows)
+        md += ["", "Sense, as judged: " + ", ".join(f"{k} {v}" for k, v in sorted(judged.items()))
+               + f". The tree takes a line only if it is `ok` here and passes the word check: "
+               f"{sum(r['sense'] == 'ok' and r['word_check'] == 'ok' for r in rows)} lines do; "
+               f"the tree holds {sum(bool(r['in_tree']) for r in rows)}."]
     for topic in TOPIC_NAMES + sorted({r["topic"] for r in rows} - set(TOPIC_NAMES)):
         mine = [r for r in rows if r["topic"] == topic]
         if not mine:
@@ -340,6 +387,8 @@ def review(args):
             flag = " (tree)" if r["in_tree"] else ""
             count = f"corpus {r['count']}" if r["count"] != "" else "not in the pool"
             md.append(f"**{r['line']}**{flag} - {count} - word check: {r['word_check']}")
+            if r["sense"]:
+                md.append(f"sense: **{r['sense']}**" + (f" - {r['note']}" if r["note"] else ""))
             md.append("")
             md += [f"- {c}: {r[c]}" for c in CONDITIONS]
             md.append("")
@@ -359,7 +408,9 @@ def main():
     r = sub.add_parser("review", help="answer the pool and the tree on the twin")
     r.add_argument("checkpoint")
     r.add_argument("--tokenizer", help="default: by the checkpoint's vocabulary")
-    r.add_argument("--pool", default=str(POOL))
+    r.add_argument("--pool", nargs="+", default=[str(POOL)],
+                   help="candidate files (default: the pool; a line in two keeps the first's topic)")
+    r.add_argument("--sense", help="a filled sheet (csv: line, sense, note) to carry into this one")
     r.add_argument("--corpus", nargs="*", help="her training text, for the word check")
     r.add_argument("--lines", nargs="*", help="only these lines")
     r.add_argument("--steps", type=int, default=48)

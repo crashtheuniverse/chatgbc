@@ -14,10 +14,11 @@ from model5 import Model5, Tokenizer   # noqa: E402
 
 # What a model SAYS - that she greets as "rei", that she names "tom" back,
 # that she echoes "ducks" - is a statement about one checkpoint, measured on
-# it: models/rei.bin as of v1.0.0. For any other checkpoint the suites still
+# it: models/rei.bin, Rei v1 (the friend5c model, 1,024 pieces). For any
+# other checkpoint the suites still
 # hold the ROM to the twin word for word, the contract, and leave those
 # statements out until they are measured on it.
-MEASURED = {"ab88a858d0a61619742dc4567ca0fb030287eef4201ee9df7ddca60248298388"}
+MEASURED = {"e9495280edbbe9d68824024bf5f461c609b5592c8b406a53463c2db47ddb9b1c"}
 
 
 def measured():

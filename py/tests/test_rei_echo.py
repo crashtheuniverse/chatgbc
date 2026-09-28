@@ -5,9 +5,12 @@ In a chat build the record it searches is her own words of the turn only
 (wOwnFrom, src/generate.asm; golden5.history / chat_turn on the twin): when it
 held the player's forced line too, every echo was a repeat and she was pushed
 off the word mid-word - "i do like duucks", "it is sainy", "druts", "hors".
-These are the lines that did it: fresh on the chat lab ROM, and mid-chat on
-build/rei.gbc through the topic tree, each against the twin, the word spelled
-right.
+The first lines below are the ones that did it; the rest are Rei v1's echo
+lines in the topic tree, where the echo is mostly <W> (the engine prints the
+player's last word, src/name.asm) and the rule must still let her spell it
+again after that. Fresh on the chat lab ROM, and mid-chat on build/rei.gbc
+through the topic tree, each against the twin; that the word is there at all
+is checked on the checkpoint it was measured on (rei_talk.MEASURED).
 
 Only meaningful for the chat export; skipped otherwise.
 """
@@ -28,15 +31,16 @@ import rei_topics                 # noqa: E402
 import twin5                      # noqa: E402
 from rei_talk import Talk, measured, twin   # noqa: E402,F401  (twin is a fixture)
 
-# (the player's line, the word her reply must hold) - each was garbled before
+# (the player's line, the word her reply must hold)
 LINES = [
-    ("do you like ducks", "ducks"),
+    ("do you like ducks", "ducks"),       # each of these four was garbled before
     ("do you like books", "books"),
     ("it is sunny today", "sunny"),
-    ("what about drums", "drums"),
-    ("it is windy today", "windy"),
     ("do you like horses", "horses"),
-    ("what about bunnies", "bunnies"),
+    ("i like drums", "drums"),            # v1's tree
+    ("i love bunnies", "bunnies"),
+    ("what about zebras", "zebras"),
+    ("i like owls", "owls"),
 ]
 
 
