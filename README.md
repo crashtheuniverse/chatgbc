@@ -298,7 +298,7 @@ the twin's own function on planted vectors; exhaustive proofs for the gate
 table and the add's byte rule; the classifier's retry path at 0 to 9
 rejects; the layer-0 probes against the twin's layer-0 lines; the encoder
 against the Python tokenizer; the prompt with and without the prefill
-shortcut. 123 on Rei's: the same engine tests on her checkpoint, the name
+shortcut. 122 on Rei's (123 with REI_CORPUS set): the same engine tests on her checkpoint, the name
 and echo opcodes on the lab ROM against the twin, and her screen driven
 button by button - every reply read back from her pane and compared with
 the twin's, a question bringing up the keyboard, the save continued across
