@@ -128,6 +128,19 @@ def test_the_bars_say_what_they_should():
                 tuple(bar("Lines", 1)), tuple(bar("Keys"))}) == 5
 
 
+def test_the_thinking_dots_are_centred():
+    """While she thinks, the middle of the five rows is three dots whose middle
+    one is on the screen's centre line (pixels 79 and 80 of 160), the others
+    sixteen pixels either side: the row the generator drew, cut into tiles."""
+    import gen_rei_art as art
+    row = art.think_row()
+    ink = [x for x in range(160) if any(row[y][x] for y in range(8))]
+    assert ink == [63, 64, 79, 80, 95, 96]
+    tiles = art_map("ReiThinkMap")[0]
+    blank = ART["REI_TILE_BASE"]                    # T_BLANK: the rest of the row is paper
+    assert [x for x, t in enumerate(tiles) if t != blank] == [7, 8, 9, 10, 11, 12]
+
+
 def bar_is_solid(r):
     attrs = r.pyboy.memory[1, 0x9800 + 12 * 32: 0x9800 + 12 * 32 + 20]
     return all(a == ART["PAL_PICK"] for a in attrs)

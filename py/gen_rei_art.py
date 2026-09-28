@@ -130,14 +130,6 @@ SYMBOLS = {
                  "........",
                  "........",
                  "........"],
-    "DOT": ["........",
-            "........",
-            "........",
-            "...++...",
-            "...++...",
-            "........",
-            "........",
-            "........"],
 }
 SYMBOLS["OK"] = ["........",                # the keyboard's send key
                  "......#.",
@@ -465,6 +457,23 @@ BARS = {
 BAR_PAGES = ["<>:PAGE 1/2 ", "<>:PAGE 2/2 "]
 
 
+# While she thinks, the middle of the five rows shows three dots. They are
+# drawn as one row of the screen, not as a dot tile printed every other cell:
+# a tile grid has no cell on the screen's centre line (x = 80 falls between
+# cells 9 and 10), so dots in cells 8, 10 and 12 sat four pixels right of it,
+# under a bar and between frames that are exactly centred. Here each dot is
+# two pixels straddling a cell edge, sixteen apart, and the middle one is on
+# the centre line.
+THINK_PITCH = 16
+
+
+def think_row():
+    img = canvas(160, 8)
+    for cx in (80 - THINK_PITCH, 80, 80 + THINK_PITCH):
+        rect(img, cx - 1, 3, cx, 4, 2)
+    return img
+
+
 def bar(text):
     assert len(text) <= BAR_COLS, (len(text), text)
     img = canvas(BAR_COLS * 4, 8)
@@ -633,6 +642,7 @@ def build():
                                                                            (BAR_PAGE_AT + BAR_PAGE_W) // 2])
                   for text in BAR_PAGES]
     assert BARS["LINES"][BAR_PAGE_AT:BAR_PAGE_AT + BAR_PAGE_W].strip() == "", "the page part's span is kept clear"
+    main.think = main.cut(think_row())
 
     splash = TileSet()
     splash.add(canvas(8, 8), "S_BLANK")
@@ -709,8 +719,10 @@ def emit(main, face_maps, mood_maps, splash, logo_map, logo_attr):
     maps("ReiFaceMaps", face_maps, 4)
     maps("ReiMoodMaps", mood_maps, BAND_W)
     for name, m in main.bars:
-        maps(f"ReiBar{name.capitalize()}", [(BARS[name].strip(), m)], 20)
+        label = "".join(part.capitalize() for part in name.split("_"))
+        maps(f"ReiBar{label}", [(BARS[name].strip(), m)], 20)
     maps("ReiBarPages", main.pages, BAR_PAGE_W // 2)
+    maps("ReiThinkMap", [("three dots, the middle one on the centre line", main.think)], 20)
     maps("ReiLogoMap", [("Rei", logo_map)], LOGO_W)
     o.append("ReiLogoAttr::")
     for r in range(0, len(logo_attr), LOGO_W):

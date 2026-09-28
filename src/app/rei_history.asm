@@ -30,10 +30,10 @@ wReiHistNext::  db                  ; the slot the next one goes in
 
 SECTION "Rei history", ROMX, BANK[REI_BANK]
 
-sReiThinking: db T_DOT + FONT_FIRST, " ", T_DOT + FONT_FIRST, " ", T_DOT + FONT_FIRST, 0
-
 ; She is about to answer: an empty pane, and the list makes way - a blank bar
-; over three dots.
+; over three dots, the middle one on the screen's centre line (ReiThinkMap, a
+; whole row: py/gen_rei_art.py says why it is not a dot tile printed three
+; times).
 ReiUi_ReplyBegin::
     call Rei_PaneClear
     call Console_WaitVBlank
@@ -45,10 +45,12 @@ ReiUi_ReplyBegin::
     ld d, LIST_W
     ld e, LIST_H + 1
     call Rei_Fill
-    ld hl, sReiThinking
-    ld b, LIST_X + 8
-    ld c, LIST_Y + 2
-    call Rei_Print
+    ld hl, ReiThinkMap
+    ld b, LIST_X
+    ld c, LIST_Y + LIST_H / 2
+    ld d, LIST_W
+    ld e, 1
+    call Rei_DrawMap
     call Console_WaitVBlank
     ld hl, BAR_Y * CON_W + LIST_X
     ld b, LIST_H + 1
