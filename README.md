@@ -2,35 +2,22 @@
 
 A language model that runs on a Game Boy Color written in Assembly.
 
-v1.0 seals the engine and ships a second cartridge on it. The engine is
-v0.9's - the same kernels, the same weights, the same tokens out of the
-same twin - with the two parts of the wait that came before the first token
-rebuilt: the encoder now gives the Python tokenizer's tokens exactly and in
-a hundredth of the time, and a prompt token that only feeds the state stops
-there. The story starts in 1.8 s where it took 6.8.
+v1.0 seals the engine and adds a second cartridge: **Rei**, a small being
+who talks to you, asks your name and keeps it.
 
-The second cartridge is **Rei**: the same engine with a conversational
-checkpoint, on a screen built like a small Game Boy game. You pick
-something to say from a list of topics, or type it, and she answers. See
-[Rei](#rei) below.
-
-v0.9 was the same model as v0.4.1 on a faster cartridge: a token takes
-0.46 s where v0.4.1 took 1.08 s - 2.3x - because an audit of every stage of
-the token found that most of its arithmetic could only ever produce a few
-hundred distinct values, and a stage like that is a table, not a
-computation.
+The story model and its tokens didn't change. The wait did: the encoder is
+exact and a hundred times faster, and a prompt token now only feeds the
+state. A story starts in 1.8 s where it took 6.8.
 
 **some stats:**
-- 1.8 s from START to the first token of a story (6.8 s in v0.9): the prompt encodes in 55,552 cycles instead of 8.3 million, and its tokens run only as far as the state
-- 0.46 s/token, 0.133 s per character — measured by the ROM's own DIV/TIMA counter with the teletype running (v0.4.1: 1.08 s, 0.31 s per character on the same text)
-- 1.126 bits per character on held-out TinyStories, 0.3% off the fp32 checkpoint (v0.4.1 shipped the same checkpoint at 1.146)
-- Weights are −1, 0 or +1. Three of them pick one of 27 sums: no multiplier, no product tables. A row of 64 inputs is 22 lookups at 12 cycles each, summed in a register pair
-- The gate of the recurrent core is one byte table; the sigmoid is folded into it and never computed
-- w2 touches only the pairs where both the activation and the weight are nonzero: 82% of the activations are zero
-- The classifier stores no logits. It keeps the running best in a register pair, 226 cycles for each of the 1,024 rows
+- 1.8 s from START to the first token (v0.9: 6.8 s)
+- 0.46 s/token, 0.133 s per character — measured by DIV/TIMA with the teletype running (v0.4.1: 1.08 s)
+- 1.126 bits per character on held-out TinyStories, 0.3% off the fp32 checkpoint
+- Weights are −1, 0 or +1. Three of them pick one of 27 precomputed sums: no multiplier, no product tables
+- The gate of the recurrent core is one byte table, the sigmoid folded in
 - No attention, no KV cache, no window. The state is 192 bytes and a story runs until you press SELECT
 - Four experts per layer, one runs per token: half the work of a dense layer, twice the weights
-- The screen is a teletype: one character every 0.3 s, fed from a queue on the VBlank interrupt
+- The screen is a teletype: characters arrive while the next token computes
 - 374K parameters and 61 KB of lookup tables in a 512 KB ROM
 
 _Trained on TinyStories, compared per character against every version before it_
@@ -47,58 +34,31 @@ weights and the whole inference stack are on the cartridge.
 
 ## Rei
 
-`.\build.ps1 -Rei` builds `build\rei.gbc`: the v1.0 engine with Rei v1, a
-conversational checkpoint (3 layers, dim 64, 4 experts of 176, 1,024-piece
-vocabulary, 374K parameters) and her own screen:
+![Rei in conversation](docs/versions/v1.0.gif)
 
-- **Your name.** She asks it, and she keeps it - for the whole
-  conversation, and across power-off. The model decides when: when your
-  line is a name, she answers with a token of her own that stores it, and
-  the engine copies the last word you typed into a slot on the cartridge.
-  Where she says your name, another token of hers prints that slot, so the
-  model never has to spell it: "anna" - "anna! i like how that sounds.",
-  and later "what is my name" - "you are anna!". While the slot holds a
-  name, each of your lines reaches her with a third token that says so;
-  before you tell her, "what is my name" gets "you did not tell me yet!
-  what is your name?".
-- **Your words back.** A fourth token prints the word your line ends with:
-  "i like tacos" - "tacos! good choice.", a word she never saw in training
-  as much as one she did.
-- **Topics.** Ten topics, up to ten lines each. Every line was read in
-  four conversations (fresh or mid-chat, with or without a name kept) and
-  kept only if her answer made sense in all four; the sheet is in
-  [docs/review](docs/review/topics_rei_v1c.md). `A` picks, `B` goes back,
-  `SELECT` opens a keyboard for anything else (`A` types, `B` deletes, the
-  last key sends).
-- **Her questions.** When her reply ends with a question mark, the keyboard
-  comes up by itself, empty, for your answer; `SELECT` from it goes to the
-  topics. Any other reply leaves the screen where you sent from.
-- **Her pane.** The reply is typed into her frame a character at a time,
-  from the VBlank interrupt while the next token computes; her face talks
-  while it arrives and settles into the mood of what she said. Three dots
-  under a blank bar while she thinks.
-- **The log.** `START` shows the whole conversation, both sides, scrolled
-  with the d-pad.
-- **The save.** The cartridge has battery RAM. The conversation - the
-  model's state, your name, the log, her last replies - is saved after
-  every exchange, and "continue" on the menu picks it up exactly where it
-  stopped: the next reply is the one it would have been without the power
-  cycle.
-- **The world.** Leave her alone for twenty seconds and she wanders off to
-  a beach, a garden or a playroom and walks about. Now and then she thinks
-  something, and what she thinks is the model's; the conversation is put
-  aside for it and put back after, bit for bit.
+*A minute of conversation, one frame per character of hers and per button
+press. The second or two she thinks before each reply is cut.*
+
+`.\build.ps1 -Rei` builds `build\rei.gbc`: the same engine, a conversational
+model (374K parameters, 1,024-piece vocabulary) and a screen that tries to
+feel like a small Game Boy game.
+
+- She asks your name and keeps it, for the whole conversation and across power-off. "vincenzo" works as well as "anna"
+- She says your words back: "i like tacos" - "tacos! that sounds nice."
+- Pick a line from ten topics, or press `SELECT` and type. When she asks you something, the keyboard comes up by itself
+- `START` shows the whole conversation. The battery saves it, and "continue" picks up exactly where you left
+- Leave her alone for twenty seconds and she goes for a walk: a beach, a garden, a playroom. Sometimes she thinks out loud
+
+How the name works: four tokens of her vocabulary are orders for the engine,
+not text. One stores the last word you typed, one prints it back, one
+repeats your last word, and one rides along with your line while the engine
+knows your name. A 374K model can't spell a name it heard ten lines ago. It
+can learn when to press the button.
 
 | | |
 |---|---|
-| Speed | 0.46 s/token: 964,158 cycles a token over the 122 tokens of her ten replies in one measured conversation, the story model's speed (the same shape and vocabulary) |
-| Waiting for her | 1.5 to 2.0 s from the press to her first token on those ten lines (mean 1.8): the encode, the prompt tokens, the pass that picks the first |
-| Limits | a small model: her sentences are few, and they blend - "cats! yes! a baby panda is very tiny when it is born." (an echo, then a fact about something else). She can mix facts up. Sometimes she stores a word that is not a name as your name ("i am seven", "i am a boy"), and a bare name is not always taken - "anna", "max" and "leo" are, "tom" is not ("my name is tom" is); telling her again puts it right |
-
-![Rei in conversation](docs/versions/v1.0.gif)
-
-*One frame per character of hers and per button press; the second or two
-she thinks before each reply is cut to one frame of the dots.*
+| Speed | 0.46 s/token, 1.5 to 2.0 s from your press to her first letter |
+| Limits | she is small. Sentences blend ("cats! yes! a baby panda is very tiny when it is born."), she can mix facts up, and now and then she takes a word that isn't a name ("i am seven") as your name. Tell her again and it's fixed |
 
 ## Numbers
 
@@ -147,29 +107,12 @@ noticing.
 
 ## What changed since v0.9
 
-Nothing in the model and nothing in the tokens: the golden sequence is
-byte-identical, and so is everything the twin says about every input. What
-moved is the wait before the first token.
+Nothing in the story model and nothing in its tokens: the golden sequence is
+byte-identical. What moved is the wait before the first token, and Rei.
 
-**The encoder is exact, and fast.** Both vocabularies have pieces up to 11
-bytes long, and the old encoder looked only as far as 7: on a line that
-needed a longer piece its tokens drifted from the Python tokenizer's (3 of
-Rei's 95 topic lines, for instance). It also scanned the whole vocabulary
-for every adjacent pair on every merge pass, which is why "Once upon a
-time" took 8.3 million cycles, four seconds, to encode. Now the exporter
-lays the vocabulary out as a hash table and measures the longest piece,
-and the merge loop remembers each pair's result, so a merge looks up only
-the two pairs it changed. 55,552 cycles, and the tokens are Python's -
-tested on every prompt the ROM and the tests use and on 300 lines of the
-validation stories.
-
-**A prompt token only feeds the state.** The argmax of every prompt token
-but the last is thrown away - the next token is the prompt's. So its
-forward pass stops at the last layer's state update: no wo and no FFN in
-that layer, no final norm, no classifier. The next token starts from its
-own embedding, so nothing skipped is ever read. About 44% of a token on the
-story model, 36% on Rei's; a test runs the prompt both ways on one ROM and
-compares the state after it byte for byte.
+- **The encoder is exact, and fast.** The old one looked at pieces up to 7 bytes; both vocabularies have pieces up to 11, so some lines drifted from the Python tokenizer. It also scanned the whole vocabulary on every merge: 8.3 million cycles for "Once upon a time". Now a hash table and a merge loop that only rechecks what changed: 55,552 cycles, and Python's tokens
+- **A prompt token only feeds the state.** Its prediction is thrown away anyway, so its pass stops at the last layer's state update. A test runs the prompt both ways and compares the state byte for byte
+- **Rei**, above
 
 ## What changed since v0.4.1
 

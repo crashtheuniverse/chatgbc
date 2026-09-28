@@ -4,7 +4,8 @@
 
 The splash, then "hello" from the topic tree - she asks who you are, and the
 keyboard comes up for the answer - a name typed on it (no tree line gives a
-name), and "what is my name" from the tree: her answers as they are typed.
+name), "what is my name", a few lines from the tree and one typed, and her
+saying the name again at the end: her answers as they are typed.
 One frame per character of hers and per button press, and one of the dots
 while she thinks; the time between presses is cut, and so is most of the time
 she spends thinking before her first character, which the caption has to
@@ -59,14 +60,16 @@ def exchange(rec, topic, line):
     r = rec.rom
     if r.read("wReiMode")[0] == 2:
         rec.press("select")                      # the keyboard -> a list
-    if r.read("wReiMode")[0] == 1 and r.read("wReiTopic")[0] != topic:
-        rec.press("b")
+    if r.read("wReiMode")[0] == 1:
+        rec.press("b")                           # back to the topics: the page is known again
     if r.read("wReiMode")[0] == 0:
         if r.read("wReiTopic")[0] // 5 != topic // 5:
             rec.press("right")
         while r.read("wReiTopic")[0] != topic:
             rec.press("down")
         rec.press("a")
+    if line >= 5:
+        rec.press("right")                       # the topic's second page
     while r.read("wReiPick")[0] != line % 5:
         rec.press("down")
     ui.press(r, "a", after=0)
@@ -98,6 +101,11 @@ def main():
     exchange(rec, 0, 0)                          # hello: she asks who you are
     typed(rec, NAME)                             # on the keyboard her question put up
     exchange(rec, 1, 0)                          # what is my name
+    exchange(rec, 7, 4)                          # i love cats
+    typed(rec, "i like tacos")                   # a word she never trained on, said back
+    exchange(rec, 5, 7)                          # tell me a joke
+    exchange(rec, 9, 7)                          # you are my friend
+    exchange(rec, 1, 4)                          # say my name
     rec.frame("close")
     r.close()
 
