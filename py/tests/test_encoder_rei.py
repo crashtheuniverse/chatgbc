@@ -6,7 +6,7 @@ the topic tree is checked in both of the forms the ROM sends - the first turn
 ("> line\\n" behind BOS and the dummy prefix, Encode) and a later one
 ("\\n> line\\n", EncodeCont) - and so is a sample of typed lines: some written to
 reach the long pieces the old encoder could not ("favourite", "cartridge."), and,
-when her corpus is on this machine (REI_CORPUS, or chatgbc_x's build/friend3.txt),
+when her corpus is on this machine (the REI_CORPUS environment variable),
 a few hundred of the player's lines from it.
 
 Only for the chat export (the story ROM's encoder is left as it was: see the
@@ -38,8 +38,8 @@ TYPED = [
 
 
 def corpus_lines(n=300):
-    path = os.environ.get("REI_CORPUS") or "C:/crashcode/chatgbc_x/build/friend3.txt"
-    if not Path(path).exists():
+    path = os.environ.get("REI_CORPUS")
+    if not path or not Path(path).exists():
         return []
     lines = set()
     with open(path, encoding="utf-8") as f:
