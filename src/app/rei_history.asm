@@ -2,8 +2,10 @@
 ;
 ; ReiUi_ReplyBegin clears her pane and puts the list away while she thinks.
 ; ReiUi_After runs when the reply is complete: it reads her mood, files the
-; reply, adds it to the log, counts the exchange, saves, and raises wReady for
-; the harness. Then the input screen comes straight back, her reply still up.
+; reply, adds it to the log, counts the exchange, saves, picks the input state
+; (the keyboard if she asked a question, src/app/rei_input.asm) and raises
+; wReady for the harness. Then the input screen comes straight back, her reply
+; still up.
 ;
 ; Her replies are filed as text - a length byte and up to 96 characters, eight
 ; slots in a ring in the save image (WRAM bank 2) - so that "continue" can put
@@ -141,6 +143,7 @@ ReiUi_After::
     ld hl, wReiLines
     call ReiSave_Count
     call ReiSave_Write              ; interrupts are off: the run is over
+    call ReiUi_Asked                ; a question: the keyboard comes up for the answer
     ld a, READY_MAGIC               ; the exchange is whole and saved; the flag
     ld [wReady], a                  ; stays up until the next message is sent
     ret

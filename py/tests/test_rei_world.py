@@ -83,7 +83,8 @@ def test_the_pool_is_the_one_the_twin_chose():
 
 def test_left_alone_she_goes_and_any_button_brings_the_chat_back(talk):
     r = talk.rom
-    assert r.read("wReiMode")[0] == 1               # a topic's sentences, as "hello" left it
+    ui.choose(r, 0, 0)                              # a topic's sentences (her reply to "hello"
+    assert r.read("wReiMode")[0] == 1               # may have asked, and left the keyboard up)
     ui.press(r, "down")
     before = chat_screen(r)
     ui.press(r, "select")

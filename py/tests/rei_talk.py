@@ -105,7 +105,8 @@ class Talk:
         """Through the keyboard, as a player gives their name (no line of the
         topic tree does): `text` typed and sent with OK, her first picks
         `forced` if given; the reply checked against the twin's, pane
-        included. Leaves the topic list up again."""
+        included. Leaves the list up again - the topics, if her reply asked
+        something (SELECT from the keyboard her question brings up)."""
         r = self.rom
         if r.read("wReiMode")[0] != 2:
             ui.press(r, "select")                   # the list -> the keyboard

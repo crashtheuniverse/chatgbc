@@ -3,9 +3,10 @@
     python py/rei_shots.py
 
 The pictures the reviews ask for - splash_menu (a save present), topics,
-sentences (and sentences_page2), reply_mid (the teletype running, her mouth
-open), reply_done (her reply up, the list back, START:LOG under the mood), log,
-keyboard, and the world: world_beach, world_garden, world_playroom (walking),
+sentences (and sentences_page2), thinking (the blank bar and three dots before
+her first character), reply_mid (the teletype running, her mouth open),
+reply_done (her reply up, START:LOG under the mood), keyboard_after_question
+(her reply asked: the keyboard, empty), log, keyboard, and the world: world_beach, world_garden, world_playroom (walking),
 world_<scene>_thought, world_pause, world_thought_mid, back_from_world - taken from one short conversation, a walk
 on the beach and a power cycle. Needs `.\\build.ps1 -Rei`.
 
@@ -282,19 +283,23 @@ def main():
     r.screenshot(SHOTS / "sentences.png")
 
     press(r, "a", after=0)                      # "hello"
+    r.pyboy.tick(20, False)
+    assert not r.read("wReiReplyLen")[0]
+    r.screenshot(SHOTS / "thinking.png")        # a blank bar over three centred dots
     for _ in range(40000):                      # a few words in, mouth open
         r.pyboy.tick(1, False)
         if r.read("wReiReplyLen")[0] >= 9 and face_shown(r) == 3:
             break
     r.screenshot(SHOTS / "reply_mid.png")
     wait_ready(r)
-    r.screenshot(SHOTS / "reply_done.png")      # a heart, START:LOG under it, the list back
-
-    press(r, "select")                          # the name is typed: no tree line gives one
-    cell = type_text(r, "my name is tom", r.read("wReiKey")[0])
+    r.screenshot(SHOTS / "reply_done.png")      # a heart, START:LOG under it
+    if r.read("wReiMode")[0] == 2:              # she asked who you are: the keyboard is up
+        r.screenshot(SHOTS / "keyboard_after_question.png")
+    else:
+        press(r, "select")
+    cell = type_text(r, "anna", r.read("wReiKey")[0])   # the name is typed: no tree line gives one
     type_text(r, OK, cell)
     wait_ready(r)
-    press(r, "select")                          # back to the list
     choose(r, 1, 0)                             # me: "what is my name"
     press(r, "a", after=0)
     wait_ready(r)

@@ -2,11 +2,12 @@
 
     python py/gifcap_rei.py
 
-The splash, then "hello" from the topic tree, "my name is tom" on the
-keyboard (no tree line gives a name) and "what is my name" from the tree -
-and her answers as they are typed. One frame per character
-of hers and per button press; the time between presses is cut, and so is the
-time she spends thinking before her first character, which the caption has to
+The splash, then "hello" from the topic tree - she asks who you are, and the
+keyboard comes up for the answer - a name typed on it (no tree line gives a
+name), and "what is my name" from the tree: her answers as they are typed.
+One frame per character of hers and per button press, and one of the dots
+while she thinks; the time between presses is cut, and so is most of the time
+she spends thinking before her first character, which the caption has to
 say. Needs `.\\build.ps1 -Rei`.
 """
 
@@ -18,7 +19,8 @@ import rei_shots as ui           # noqa: E402
 
 OUT = ui.ROOT / "docs" / "versions" / "v1.0.gif"
 SCALE = 2
-DURATION = {"hold": 1800, "key": 350, "char": 70, "rest": 1600, "close": 3000}
+DURATION = {"hold": 1800, "key": 350, "think": 700, "char": 70, "rest": 1600, "close": 3000}
+NAME = "anna"                                    # a bare name she keeps (she does not keep every one)
 
 
 class Recorder:
@@ -36,8 +38,27 @@ class Recorder:
         self.frame("key")
 
 
+def answer(rec):
+    """Her reply, a frame per character, after one frame of her thinking."""
+    r = rec.rom
+    r.pyboy.tick(10, False)
+    rec.frame("think")
+    seen = 0
+    ready = r.addr("wReady")
+    while r.pyboy.memory[ready] != r.defs["READY_MAGIC"]:
+        r.pyboy.tick(2, False)
+        n = r.read("wReiReplyLen")[0]
+        if n != seen:
+            seen = n
+            rec.frame("char")
+    r.pyboy.tick(8, False)
+    rec.frame("rest")
+
+
 def exchange(rec, topic, line):
     r = rec.rom
+    if r.read("wReiMode")[0] == 2:
+        rec.press("select")                      # the keyboard -> a list
     if r.read("wReiMode")[0] == 1 and r.read("wReiTopic")[0] != topic:
         rec.press("b")
     if r.read("wReiMode")[0] == 0:
@@ -49,20 +70,12 @@ def exchange(rec, topic, line):
     while r.read("wReiPick")[0] != line % 5:
         rec.press("down")
     ui.press(r, "a", after=0)
-    seen = 0
-    ready = r.addr("wReady")
-    while r.pyboy.memory[ready] != r.defs["READY_MAGIC"]:
-        r.pyboy.tick(2, False)
-        n = r.read("wReiReplyLen")[0]
-        if n != seen:
-            seen = n
-            rec.frame("char")
-    r.pyboy.tick(8, False)
-    rec.frame("rest")
+    answer(rec)
 
 
 def typed(rec, text):
-    """The player's own line: the keyboard, one frame a key, then OK."""
+    """The player's own line: the keyboard (already up if she asked), one
+    frame a key, then OK."""
     r = rec.rom
     if r.read("wReiMode")[0] != 2:
         rec.press("select")
@@ -70,17 +83,7 @@ def typed(rec, text):
     for ch in text + ui.OK:
         cell = ui.type_text(r, ch, cell)
         rec.frame("key")
-    seen = 0
-    ready = r.addr("wReady")
-    while r.pyboy.memory[ready] != r.defs["READY_MAGIC"]:
-        r.pyboy.tick(2, False)
-        n = r.read("wReiReplyLen")[0]
-        if n != seen:
-            seen = n
-            rec.frame("char")
-    r.pyboy.tick(8, False)
-    rec.frame("rest")
-    rec.press("select")                          # back to the list
+    answer(rec)
 
 
 def main():
@@ -92,8 +95,8 @@ def main():
     rec.frame("hold")
     ui.press(r, "start", after=60)
     rec.frame("hold")
-    exchange(rec, 0, 0)                          # hello
-    typed(rec, "my name is tom")
+    exchange(rec, 0, 0)                          # hello: she asks who you are
+    typed(rec, NAME)                             # on the keyboard her question put up
     exchange(rec, 1, 0)                          # what is my name
     rec.frame("close")
     r.close()

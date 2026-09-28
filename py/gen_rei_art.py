@@ -453,6 +453,9 @@ BARS = {
     "TOPICS": " TOPIC   <^v>:MOVE   A:SELECT   SEL:KEYS",
     "LINES":  " SAY A:SAY B:BACK               SEL:KEYS",
     "KEYS":   " KEYS  A:TYPE  B:DEL  OK:SAY    SEL:LIST",
+    # The keyboard when SELECT goes to the topics: opened from the topics, or
+    # put up by her question (src/app/rei_input.asm, ReiUi_Asked).
+    "KEYS_TOPICS": " KEYS  A:TYPE  B:DEL  OK:SAY  SEL:TOPICS",
 }
 BAR_PAGES = ["<>:PAGE 1/2 ", "<>:PAGE 2/2 "]
 

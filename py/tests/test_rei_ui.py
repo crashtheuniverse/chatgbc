@@ -35,6 +35,7 @@ ART = harness.load_defs(APP / "src" / "rei_art.inc")
 HAPPY, SAD = 1, 3                 # MOOD_* in src/app/rei.inc
 
 PANE = {(x, y) for x in range(7, 19) for y in range(1, 8)}
+INPUT = {(x, y) for x in range(20) for y in range(10, 18)}      # the prompt row, the bar, the rows
 FACE = {(x, y) for x in range(1, 5) for y in range(1, 5)}
 MOOD = {(x, y) for x in range(0, 6) for y in range(6, 9)}
 MARKER = {(x, 8) for x in range(13, 18)}
@@ -45,6 +46,7 @@ SAVE_BODY = 11 + 192 + 8 * 97 + 64 * 19 + (12 if NAME_OPS else 0)
 MAGIC = b"REI" + bytes([2 if NAME_OPS else 1])
 
 
+import rei_talk                   # noqa: E402
 import rei_topics                 # noqa: E402
 from rei_talk import Talk, measured, twin, where   # noqa: E402,F401  (twin is a fixture)
 
@@ -58,6 +60,29 @@ def talk(twin):
 
 def changed(before, after):
     return {(x, y) for y in range(18) for x in range(20) if before[y][x] != after[y][x]}
+
+
+def but_the_face(r):
+    """The map with her face left out: it blinks on a clock of its own."""
+    m = ui.tilemap(r)
+    for x, y in FACE:
+        m[y][x] = None
+    return m
+
+
+def asks(reply):
+    """ReiUi_Asked's rule (src/app/rei_input.asm): her reply as the ROM keeps
+    it - no newline, the first 96 characters - ends in "?" after any spaces."""
+    return reply.replace("\n", "")[:96].rstrip(" ").endswith("?")
+
+
+def her_text(tok, text):
+    """Token ids that make her say `text` - forced through the ROM's test hook
+    (rei_talk.force) and golden5.chat_turn's `force` alike, the newline that
+    ends her turn included."""
+    ids = tok.encode(text + "\n")[1:]               # no BOS
+    assert len(ids) <= rei_talk.NAME["NAME_FORCE_MAX"]
+    return ids
 
 
 def test_topics_are_in_vocabulary_and_in_the_rom():
@@ -120,12 +145,13 @@ def test_the_bars_say_what_they_should():
     assert art.BARS["TOPICS"].split() == ["TOPIC", "<^v>:MOVE", "A:SELECT", "SEL:KEYS"]
     assert art.BARS["LINES"].split() == ["SAY", "A:SAY", "B:BACK", "SEL:KEYS"]
     assert art.BARS["KEYS"].split() == ["KEYS", "A:TYPE", "B:DEL", "OK:SAY", "SEL:LIST"]
+    assert art.BARS["KEYS_TOPICS"].split() == ["KEYS", "A:TYPE", "B:DEL", "OK:SAY", "SEL:TOPICS"]
     assert [t.strip() for t in art.BAR_PAGES] == ["<>:PAGE 1/2", "<>:PAGE 2/2"]
     for text in art.BARS.values():
         assert len(text) == 40 and text[0] == " " and text[-1] != " "
     assert ART["REI_MAIN_TILES"] <= 152
     assert len({tuple(bar("Topics")), tuple(bar("Lines")), tuple(bar("Lines", 0)),
-                tuple(bar("Lines", 1)), tuple(bar("Keys"))}) == 5
+                tuple(bar("Lines", 1)), tuple(bar("Keys")), tuple(bar("KeysTopics"))}) == 6
 
 
 def test_the_thinking_dots_are_centred():
@@ -215,7 +241,8 @@ def test_a_topic_opens_its_sentences(talk):
     ui.choose(r, short[0], 0)                       # things: nine sentences, four on page 2
     ui.press_until(r, "down", lambda: r.read("wReiPick")[0] == 4)
     ui.press(r, "right")
-    assert r.read("wReiPick")[0] == len(rei_topics.TOPICS[short[0]][1]) - 6,         "the cursor stays on a sentence"
+    assert r.read("wReiPick")[0] == len(rei_topics.TOPICS[short[0]][1]) - 6, \
+        "the cursor stays on a sentence"
     assert ui.row_text(r, 17, 1, 20).strip() == ""
     ui.press(r, "b")
 
@@ -246,20 +273,27 @@ def test_hello_lands_in_the_pane_only(talk):
     assert not seen["stray"], f"tiles changed outside her pane during the reply: {sorted(seen['stray'])}"
     assert seen["mouth"], "her mouth never opened"
 
-    # Back in the state it was sent from: the same topic, page and cursor.
-    after = ui.tilemap(r)
-    assert not changed(before, after) - PANE - FACE - MOOD
-    assert r.read("wReiMode")[0] == 1 and r.read("wReiTopic")[0] == 0
-    assert cursor_cells(r) == {(x, 13) for x in range(20)}, "the cursor is back"
-    assert bar_is_solid(r)
-
     assert talk.rom_reply() == want
     assert ui.pane(r) == ui.layout(want)
     assert r.read("wReiMood")[0] == ui.mood_of(want)
     if measured():
         assert "rei" in want and ui.mood_of(want) == HAPPY     # "hello! i am rei."
+        assert asks(want), "she asks who you are"   # "... who are you?"
     assert ui.face_shown(r) in (0, 1)
-    assert ui.row_text(r, 10, 1, 19).rstrip() == "hello", "the prompt row shows what A would send"
+    assert bar_is_solid(r)
+
+    after = ui.tilemap(r)
+    if asks(want):
+        # A question: the keyboard, empty, for the answer (test_a_question_...).
+        assert not changed(before, after) - PANE - FACE - MOOD - INPUT
+        assert r.read("wReiMode")[0] == 2 and r.read("wReiKey")[0] == 0
+        assert ui.row_text(r, 10, 1, 19).rstrip() == "_"
+    else:
+        # Back in the state it was sent from: the same topic, page and cursor.
+        assert not changed(before, after) - PANE - FACE - MOOD
+        assert r.read("wReiMode")[0] == 1 and r.read("wReiTopic")[0] == 0
+        assert cursor_cells(r) == {(x, 13) for x in range(20)}, "the cursor is back"
+        assert ui.row_text(r, 10, 1, 19).rstrip() == "hello", "the prompt row shows what A would send"
 
 
 def test_the_state_carries(talk):
@@ -319,11 +353,107 @@ def test_keyboard_and_the_ok_key(talk):
     assert ui.pane(r) == ui.layout(want)
     assert ui.row_text(r, 13, 1, 18) == "a b c d e f g h i", "the keyboard is back"
     assert ui.row_text(r, 10, 1, 19).rstrip() == "_"
-    ui.press(r, "select")                           # and SELECT goes back to where the list was
-    assert r.read("wReiMode")[0] == 1 and r.read("wReiTopic")[0] == 3 and r.read("wReiPick")[0] == 1
+    ui.press(r, "select")
+    if asks(want):                                  # a question: SELECT goes to the topics
+        assert r.read("wReiMode")[0] == 0 and r.read("wReiTopic")[0] == 0
+    else:                                           # and otherwise back to where the list was
+        assert r.read("wReiMode")[0] == 1 and r.read("wReiTopic")[0] == 3 and r.read("wReiPick")[0] == 1
     ui.press(r, "select")
     ui.press(r, "select")
     assert not ui.world_on(r), "SELECT is never the world"
+
+
+# --- her question brings the keyboard -----------------------------------------
+# What she says is forced through the test hook (and the twin's `force`), so
+# both kinds of reply happen whatever the model would have said.
+
+def keyboard_for_the_answer(r):
+    """The keyboard her question leaves: nothing typed, the cursor on the
+    first key, the bar saying SELECT goes to the topics."""
+    assert r.read("wReiMode")[0] == 2
+    assert ui.row_text(r, 10, 1, 19).rstrip() == "_", "an empty prompt row"
+    assert ui.row_text(r, 13, 1, 18) == "a b c d e f g h i"
+    assert r.read("wReiKey")[0] == 0 and cursor_cells(r) == {(1, 13)}
+    assert bar_row(r) == bar("KeysTopics") and bar_is_solid(r)
+
+
+def topics_home(r):
+    """The topics grid with the first topic chosen and nothing on the prompt row."""
+    assert r.read("wReiMode")[0] == 0 and r.read("wReiTopic")[0] == 0
+    assert bar_row(r) == bar("Topics")
+    assert cursor_cells(r) == {(x, 13) for x in range(10)}
+    assert ui.tilemap(r)[13][0] == ART["T_ARROW_R"]
+    assert ui.row_text(r, 10, 1, 19).strip() == ""
+
+
+def test_a_question_brings_the_keyboard(talk):
+    """From a topic's sentences (not the first topic, not its first line, so
+    the home the question leads to is somewhere else): she answers with a
+    question, and the keyboard is up for the player's own words. SELECT from
+    it is the topics' home, not the list the line came from."""
+    r = talk.rom
+    want = talk.send(3, 1, forced=her_text(talk.tok, "really?"))
+    assert asks(want) and want.endswith("?")
+    keyboard_for_the_answer(r)
+    ui.press(r, "select")
+    topics_home(r)
+    ui.press(r, "select")                           # and back: the keyboard, as it was
+    keyboard_for_the_answer(r)
+
+
+def test_trailing_spaces_still_ask(talk):
+    r = talk.rom
+    want = talk.send(3, 1, forced=her_text(talk.tok, "is it?  "))
+    assert want.endswith("?  ") and asks(want)
+    keyboard_for_the_answer(r)
+
+
+def test_a_reply_that_asks_nothing_goes_back_to_the_list(talk):
+    r = talk.rom
+    want = talk.send(3, 1, forced=her_text(talk.tok, "ok."))
+    assert not asks(want)
+    assert r.read("wReiMode")[0] == 1 and r.read("wReiTopic")[0] == 3 and r.read("wReiPick")[0] == 1
+    assert bar_row(r) == bar("Lines", 0)
+    assert cursor_cells(r) == {(x, 14) for x in range(20)}
+    assert ui.row_text(r, 10, 1, 19).rstrip() == rei_topics.TOPICS[3][1][1]
+    want = talk.send(3, 1, forced=her_text(talk.tok, "why? ok."))    # a "?" inside is no question
+    assert not asks(want) and r.read("wReiMode")[0] == 1
+
+
+def test_a_typed_line_keeps_the_keyboard(talk):
+    """Sent from the keyboard, a reply that asks nothing leaves the keyboard up
+    (the state it was sent from), SELECT still going to the list it came from."""
+    r = talk.rom
+    ui.choose(r, 3, 1)
+    ui.press(r, "select")
+    assert bar_row(r) == bar("Keys"), "SEL:LIST - back to the sentences"
+    cell = ui.type_text(r, "yes", r.read("wReiKey")[0])
+    want = talk.expect("yes", forced=her_text(talk.tok, "good."))
+    rei_talk.force(r, her_text(talk.tok, "good."))
+    ui.type_text(r, ui.OK, cell)
+    ui.wait_ready(r)
+    assert talk.rom_reply() == want and not asks(want)
+    assert r.read("wReiMode")[0] == 2 and bar_row(r) == bar("Keys")
+    ui.press(r, "select")
+    assert r.read("wReiMode")[0] == 1 and r.read("wReiTopic")[0] == 3 and r.read("wReiPick")[0] == 1
+
+
+def test_the_log_and_the_world_keep_the_keyboard_for_the_answer(talk):
+    r = talk.rom
+    talk.send(3, 1, forced=her_text(talk.tok, "and you?"))
+    keyboard_for_the_answer(r)
+    screen = but_the_face(r)
+    ui.press(r, "start", after=12)                  # the log
+    assert ui.log_open(r)
+    ui.press(r, "select", after=12)
+    assert not ui.log_open(r) and but_the_face(r) == screen
+    keyboard_for_the_answer(r)
+    ui.to_world(r)                                  # left alone: the world
+    ui.press(r, "b", after=10)                      # and any button back
+    assert not ui.world_on(r) and but_the_face(r) == screen
+    keyboard_for_the_answer(r)
+    ui.press(r, "select")
+    topics_home(r)
 
 
 def bg_palette(r, slot):
@@ -373,7 +503,7 @@ def test_the_log_shows_both_sides(talk):
     assert ui.tilemap(r) == main, "the main screen is as it was"
     assert bytes(r.pyboy.memory[1, 0x9800:0x9800 + 18 * 32]) == attrs
     assert bg_palette(r, ART["PAL_CURSOR"]) == cursor, "and so is the cursor's palette"
-    assert r.read("wReiMode")[0] == 1
+    assert r.read("wReiMode")[0] == (2 if asks(talk.said[-1]) else 1)
 
 
 def test_speed_is_on_record(talk):

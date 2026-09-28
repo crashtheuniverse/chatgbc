@@ -13,13 +13,15 @@
 ;              (wrapping), A types, B deletes; the last key is OK, and A on it
 ;              sends. Nothing typed, nothing sent.
 ; SELECT goes between the list (whichever of its two states it was in) and the
-; keyboard. START opens the conversation log (src/app/rei_log.asm) and comes
-; back to this screen as it was. The prompt row above always shows what would
-; be sent: the sentence under the cursor, or the tail of what has been typed
-; with a caret after it.
+; keyboard; the keyboard's bar says which (SEL:LIST or SEL:TOPICS). START opens
+; the conversation log (src/app/rei_log.asm) and comes back to this screen as
+; it was. The prompt row above always shows what would be sent: the sentence
+; under the cursor, or the tail of what has been typed with a caret after it.
 ;
 ; After a reply the screen comes back in the state the message was sent from -
-; the same topic, page and cursor - so a follow-up is one press.
+; the same topic, page and cursor - so a follow-up is one press. Unless she
+; asked something (her reply ends in "?", ReiUi_Asked): then the keyboard is
+; up, empty, the cursor on its first key, and SELECT leads to the topics.
 ;
 ; Left alone for twenty seconds she wanders off to the world by herself
 ; (src/app/rei_world.asm) - the only way there. Any button brings this screen
@@ -293,8 +295,12 @@ ReiIn_Draw:
 
     ; --- the keyboard ---
 .keys
-    ld hl, ReiBarKeys
-    call ReiIn_Bar
+    ld hl, ReiBarKeys               ; "SEL:LIST": back to a topic's sentences,
+    ld a, [wReiList]                ; or "SEL:TOPICS": to the grid
+    cp MODE_TOPICS
+    jr nz, :+
+    ld hl, ReiBarKeysTopics
+:   call ReiIn_Bar
     ld b, IN_KEY_X
     ld c, LIST_Y
     call Rei_CellAddr
@@ -411,6 +417,38 @@ ReiIn_Refresh::
     call Rei_Blit
     pop af
     jp ReiIn_Attrs
+
+; Her reply is complete. If it is a question - its last character that is not
+; a space is a "?" - the answer is the player's own words: the keyboard comes
+; up with nothing typed and the cursor on its first key, and SELECT from it
+; goes to the topics with the first one chosen, not back to the list the
+; question answered. Any other reply leaves the state it was sent from.
+; wReiReply is the text as kept (no newline; the first REI_REPLY_MAX
+; characters).
+ReiUi_Asked::
+    ld a, [wReiReplyLen]
+    ld c, a
+    ld b, 0
+    ld hl, wReiReply
+    add hl, bc
+.back
+    ld a, c
+    or a
+    ret z                           ; nothing but spaces: no question
+    dec hl
+    dec c
+    ld a, [hl]
+    cp ' '
+    jr z, .back
+    cp '?'
+    ret nz
+    ld a, MODE_KEYS
+    ld [wReiMode], a
+    xor a                           ; MODE_TOPICS
+    ld [wReiList], a
+    ld [wReiTopic], a
+    ld [wReiKey], a
+    ret
 
 ; Back from the world: the screen is as it was left, so nothing is redrawn and
 ; nothing typed is lost.
@@ -695,5 +733,6 @@ ReiUi_Input::
 
 ASSERT REI_TEXT_MAX + 4 <= PROMPT_MAX, "Chat_Stage adds a newline, the marker and a newline"
 ASSERT TOPIC_COUNT == 2 * GRID_ROWS && TOPIC_PAGE == LIST_H
+ASSERT MODE_TOPICS == 0, "ReiUi_Asked clears the list state with the topic"
 
 ENDC
