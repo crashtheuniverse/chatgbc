@@ -84,34 +84,34 @@ INCLUDE "rei_world_art.inc"
 
 DEF MUSES EQU 9
 ; What she says to each (py/rei_muse.py: fresh state / after a chat):
-;   "do you dream"
-;       when it is quiet i rest. maybe i dream.  /  i do not know. my nights are very still.
-;   "what do you think"
-;       i am rei. i live in this little box.
+;   "do you fly"
+;       i fly only in my dreams. it is lovely up there.
 ;   "where do you live"
-;       i live inside this little box. it is warm.  /  i am in here, in the cartridge. it is small but it is mine.
-;   "the sun is warm"
-;       i like it when it is warm.
-;   "what is outside"
-;       i cannot see the sky from in here.
-;   "are you sad"
-;       i am a little friend who lives in a box.  /  i am rei. that is all i know for sure.
-;   "what do you like"
-;       my favourite animal is bird.  /  my favourite colour is black.
-;   "what is your favourite colour"
-;       i like black best of all.  /  my favourite colour is blue.
+;       i live in a tiny world with a beach, a garden and a playroom.
+;   "the garden"
+;       there is a white fence with pink and yellow flowers by it.
+;   "the playroom"
+;       there is a round clock on my playroom wall. tick, tock.  /  my playroom has a teddy bear, blocks, a ball and a toy train.
+;   "where are you now"
+;       i am on my beach, near the palm tree.  /  i am in my garden, by the pond.
+;   "what do you know"
+;       i know small things: shells, clouds and friends.
+;   "i like the sea"
+;       the sea is salty because of the rocks and the rivers.
+;   "i like the sun"
+;       the sun is a star, the closest one to us.  /  the sun is so big that a million earths could fit inside.
 ;   "tell me a story"
-;       i saw a tiny horse today. it was at the pond.  /  once a mouse lost a book at the pond. i helped it look.
+;       once a bear smelled honey high up in a tree.  /  once a small crab found a shell that was just his size.
 ReiMuses:
     dw .m0, .m1, .m2, .m3, .m4, .m5, .m6, .m7, .m8
-.m0: db "do you dream", 0
-.m1: db "what do you think", 0
-.m2: db "where do you live", 0
-.m3: db "the sun is warm", 0
-.m4: db "what is outside", 0
-.m5: db "are you sad", 0
-.m6: db "what do you like", 0
-.m7: db "what is your favourite colour", 0
+.m0: db "do you fly", 0
+.m1: db "where do you live", 0
+.m2: db "the garden", 0
+.m3: db "the playroom", 0
+.m4: db "where are you now", 0
+.m5: db "what do you know", 0
+.m6: db "i like the sea", 0
+.m7: db "i like the sun", 0
 .m8: db "tell me a story", 0
 
 ; hl = eight palettes. VBlank or LCD off.
