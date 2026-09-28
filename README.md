@@ -47,26 +47,43 @@ weights and the whole inference stack are on the cartridge.
 
 ## Rei
 
-`.\build.ps1 -Rei` builds `build\rei.gbc`: the v1.0 engine with a
-conversational checkpoint (3 layers, dim 64, 4 experts of 176, 512-piece
-vocabulary, 341K parameters) and her own screen:
+`.\build.ps1 -Rei` builds `build\rei.gbc`: the v1.0 engine with Rei v1, a
+conversational checkpoint (3 layers, dim 64, 4 experts of 176, 1,024-piece
+vocabulary, 374K parameters) and her own screen:
 
-- **Topics.** Ten topics, up to ten lines each, every line one her
-  training taught her to answer. `A` picks, `B` goes back, `SELECT` opens a
-  keyboard for anything else (`A` types, `B` deletes, the last key sends).
+- **Your name.** She asks it, and she keeps it - for the whole
+  conversation, and across power-off. The model decides when: when your
+  line is a name, she answers with a token of her own that stores it, and
+  the engine copies the last word you typed into a slot on the cartridge.
+  Where she says your name, another token of hers prints that slot, so the
+  model never has to spell it: "anna" - "anna! i like how that sounds.",
+  and later "what is my name" - "you are anna!". While the slot holds a
+  name, each of your lines reaches her with a third token that says so;
+  before you tell her, "what is my name" gets "you did not tell me yet!
+  what is your name?".
+- **Your words back.** A fourth token prints the word your line ends with:
+  "i like tacos" - "tacos! good choice.", a word she never saw in training
+  as much as one she did.
+- **Topics.** Ten topics, up to ten lines each. Every line was read in
+  four conversations (fresh or mid-chat, with or without a name kept) and
+  kept only if her answer made sense in all four; the sheet is in
+  [docs/review](docs/review/topics_rei_v1c.md). `A` picks, `B` goes back,
+  `SELECT` opens a keyboard for anything else (`A` types, `B` deletes, the
+  last key sends).
+- **Her questions.** When her reply ends with a question mark, the keyboard
+  comes up by itself, empty, for your answer; `SELECT` from it goes to the
+  topics. Any other reply leaves the screen where you sent from.
 - **Her pane.** The reply is typed into her frame a character at a time,
   from the VBlank interrupt while the next token computes; her face talks
-  while it arrives and settles into the mood of what she said. The decode
-  rule that stops a small model looping - never complete a four-token run
-  already said - reads only her own words of the reply, not the player's,
-  so she can say theirs back ("do you like ducks" - "i do like ducks. do
-  you?").
+  while it arrives and settles into the mood of what she said. Three dots
+  under a blank bar while she thinks.
 - **The log.** `START` shows the whole conversation, both sides, scrolled
   with the d-pad.
 - **The save.** The cartridge has battery RAM. The conversation - the
-  model's state, the log, her last replies - is saved after every exchange,
-  and "continue" on the menu picks it up exactly where it stopped: the next
-  reply is the one it would have been without the power cycle.
+  model's state, your name, the log, her last replies - is saved after
+  every exchange, and "continue" on the menu picks it up exactly where it
+  stopped: the next reply is the one it would have been without the power
+  cycle.
 - **The world.** Leave her alone for twenty seconds and she wanders off to
   a beach, a garden or a playroom and walks about. Now and then she thinks
   something, and what she thinks is the model's; the conversation is put
@@ -74,14 +91,14 @@ vocabulary, 341K parameters) and her own screen:
 
 | | |
 |---|---|
-| Speed | 0.40 s/token (about 848,000 cycles a full pass) |
-| Waiting for her | 1.7 to 2.8 s from the press to her first letter on the four lines measured, where the v0.9 engine took 3.0 to 6.9 |
-| Limits | she remembers your name for the rest of the conversation, reliably only for the sixteen names in her training; any other name she hears as the closest one she knows |
+| Speed | 0.46 s/token: 964,158 cycles a token over the 122 tokens of her ten replies in one measured conversation, the story model's speed (the same shape and vocabulary) |
+| Waiting for her | 1.5 to 2.0 s from the press to her first token on those ten lines (mean 1.8): the encode, the prompt tokens, the pass that picks the first |
+| Limits | a small model: her sentences are few, and they blend - "cats! yes! a baby panda is very tiny when it is born." (an echo, then a fact about something else). She can mix facts up. Sometimes she stores a word that is not a name as your name ("i am seven", "i am a boy"), and a bare name is not always taken - "anna", "max" and "leo" are, "tom" is not ("my name is tom" is); telling her again puts it right |
 
 ![Rei in conversation](docs/versions/v1.0.gif)
 
-*One frame per character of hers; the second or two she thinks before
-each reply is cut.*
+*One frame per character of hers and per button press; the second or two
+she thinks before each reply is cut to one frame of the dots.*
 
 ## Numbers
 
@@ -310,7 +327,7 @@ I expressly chose tools that can work this way.
 The checkpoints, tokenizers and the six calibration stories the export
 needs are in `models\` (see [models/README.md](models/README.md)), so a fresh
 clone builds both ROMs byte for byte. `-Rei` exports her checkpoint
-(`models\rei.bin`, `models\tok_rei.bin`), builds, and puts the tracked
+(`models\rei.bin`, `models\tok_rei1024.bin`), builds, and puts the tracked
 sources back in the story build's form, so `git status` is clean afterwards.
 
 ## Train it
@@ -333,15 +350,16 @@ during v0.9 - one constant that names the classifier's blocking moved, and
 it changes no integer; every kernel was rewritten to reproduce it. The tests boot the
 lab ROM headlessly and assert it emits an identical token sequence.
 
-39 tests on the story build: the golden run, strict; each kernel against
+46 tests on the story build: the golden run, strict; each kernel against
 the twin's own function on planted vectors; exhaustive proofs for the gate
 table and the add's byte rule; the classifier's retry path at 0 to 9
 rejects; the layer-0 probes against the twin's layer-0 lines; the encoder
 against the Python tokenizer; the prompt with and without the prefill
-shortcut. 82 on Rei's: the same engine tests on her checkpoint, and her
-screen driven button by button - every reply read back from her pane and
-compared with the twin's, the save continued across a power cycle, the
-world visited and left.
+shortcut. 123 on Rei's: the same engine tests on her checkpoint, the name
+and echo opcodes on the lab ROM against the twin, and her screen driven
+button by button - every reply read back from her pane and compared with
+the twin's, a question bringing up the keyboard, the save continued across
+a power cycle, the world visited and left.
 
 Every bug becomes "at which layer do the two stop agreeing", which is a
 bisection with a definite answer.

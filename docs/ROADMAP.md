@@ -11,7 +11,8 @@ the ROM's own counters:
 | story, "Once upon a time" encoded | 8,321,536 cycles | 55,552 cycles |
 | story, the five prompt tokens before the last | 4,871,488 cycles | 2,694,016 cycles |
 | story, from START to the first token | 6.8 s | 1.8 s |
-| Rei, from the press to her first letter (four lines) | 3.0 to 6.9 s | 1.7 to 2.8 s |
+| Rei, from the press to her first letter (four lines, v1.0.0's first 512-piece Rei) | 3.0 to 6.9 s | 1.7 to 2.8 s |
+| Rei v1, from the press to her first token (ten lines, 1,024 pieces) | | 1.5 to 2.0 s |
 
 Both changes are exact. The encoder now gives the Python tokenizer's
 tokens on every line tested (the old one did not on lines needing a piece
@@ -20,12 +21,27 @@ at the last layer's state update, which leaves the state byte-identical.
 The golden sequence did not move; the bits per character did not move.
 
 **Rei** is the engine's first conversational cartridge: `.\build.ps1 -Rei`.
-A checkpoint of the same shape as the story model's with a 512-piece
-vocabulary, 0.40 s a token, behind a screen made like a small Game Boy
-game - topics and a keyboard to talk with, a log, a battery save that
-continues a conversation exactly, and a world of three scenes she walks
-in when she is left alone. Every word on her screen is the model's, checked
-against the twin by the tests. She remembers your name for the rest of the conversation - reliably only if it is one of the sixteen names in her training; any other name she hears as the closest one she knows.
+Rei v1 is a checkpoint of the same shape and vocabulary size as the story
+model's (1,024 pieces, 0.46 s a token), behind a screen made like a small
+Game Boy game - topics and a keyboard to talk with, a log, a battery save
+that continues a conversation exactly, and a world of three scenes she
+walks in when she is left alone. Every word on her screen is the model's,
+checked against the twin by the tests.
+
+She asks your name and keeps it for the whole conversation and across
+power-off. The split is the point: the model decides when (a token of
+hers, `<SN>`, after a line that is a name), the cartridge keeps the text
+(the last word you typed, in a slot the battery saves), and another token,
+`<N>`, prints it back: the model never spells the name. The same engine prints the word your line ends with where she
+says `<W>`, and tells her with `<NK>` on each of your lines that a name is
+known. When her reply ends with a question, the keyboard comes up for your
+answer. The topic tree is what survived a sense review: each line read in
+four conversations and kept only if her answer made sense in all of them.
+
+Honest limits: 374K parameters. Her sentences blend - an echo followed by a
+fact about something else is common - and she can mix facts up. She
+sometimes stores a word that is not a name ("i am seven"), and does not take
+every bare name ("tom" alone is not taken, "my name is tom" is).
 
 ## Left open
 

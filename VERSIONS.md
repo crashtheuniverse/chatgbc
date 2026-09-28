@@ -119,14 +119,24 @@ its forward pass now stops at the last layer's state update - no wo, no FFN
 in that layer, no final norm, no classifier - which is 44% of a token and
 changes no bit of the state. From START to the first token of a story, 6.8 s
 became 1.8. The second cartridge, **Rei** (`.\build.ps1 -Rei`), runs a
-conversational checkpoint on the same engine - 341K parameters, a 512-piece
-vocabulary, 0.40 s a token - behind a small game screen: a topic tree and a
-keyboard to talk with, her replies typed into her frame, a log of the whole
+conversational checkpoint on the same engine - Rei v1: 374K parameters, a
+1,024-piece vocabulary, 0.46 s a token (964,158 cycles, over the 122 tokens
+of ten replies) - behind a small game screen: a topic tree and a keyboard to
+talk with, her replies typed into her frame, a log of the whole
 conversation, a battery save that continues exactly where it stopped, and a
-world she walks about in when left alone, thinking now and then. Her decode
-keeps the engine's rule against repeating a four-token run, but reads only
-her own words of the reply, so she can say the player's back. She waits
-1.7 to 2.8 s before her first letter. She remembers your name for the rest of the conversation - reliably only if it is one of the sixteen names in her training; any other name she hears as the closest one she knows.
+world she walks about in when left alone, thinking now and then. She asks
+your name and keeps it, for the conversation and across power-off: the
+model decides when a line is a name and says so with a token of its own,
+the engine copies the last word typed into a slot on the cartridge and
+prints it where she says your name - the model never spells it. A fourth token of hers prints the word your
+line ends with ("i like tacos" - "tacos! good choice."). When her reply is
+a question the keyboard comes up for the answer. Every line of the topic
+tree was read in four conversations and kept only if it made sense in all
+of them (`docs/review/`). Her decode keeps the engine's rule against
+repeating a four-token run, but reads only her own words of the reply. She
+waits 1.5 to 2.0 s before her first token. She is a small model: her
+sentences blend and she can mix facts up, and she sometimes stores a word
+that is not a name as your name.
 
 ## The captures
 
@@ -149,9 +159,10 @@ took.
 | ![v0.9](docs/versions/v0.9.gif) | ![v1.0](docs/versions/v1.0.gif) |
 
 The v1.0.0 story capture would look like v0.9's (same tokens, same speed,
-shorter wait before the first); the v1.0.0 capture is Rei instead: one
-frame per character of hers and per button press, the time she thinks
-before each reply cut.
+shorter wait before the first); the v1.0.0 capture is Rei instead - hello,
+a name typed on the keyboard her question brings up, then "what is my
+name": one frame per character of hers and per button press, the time she
+thinks before each reply cut to one frame of the dots.
 
 ## How the numbers were taken
 
@@ -180,5 +191,11 @@ before each reply cut.
   pass that picks the first token - on the default prompt, summed. v0.9's
   figure is the v1.0 ROM with the new encoder replaced by the old one and
   the prefill shortcut switched off (`wPrefillFull`), which is the v0.9 code.
+- **Rei**: `build\rei.gbc` in one conversation of ten exchanges (hello, a
+  typed name, eight tree lines), the ROM's own counters read after each
+  reply. Her seconds a token: the cycles of the passes that picked her
+  tokens (`wGenTotal` less `wPrefillCycles`) over her tokens. Her wait: the
+  encode, the prompt tokens before the last, and the pass that picks her
+  first token (`wEncCycles`, `wPrefillCycles`, `wFirstCycles`), summed.
 - **Characters per token**: the version's tokenizer on the same stories
   (3.464 for the 1024-piece tokenizer, rounded in the table).
