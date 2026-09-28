@@ -14,6 +14,7 @@ Only meaningful for the chat export; skipped otherwise.
 import re
 
 import pytest
+from types import SimpleNamespace
 
 import export5                    # noqa: E402
 from conftest import APP, lab_rom
@@ -62,8 +63,10 @@ def lab_reply(r, tok, prompt):
     assert toks[:forced] == ids[1:], "the prompt is forced as encoded"
     assert r.read("wOwnFrom")[0] == forced, "her history starts after the player's line"
     said, prev = "", toks[forced - 1]
+    st = SimpleNamespace(name=None)   # a fresh turn: no name in the slot
+    line = prompt[2:].rstrip("\n")   # the player's line, as the engine captures it
     for t in toks[forced:]:
-        said += tok.decode(t, prev)
+        said += golden5.speak(tok, st, t, prev, line)   # what the cartridge prints, opcodes too
         prev = t
     return said
 
