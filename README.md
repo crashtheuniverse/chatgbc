@@ -137,8 +137,18 @@ sources back in the story build's form, so `git status` is clean afterwards.
 
 ## Train it
 
+Optional: `models\` already ships the checkpoints, tokenizers and
+calibration text v1.0 was built from ([models/README.md](models/README.md)),
+so `.\build.ps1` needs none of this. To retrain from scratch:
+
 ```powershell
-# TinyStories from HF roneneldan/TinyStories into models\tinystories\, then:
+# TinyStories (Eldan & Li, CDLA-Sharing-1.0) from HF roneneldan/TinyStories into models\tinystories\:
+New-Item -ItemType Directory -Force models\tinystories | Out-Null
+$hf = 'https://huggingface.co/datasets/roneneldan/TinyStories/resolve/main'
+curl.exe -L -o models\tinystories\TinyStoriesV2-GPT4-train.first200MiB.txt -r 0-209715199 "$hf/TinyStoriesV2-GPT4-train.txt"
+Invoke-WebRequest "$hf/TinyStoriesV2-GPT4-valid.txt" -OutFile models\tinystories\TinyStoriesV2-GPT4-valid.txt -UseBasicParsing
+Invoke-WebRequest "$hf/TinyStories-valid.txt" -OutFile models\tinystories\TinyStories-valid.txt -UseBasicParsing
+
 .venv\Scripts\python.exe py\tinystories.py                       # fold to the keyboard's alphabet
 .venv\Scripts\python.exe py\tokenizer.py --corpus models\tinystories\ts_train.txt --out models\tok_ts1024.bin --vocab 1024
 .venv\Scripts\python.exe py\fit.py --tokenizer models\tok_ts1024.bin --name ts3L_v1024

@@ -10,6 +10,12 @@
 # in chat form, which the Rei test suite needs; test.ps1 restores it.
 # The chat checkpoint and its tokenizer: rei_env.ps1 (models/rei.bin, or
 # $env:REI_PIP5 / $env:REI_TOKENIZER).
+#
+# The plain (non -Rei) build reads src/weights.asm's own INCBINs from
+# build/blobs, which is gitignored: a fresh clone has none. If they are
+# missing this exports the story checkpoint (models/ts3L_v1024.bin) first;
+# once build/blobs exists, later builds skip straight to rgbasm. Delete
+# build/ (or just build/blobs) to force a re-export.
 param([switch]$Quiet, [switch]$Lab, [switch]$Census, [switch]$Rei, [switch]$Keep)
 $ErrorActionPreference = 'Stop'
 $root  = $PSScriptRoot
@@ -52,6 +58,8 @@ if ($Rei) {
         $saved[$k] = [Environment]::GetEnvironmentVariable($k)
         [Environment]::SetEnvironmentVariable($k, $chatEnv[$k])
     }
+    Export-Model
+} elseif (-not (Test-Path (Join-Path $build 'blobs/tbl_rsqrt.bin'))) {
     Export-Model
 }
 try {
