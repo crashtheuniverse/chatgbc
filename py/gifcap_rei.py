@@ -1,4 +1,4 @@
-"""Record build/rei.gbc in conversation, as an animated GIF: docs/versions/v1.0.gif.
+"""Record build/rei.gbc in conversation, as an animated GIF: docs/rei.gif.
 
     python py/gifcap_rei.py
 
@@ -18,7 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import rei_shots as ui           # noqa: E402
 
-OUT = ui.ROOT / "docs" / "versions" / "v1.0.gif"
+OUT = ui.ROOT / "docs" / "rei.gif"
 SCALE = 2
 DURATION = {"hold": 1800, "key": 350, "think": 700, "char": 70, "rest": 1600, "close": 3000}
 NAME = "anna"                                    # a bare name she keeps (she does not keep every one)
